@@ -57,7 +57,15 @@ jobs:
 
   windows-x64:
     name: Windows x64 — configure/build/test
-    runs-on: windows-latest
+    # Pinned to windows-2022, not windows-latest: GitHub migrated
+    # windows-latest to a newer Windows Server / Visual Studio image
+    # that CMake's "Visual Studio 17 2022" generator (CMakePresets.json)
+    # cannot find via vswhere ("could not find any instance of Visual
+    # Studio"), confirmed by this job's first real CI run after Block 01
+    # was integrated. windows-2022 still ships the matching VS2022
+    # toolchain. Deliberately not updating the generator/preset itself —
+    # see docs/DECISION_LOG.md for that decision if/when it's revisited.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
