@@ -1,0 +1,46 @@
+# Nimvlets — build & tooling ignores
+#
+# Keep the versioned tree limited to source, tests, tools, docs and dev
+# assets. Nothing under build output, dependency caches, or editor/OS
+# noise should ever be committed.
+
+# --- CMake build directories ---
+/build/
+/build-*/
+/out/
+/cmake-build-*/
+
+# --- Release/distribution artifacts ---
+/dist/
+
+# --- FetchContent / dependency caches ---
+_deps/
+.cache/
+
+# --- Compiler / tooling output ---
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+compile_commands.json
+
+# --- Python (tools/stats_loc.py has no deps, but keep caches out) ---
+__pycache__/
+*.pyc
+
+# --- Editors / OS ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Performance / QA scratch output (local measurement runs) ---
+/perf/
