@@ -1,0 +1,76 @@
+#include "platform/TransparentWindowSupport.h"
+
+#include <SDL3/SDL.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
+// IMPORTANT — read before trusting this file's behavior:
+//
+// This implementation has been compiled via CI (.github/workflows) on a
+// Windows x64 runner as part of this block, but it has NOT been run on
+// real Windows hardware with a display: configure/build success is the
+// only thing verified here. See docs/PLATFORM_SPIKE.md, "Windows"
+// section, for exactly what is and isn't confirmed, and the manual smoke
+// test list required before this can be trusted.
+//
+// The technique below (toggling WS_EX_TRANSPARENT on the extended window
+// style) is the standard Win32 mechanism for per-pixel mouse
+// click-through on a layered window and mirrors
+// src/platform/macos/TransparentWindowSupport.mm's use of
+// NSWindow.ignoresMouseEvents: both are driven by the same
+// core::BlobSilhouette::Contains() decision computed once in
+// src/app/SpikeApp.cpp, so the platform layer only ever reacts to a
+// bool — it never reimplements hit-testing.
+
+namespace nimvlets::platform {
+
+#if defined(_WIN32)
+
+namespace {
+
+HWND Win32WindowFor(SDL_Window* window) {
+    SDL_PropertiesID props = SDL_GetWindowProperties(window);
+    void* ptr = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+    return static_cast<HWND>(ptr);
+}
+
+}  // namespace
+
+void ConfigureCompanionWindow(SDL_Window* window) {
+    HWND hwnd = Win32WindowFor(window);
+    if (hwnd == nullptr) {
+        SDL_Log("nimvlets: platform/windows could not resolve HWND; skipping native window configuration");
+        return;
+    }
+
+    const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED | WS_EX_NOACTIVATE);
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
+    HWND hwnd = Win32WindowFor(window);
+    if (hwnd == nullptr) {
+        return;
+    }
+
+    const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    const LONG_PTR next = clickThrough ? (exStyle | WS_EX_TRANSPARENT) : (exStyle & ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT));
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+}
+
+#else
+
+// This translation unit is only ever added to the build when
+// CMAKE_SYSTEM_NAME is Windows (see root CMakeLists.txt); the branch
+// below exists solely so the file is not silently empty if that
+// invariant is ever broken.
+void ConfigureCompanionWindow(SDL_Window*) {}
+void SetWindowClickThrough(SDL_Window*, bool) {}
+
+#endif
+
+}  // namespace nimvlets::platform
