@@ -66,10 +66,24 @@ engine code.
 ## Block 01's relationship to this spec
 
 Block 01 does **not** implement a content loader, schema, or file
-format. Its placeholder creature
+format. Its original placeholder creature
 (`core::BlobSilhouette` in [`src/core/Silhouette.h`](../src/core/Silhouette.h))
 is deliberately primitive — two overlapping analytic circles with one
 built-in idle bob — specifically so it *doesn't* imply a format
 decision. It satisfies "one mandatory idle animation" and "alpha/hit
 shape" conceptually, using math instead of asset files, and nothing
-else in this list.
+else in this list. It remains the spike's fallback visual and is still
+what `tests/SilhouetteTest.cpp` exercises directly.
+
+Late in Block 01, the repository owner supplied a real illustrated
+asset ("Bunny") as a **temporary QA fixture** to validate hit-testing
+against real alpha data before the block's interactive macOS QA closed
+— see `docs/DECISION_LOG.md` DEC-018 and `docs/PLATFORM_SPIKE.md` §6.
+`tools/prep_dev_sprite.py` + `graphics::DevSprite` is a minimal,
+one-off loader for exactly that fixture (a fixed uncompressed RGBA
+format, no atlas, no animation frames, no schema version, no
+provenance metadata) — it is explicitly **not** an early version of
+this spec's content-loading system, does not commit to any of the
+fields or formats above, and should not be extended or assumed to
+generalize by a future block. The real content loader described by
+this document remains unimplemented.

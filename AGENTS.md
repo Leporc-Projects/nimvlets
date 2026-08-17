@@ -191,9 +191,16 @@ python3 tools/stats_loc.py
 
 - No final art, audio, or branding in this repo yet — see each block's
   NON-SCOPE list.
-- Development placeholders must be original and clearly non-final
-  (procedurally generated or simple geometric shapes), never real
-  assets, never anything imitating a third-party franchise.
+- Development placeholders are procedurally generated or simple
+  geometric shapes by default, never anything imitating a third-party
+  franchise. A real (non-procedural) asset is only acceptable as a
+  narrow, explicitly-scoped QA fixture — supplied deliberately by the
+  repository owner, clearly documented as temporary/non-canonical, and
+  never introduced unprompted by an agent. See `docs/DECISION_LOG.md`
+  DEC-018 (the "Bunny" QA fixture) for the precedent and exactly how
+  that line was kept: no new content architecture, no runtime
+  image-library dependency, explicit fallback to the procedural
+  placeholder if the fixture is absent.
 - When real pet content lands, its shape/contract is
   `docs/PET_CONTENT_SPEC.md` — don't hardcode a specific creature's
   behavior in engine code if it can be data instead (see §13).

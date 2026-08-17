@@ -1,17 +1,24 @@
 # Nimvlets — Platform Spike (Block 01)
 
-This document is both the QA **plan** (§2, written against the block
-brief before running anything) and the **results** (§3 onward, filled
-in after actually building and running the spike). Nothing below is
-upgraded from PARTIAL to PASS without new evidence — see §4 for exactly
-why several interactive items are PARTIAL/NOT TESTED rather than PASS,
-and what would resolve them.
+This document is the QA **plan** (§2, written against the block brief
+before running anything), the **results** (§3 onward), and — because
+this block went through two rounds of interactive macOS QA with the
+repository owner — the record of a real bug hunt (§5) that changed the
+shipped click-through mechanism partway through. Nothing below is
+upgraded to PASS without real evidence; where a claim rests on an
+earlier, since-superseded belief, that's said explicitly rather than
+quietly overwritten.
 
 ## 1. What was evaluated
 
 `SDL_SetWindowShape()` was evaluated first, as the block brief
-requires, before deciding on the shipped approach. See §5 for the full
-evaluation and the decision it led to (`docs/DECISION_LOG.md` DEC-006).
+requires. The initial verdict (based on community reports, not the SDL
+source itself) was to reject it — see §5.1. Interactive QA later
+disproved the fallback that decision led to, and re-reading the actual
+pinned SDL 3.4.12 source reversed the verdict for macOS specifically:
+**`SDL_SetWindowShape()` is what this block ships.** §5 is the full
+story; `docs/DECISION_LOG.md` DEC-006 (superseded) and DEC-017
+(current) carry the same arc as dated decision records.
 
 ## 2. QA plan (macOS)
 
@@ -19,10 +26,10 @@ For each item: build Release, run `nimvlets_spike`, and check —
 
 1. transparent window renders
 2. borderless (no title bar/decoration)
-3. small bounding box (matches `core::BlobSilhouette::Default()`, 160×160 logical)
+3. small bounding box
 4. real per-pixel alpha (not just a translucent rectangle)
 5. click-through on fully transparent pixels
-6. click detected on the visible (opaque) shape
+6. click detected on the visible (opaque) region
 7. drag moves the window
 8. a drag is never miscounted as a click, and vice versa
 9. no more focus-stealing than the platform makes unavoidable
@@ -32,203 +39,356 @@ For each item: build Release, run `nimvlets_spike`, and check —
 13. render/event loop does not busy-wait
 14. no invasive permission is requested anywhere in the process
 
-## 3. Results — macOS
+## 3. Results — macOS (final)
 
-Machine: Apple M5, macOS 26.6.1 (Darwin 25.6.0), Retina display
-(2560×1664 logical @ 2x). Build: Release, `cmake --preset macos-release`.
+Machine: Apple M5, macOS 26.6.1 (Darwin 25.6.0), Retina display (2x).
+Build: Release, `cmake --preset macos-release`. Verified with **two**
+visuals — the analytic placeholder (`core::BlobSilhouette`) and the
+**Bunny QA fixture** (a real, non-analytic asset with its own alpha
+channel — see §6) — both driven through the exact same code path.
 
 | # | Item | Verdict | Evidence |
 |---|---|---|---|
-| 1 | Transparent window | **PARTIAL** | `SDL_CreateWindow` with `SDL_WINDOW_TRANSPARENT` returned non-null (no `SDL_GetError()` output); `platform::ConfigureCompanionWindow` ran and resolved a real `NSWindow` (no "could not resolve NSWindow" log). Pixel-level transparency was **not** visually confirmed — see §4. |
-| 2 | Borderless | **PARTIAL** | `SDL_WINDOW_BORDERLESS` passed at creation, accepted without error. Not visually confirmed. |
-| 3 | Small bounding box | **PASS** | Objectively confirmed via `CGWindowListCopyWindowInfo`: `kCGWindowBounds = {Width=160, Height=160, X=655, Y=376}` for the running process — an independent, non-visual read of the real WindowServer state, not just "we asked for 160×160". |
-| 4 | Real alpha | **PARTIAL** | Same basis as #1; `kCGWindowAlpha=1` is the *window's* alpha multiplier (expected — we intentionally leave `NSWindow.alphaValue` at 1.0 and rely on per-pixel alpha from rendering instead), not evidence about pixel content. |
-| 5 | Click-through on transparent pixels | **NOT TESTED** (interactive) | Implementation code-reviewed against the exact SDL3 3.4.12 header symbols used (`SDL_GetGlobalMouseState`, `SDL_GetWindowPosition`, `SDL_PROP_WINDOW_COCOA_WINDOW_POINTER`, `NSWindow.ignoresMouseEvents`), all confirmed to exist with the signatures used (see §5). No real or synthetic click was performed — see §4. |
-| 6 | Click on visible shape | **NOT TESTED** (interactive, same reason) | Classification logic that would run: **PASS** — `core::DragClassifier` has 8/8 unit tests green, including exact-threshold and "drag that returns to origin" cases. |
-| 7 | Drag moves the window | **NOT TESTED** (interactive, same reason) | `SDL_SetWindowPosition` call path code-reviewed correct; not exercised end-to-end with real input. |
-| 8 | Click vs. drag never confused | **PASS** (logic) / **NOT TESTED** (full interactive loop) | See #6. |
-| 9 | Focus behavior | **PARTIAL** | `SDL_WINDOW_NOT_FOCUSABLE` accepted at creation without error. Not interactively confirmed that a normal app keeps focus while the pet is clicked. |
-| 10 | Always-on-top | **PASS** | Objectively confirmed: the spike window's `kCGWindowLayer = 3` (the value macOS assigns to `NSFloatingWindowLevel`), strictly above ordinary app windows observed at `kCGWindowLayer = 0` (e.g. the browser window also present on screen) — read directly from the WindowServer, not inferred. |
-| 11 | High-DPI backing | **PASS** | Objectively confirmed via SDL itself: `SDL_GetWindowSize` → 160×160 (logical), `SDL_GetWindowSizeInPixels` → 320×320 (pixels), `SDL_GetWindowPixelDensity`/`SDL_GetWindowDisplayScale` → 2.00. Logged by the app at startup (`SpikeApp::Init`), not a visual judgement call. |
-| 12 | Clean shutdown | **PASS** | `SIGINT`/`SIGTERM` → `Shutdown()` path exercised twice via `kill -TERM <pid>`: log shows `clean shutdown, N click(s) recorded this session` both times, the process fully leaves the process table (`ps -p <pid>` empty afterward), and `~/Library/Logs/DiagnosticReports` has no crash report for the process. |
-| 13 | No busy-wait | **PASS** | Idle-animated Release run measured ≈1.2% average CPU over a 27-second sampling window (10 samples, 3s apart; see §7) with a 12 fps idle animation running the whole time. A busy-wait loop at this frame rate would show CPU usage close to 100% of one core, not ~1%. |
-| 14 | No invasive permission requested | **PASS** | See `docs/PRIVACY_SECURITY.md` and the Block 01 report §10 — grep-verified: no Accessibility, Input Monitoring, Screen Recording, or admin/root request anywhere in `src/`. |
+| 1 | Transparent window | **PASS** | Pixel-inspected a real captured frame (`screencapture -l<windowID>`, Screen Recording permission granted mid-block — see §5.4): all four corners read exact `(0,0,0,0)` RGBA. |
+| 2 | Borderless | **PASS** | The captured window image is accounted for entirely by the shape + transparent background pixels; no title-bar chrome pixels anywhere in the 320×320 capture. |
+| 3 | Small bounding box | **PASS** | `CGWindowListCopyWindowInfo`: `kCGWindowBounds = {Width=160, Height=160, ...}` (independent WindowServer read) *and* the captured frame is exactly 320×320 physical pixels (160×160 logical × 2x). |
+| 4 | Real alpha | **PASS** | Pixel-inspected: background exactly alpha=0, interior alpha≈253–255 (Bunny) / 255 (placeholder), sharp antialiased transition at the silhouette edge — not a flat translucent rectangle. |
+| 5 | Click-through on transparent pixels | **PASS** | Root-caused and fixed after being reported FAIL twice by the repository owner — see §5. Final manual confirmation (owner, with Bunny): clicking a transparent point near Bunny reaches the application underneath; Nimvlets' own log shows no click/drag registered for it (correct silence). |
+| 6 | Click on visible region | **PASS** | Owner-confirmed with Bunny: `click #1` logged for a deliberate click on the visible sprite. Also exercised dozens of times across both QA rounds (`click #1`…`#13` in the final session's log) with zero misclassifications. |
+| 7 | Drag moves the window | **PASS** | Owner-confirmed with Bunny: dragging visibly moved the window; log shows `drag ended (correctly not counted as a click)`. |
+| 8 | Click vs. drag never confused | **PASS** | `core::DragClassifier` unit tests (8/8) plus dozens of real interactive presses/drags across both QA rounds, zero misclassifications observed in any log. |
+| 9 | Focus behavior | **PASS** | Real bug found and fixed (see §5.3): launching the spike used to make it the frontmost/active app. Objectively confirmed fixed — frontmost app was `Claude` both immediately before *and* immediately after launching the spike. |
+| 10 | Always-on-top | **PASS** | `kCGWindowLayer = 3` (`NSFloatingWindowLevel`), strictly above ordinary app windows at layer 0 — read directly from the WindowServer. |
+| 11 | High-DPI backing | **PASS** | Real bug found and fixed (see §5.2): the placeholder used to render at half size in the window's top-left quadrant on this 2x display. Fixed and pixel-confirmed: `SDL_GetWindowSize`→160×160, `SDL_GetWindowSizeInPixels`→320×320, and a captured frame's opaque-pixel bounding box now matches the full window, not a quarter of it. |
+| 12 | Clean shutdown | **PASS** | `SIGINT`/`SIGTERM` → `Shutdown()` exercised many times across this block (including at the very end of both QA rounds): log always shows `clean shutdown, N click(s) recorded`, process leaves the process table, zero crash reports in `~/Library/Logs/DiagnosticReports`. |
+| 13 | No busy-wait | **PASS** | Idle-animated Release run: ≈1.2–2% average CPU over 27s sampling windows (placeholder vs. Bunny — see §7) with the render tick running the whole time. A busy-wait loop would show ≈100% of one core. |
+| 14 | No invasive permission requested | **PASS** | Grep-verified: no Accessibility, Input Monitoring, admin/root, or global-hook API anywhere in `src/`. Screen Recording was granted **to the agent's automation shell**, on the owner's explicit instruction, purely to inspect the spike's own window pixels for this QA — not requested by `nimvlets_spike` itself, which still requests nothing beyond `SDL_INIT_VIDEO`. See §5.4 and `docs/PRIVACY_SECURITY.md`. |
 
-## 4. Why several interactive items are PARTIAL/NOT TESTED, not PASS
+## 4. How macOS QA actually happened, in two rounds
 
-This agent session runs the build/run/verify loop through a
-non-interactive automation shell on the target Mac, not through a human
-sitting at the keyboard. Two consequences, both handled by being honest
-about the gap rather than working around it:
+Block 01 was first closed with several macOS items marked PARTIAL/NOT
+TESTED, on the reasoning that the agent session had no way to capture
+screen pixels or synthesize input without either an unavailable
+permission or "invasive automation" the block brief warns against. The
+repository owner then asked for that gap to be closed for real:
 
-- **No screenshot channel.** `screencapture -x` failed with "could not
-  create image from display" — almost certainly because the shell
-  process driving this session has not been granted the macOS Screen
-  Recording permission. This was **not** pursued: granting that
-  permission is a systemwide security-setting change (out of scope for
-  an agent to make on the user's behalf), and it's also literally the
-  mechanism the block brief says not to lean on for verification
-  ("No uses screen recording... para verificarlo").
-- **No synthetic input.** Deliberately did not synthesize mouse
-  clicks/drags (e.g. via `CGEventPost` or accessibility-driven UI
-  automation) to exercise the interactive path end-to-end. That would
-  edge into exactly the "invasive automation" the same brief line warns
-  against, for a marginal gain over what's already verified by unit
-  tests + code review + objective WindowServer inspection.
+1. **Screen Recording was requested from and granted by the owner**
+   (not assumed, not routed around) specifically so the agent could
+   inspect the *spike's own window* — never the owner's broader screen
+   — via `screencapture -l<windowID>` (captures one window's pixel
+   buffer directly; never a full-screen or arbitrary-region capture,
+   which would risk picking up unrelated content — an actual near-miss
+   on that exact risk is recorded in §5.4).
+2. **Interactive clicks/drags were performed by the owner**, not
+   synthesized, on the agent's explicit numbered instructions each
+   round — never `CGEventPost` or accessibility-driven automation.
 
-What *was* used instead, all real evidence rather than assumptions:
-non-visual WindowServer metadata (`CGWindowListCopyWindowInfo` —
-bounds, layer, onscreen state), SDL's own DPI query APIs, process-level
-checks (log output, exit behavior, crash reports, CPU/RSS over time),
-exhaustive unit tests of every piece of pure logic involved, and a
-line-by-line check of every SDL3 API call against the actual pinned
-3.4.12 headers (not documentation that might be stale) fetched into
-this build.
+That combination — real screen pixels plus a real human's mouse —
+is what turned §3 from PARTIAL/NOT TESTED into PASS, and is also what
+surfaced the three real bugs in §5.
 
-**What would close the gap:** a human running the 8-step manual
-checklist in §6 below, which takes under two minutes.
+## 5. Bugs found during interactive QA (all fixed, all owner-confirmed)
 
-## 5. `SDL_SetWindowShape` evaluation (required by the block brief)
+### 5.1 Click-through: root cause and fix
 
-Evaluated before deciding on an approach, using:
-- the official SDL3 wiki page for `SDL_SetWindowShape` (confirms it
-  exists in SDL 3.4.12 — "Available since SDL 3.2.0" — and that its
-  documented behavior is "sets the alpha channel of a transparent
-  window and any fully transparent areas are also transparent to mouse
-  clicks", gated on `SDL_WINDOW_TRANSPARENT`);
-- **libsdl-org/SDL#12683** ("No way of creating a window which does not
-  accept mouse inputs/events (click-through) but isn't totally
-  transparent/invisible(?)"), still open — a `desktop pet` use case
-  described in nearly identical terms to this block's, where the
-  reporter and other commenters (including an SDL maintainer)
-  independently converge on the same finding: `SDL_SetWindowShape`
-  couples the click-through mask to what actually gets rendered —
-  pixels outside the shape surface aren't drawn at all. That's fine if
-  your "content" *is* the shape mask; it conflicts with wanting
-  `src/graphics` to own drawing independently of the hit-test mask, as
-  this block's placeholder (and any future real pet content) needs.
-- **libsdl-org/SDL#11199**, cited as further evidence that
-  `SDL_SetWindowShape` behaves inconsistently between Windows and
-  macOS — another reason not to build the cross-platform click-through
-  path on top of it.
+**Symptom (reported by the owner, twice):** clicking a transparent
+point near the placeholder shape did not reach the application
+underneath — the click seemed to vanish (Nimvlets' own log showed
+nothing for it either, ruling out "our window silently ate it and did
+something with it").
 
-A minimal isolated runtime test of `SDL_SetWindowShape` itself (to
-watch its "doesn't render outside the mask" behavior firsthand rather
-than relying on the cited reports) was not performed in this
-environment, since confirming it visually runs into the same
-screenshot limitation as §4. The decision below does not depend on that
-firsthand look — it follows from the documented API contract plus a
-real, still-open upstream issue describing this exact use case.
+**First fix attempt (insufficient):** the original mechanism —
+`NSWindow.ignoresMouseEvents` toggled from a poll of
+`SDL_GetGlobalMouseState()` tied to the 12fps render tick — was
+suspected of simple lag (a click landing before the next poll caught
+up), so the poll was moved to its own ~60Hz schedule
+(`hoverScheduler_`), independent of rendering. The owner re-tested:
+**still failed**, and asked for the pipeline to be instrumented rather
+than guessed at further, and for polling frequency to not be raised
+again until a real cause was demonstrated.
 
-**Decision:** do not build click-through on `SDL_SetWindowShape`. See
-`docs/DECISION_LOG.md` DEC-006 for the shipped alternative (native
-`NSWindow.ignoresMouseEvents` / `WS_EX_TRANSPARENT` toggled from a
-`SDL_GetGlobalMouseState()` poll piggybacked on the idle-animation
-tick).
+**Instrumentation (see §5.5) and root cause:** six pipeline stages were
+logged on transition only (global cursor → window position → local
+coordinate → hit-test result → requested click-through state →
+*actual* `NSWindow.ignoresMouseEvents` read back immediately after
+setting it). Across two owner-supervised test rounds, the instrumented
+pipeline never showed a single mismatch between "requested" and
+"actual" — the toggle itself always worked exactly as commanded. The
+real cause was found by reading the pinned **SDL 3.4.12 Cocoa backend
+source directly** (not third-party reports):
+`src/video/cocoa/SDL_cocoawindow.m`'s `-mouseMoved:` handler calls
+`updateIgnoreMouseState:` on *every real mouse-moved NSEvent* whenever
+the window has `SDL_WINDOW_TRANSPARENT`, and that function
+**unconditionally resets `ignoresMouseEvents` to `NO`** unless an
+`SDL_SetWindowShape()` surface is set:
 
-## 6. Manual smoke test checklist (for the repository owner)
+```objc
+// src/video/cocoa/SDL_cocoawindow.m
+- (void)updateIgnoreMouseState:(NSEvent *)theEvent
+{
+    SDL_Surface *shape = ...SDL_PROP_WINDOW_SHAPE_POINTER...;
+    BOOL ignoresMouseEvents = NO;
+    if (shape) { /* ... compute from shape alpha ... */ }
+    _data.nswindow.ignoresMouseEvents = ignoresMouseEvents;   // always runs
+}
+```
 
-Takes under two minutes on a real desktop session:
+Since this block was manually managing `ignoresMouseEvents` *without*
+ever calling `SDL_SetWindowShape`, SDL itself was silently resetting
+our own assignment back to `NO` on essentially every mouse movement —
+including the movement immediately preceding a click. By the time a
+click landed, the window was usually back to accepting events, so it
+consumed the click at the OS level (our own app then correctly
+declined to count it as a valid gesture, since it wasn't on the visible
+region — hence the observed silence on both sides).
 
-1. `cmake --build --preset macos-debug && ./build/macos-debug/src/app/nimvlets_spike`
-2. Look at the screen: a small blob shape should appear with **no**
-   rectangular background around it.
-3. Click on empty space that's inside the 160×160 window area but
-   outside the blob — confirm the click reaches whatever is behind the
-   window (e.g. it doesn't get "eaten" by our window).
-4. Click directly on the blob without moving the mouse — confirm the
-   terminal shows `click #1`.
-5. Press on the blob, drag more than a few pixels, release — confirm
-   the terminal shows `drag ended (correctly not counted as a click)`
-   and the window visually followed the cursor.
-6. Click into a different, normal app window — confirm it becomes
-   active normally (the pet window shouldn't have been stealing focus).
-7. Confirm the pet window stays above other normal windows.
-8. `Ctrl+C` in the terminal (or `kill -TERM <pid>` from elsewhere) —
-   confirm the process exits and the log shows `clean shutdown`.
+**Fix:** re-read `SDL_SetWindowShape`'s actual macOS implementation
+(`src/video/cocoa/SDL_cocoashape.m`) instead of relying on the earlier
+community-report-based rejection (§5.1's own predecessor, §1). On
+macOS specifically, that implementation **only ever touches
+`ignoresMouseEvents`** — it does not composite, clip, or otherwise
+touch rendered pixels, contrary to what the earlier evaluation assumed
+(that assumption held for the reported use case, which was about
+Windows' `UpdateLayeredWindow`-based behavior — see
+`docs/DECISION_LOG.md` DEC-017 for the full comparison). Once a shape
+is set, SDL's own `updateIgnoreMouseState:` computes `ignoresMouseEvents`
+*from that shape's alpha at the current cursor position* on every real
+mouse-moved event instead of resetting to `NO` — a correct,
+event-driven mechanism requiring zero polling from the app.
+`src/app/SpikeApp.cpp` now builds an `SDL_Surface` from a
+`core::AlphaMask` (rasterized from whichever visual is active — Bunny's
+real alpha channel or the placeholder's analytic shape) and calls
+`SDL_SetWindowShape()` once at startup;
+`platform::NativeShapeHitTestIsRenderSafe()` gates this per platform
+(`true` on macOS, `false`/unverified on Windows — see §8). The
+poll-driven mechanism (`PollHover()`/`UpdateClickThrough()`) is kept
+as the Windows fallback, unchanged in its own logic, just no longer
+exercised on macOS.
+
+**Result:** owner-confirmed PASS in the final QA round — see §3, item 5.
+
+### 5.2 High-DPI render scale bug
+
+**Symptom (found by the agent, pixel-inspecting a captured frame, not
+reported by the owner):** on this 2x Retina display, the placeholder
+shape rendered at half its intended size, confined to the window's
+top-left quadrant, instead of filling the window.
+
+**Root cause:** `SDL_SetRenderLogicalPresentation()` was never called.
+Its default, `SDL_LOGICAL_PRESENTATION_DISABLED`, maps render
+coordinates 1:1 to physical backbuffer pixels — so
+`core::BlobSilhouette`'s deliberately-DPI-independent logical 160×160
+coordinates only covered a 160×160 physical corner of the real 320×320
+backbuffer.
+
+**Fix:** `SDL_SetRenderLogicalPresentation(renderer, 160, 160,
+SDL_LOGICAL_PRESENTATION_LETTERBOX)` right after creating the renderer.
+Pixel-confirmed fixed both for the placeholder and, later, for Bunny
+(§6): the opaque-pixel bounding box of a captured frame now spans the
+full window.
+
+### 5.3 App-activation focus steal
+
+**Symptom (found by the agent, via objective frontmost-app
+inspection, not visually reported by the owner):** launching the spike
+made it the frontmost/active application, even though
+`SDL_WINDOW_NOT_FOCUSABLE` already correctly prevented the *window*
+from becoming key.
+
+**Root cause:** SDL's Cocoa backend calls `[NSApp
+activateIgnoringOtherApps:YES]` during startup by default —
+`SDL_WINDOW_NOT_FOCUSABLE` only affects window-level key status, not
+app-level activation.
+
+**Fix:** `SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1")` before
+`SDL_Init()` — an official SDL hint documented for exactly this
+("A variable controlling whether to force the application to become
+the foreground process when launched on macOS"). Confirmed fixed:
+frontmost app was `Claude` (the owner's active app) both immediately
+before and immediately after launching the spike, measured via
+`NSWorkspace.frontmostApplication`.
+
+### 5.4 A near-miss on capturing unrelated content
+
+While diagnosing §5.1, an early attempt used `screencapture -R<region>`
+(a screen-region capture at the coordinates `CGWindowListCopyWindowInfo`
+reported for the spike window) instead of a window-scoped capture. The
+result showed unrelated content — not Nimvlets, not the background
+app used for click-through testing — because the window had since
+moved (owner-dragged) and a full/region screen capture reflects
+whatever is really composited at that screen location, which had
+become a different, unrelated real window. **The captured image was
+deleted immediately, unexamined beyond confirming the mismatch, and
+never referenced again.** Every capture after that point in this block
+used `screencapture -l<windowID>` (captures one window's own pixel
+buffer directly, regardless of what else is on screen at that
+location) — which is both more reliable for this purpose and
+structurally incapable of picking up unrelated content, rather than
+relying on discipline alone.
+
+### 5.5 Click-through instrumentation
+
+Referenced throughout `src/app/SpikeApp.cpp`'s comments. Built
+specifically to diagnose §5.1, logging six pipeline stages **only on
+transition** (a value is printed only when it differs from the
+last-logged value for that stage — never once per poll regardless of
+change, which at 60Hz would flood the log):
+
+1. global cursor position (`SDL_GetGlobalMouseState`)
+2. window position (`SDL_GetWindowPosition`)
+3. computed local coordinate (1 − 2)
+4. hit-test result (`IsPointInteractive()`)
+5. requested click-through state
+6. `NSWindow.ignoresMouseEvents`, **read back** immediately after
+   setting it (not assumed to equal what was requested)
+
+Across both QA rounds this never showed a single stage-5/stage-6
+mismatch — proving the poll-driven toggle itself was never the bug
+(see §5.1). Compiled out entirely in Release builds (`#ifndef NDEBUG`,
+both the logging calls *and* the backing fields — not just silenced)
+so a normal run's log stays clean; available in Debug builds for
+whoever eventually brings up the Windows fallback (§8) on real
+hardware.
+
+## 6. Bunny: the Block 01 closure QA fixture
+
+The analytic placeholder (two overlapping circles, `core::BlobSilhouette`)
+is mathematically exact but can't validate hit-testing against **real**
+alpha data — antialiased edges, non-convex silhouette, a texture
+instead of a flat fill. For final closure, the repository owner
+supplied a real illustrated asset ("Bunny") as a **temporary QA
+fixture only** — explicitly not the start of the real content system
+(`docs/PET_CONTENT_SPEC.md` still describes zero implementation in
+Block 01).
+
+- **Pipeline:** source PNG (1254×1254, real alpha) → resized to 320×320
+  (`sips`, preserves alpha) → `tools/prep_dev_sprite.py` (dependency-free
+  Python, reuses this block's own PNG-decoding logic) → `assets/dev/bunny.rgba`,
+  a trivial uncompressed format (4-byte magic + width + height + raw
+  RGBA8) the C++ side reads with no PNG decoder and no `SDL_image`
+  dependency (`graphics::DevSprite`).
+- **Rendering:** `SDL_CreateTextureFromSurface` + `SDL_RenderTexture`
+  into the same 160×160 logical destination rect the placeholder uses —
+  exercises the exact `SDL_SetRenderLogicalPresentation` fix from §5.2
+  against a second, independent asset. Pixel-confirmed correct (full
+  window filled, sharp, no DPI regression).
+- **Hit-testing:** `graphics::DevSprite::BuildAlphaMask()` rasterizes
+  the *loaded image's own alpha channel* into a `core::AlphaMask` at
+  the window's logical resolution — not the analytic shape. This same
+  mask feeds both `SDL_SetWindowShape()` (§5.1's fix) and the
+  MOUSE_BUTTON_DOWN defense-in-depth check, so what's clickable is
+  derived from the same real pixel data on both the "let the click in"
+  and "let the click through" sides.
+- **Alpha threshold — `DevSprite::kHitTestAlphaThreshold = 128`
+  (50%):** chosen after inspecting this specific asset's real alpha
+  histogram, not picked arbitrarily:
+  - background pixels: exactly alpha = 0 (60.6% of the image)
+  - interior ("visibly part of the bunny") pixels: clustered tightly
+    at alpha ≈ 253–254 (98% of all non-zero-alpha pixels are ≥128)
+  - a thin antialiased edge band in between (the only pixels a
+    threshold choice actually affects)
+
+  128 is the standard antialiased-edge midpoint and, per the
+  histogram, cleanly separates "background" from "visible shape" for
+  this asset — see `docs/DECISION_LOG.md` DEC-018 for the full
+  analysis with numbers.
+- **Fallback, not replacement:** if `assets/dev/bunny.rgba` fails to
+  load (e.g. the process isn't launched from the repo root, where the
+  relative path resolves from), `SpikeApp` logs that and falls back to
+  the analytic placeholder unchanged — the placeholder is not deleted
+  and is still what `tests/SilhouetteTest.cpp` exercises directly,
+  independent of which visual the running app happens to show.
+
+**Manual QA result (owner-confirmed, final round):** click on Bunny →
+registered (`click #1`); click on a transparent point near Bunny,
+inside the window → reached the application underneath (silence in
+Nimvlets' own log); drag on Bunny → moved the window, logged as
+`drag ended (correctly not counted as a click)`, not a click.
 
 ## 7. Performance sampling (Release, native arm64)
 
-10 samples via `ps -o rss,%cpu,time`, 3 seconds apart, no `sudo`, no
-special instrumentation — see the Block 01 report §7 for the full
-numbers and method. Summary: RSS stabilized at ≈70 MB; CPU time grew by
-0.32s of process time over a 27s wall-clock window (≈1.19% average).
+Method: `ps -o rss,%cpu,time`, 3-second intervals, no `sudo`, no
+special instrumentation — see the Block 01 Final Closure Report for
+the full sample tables.
+
+| Visual | RSS (stabilized) | CPU, idle-animated (steady state) |
+|---|---|---|
+| Analytic placeholder (original Block 01 close) | ≈70 MB | ≈1.2% average |
+| Bunny QA fixture (this closure pass) | ≈72 MB | ≈2% average (after excluding the first few seconds' one-time texture/shape setup cost) |
+
+The increase with Bunny is expected and modest: rendering a real
+320×320 texture with linear filtering is more work than filling two
+flat-colored circles. Both remain far below "busy-wait" territory
+(≈100% of one core) and within `docs/PERFORMANCE_BUDGETS.md`'s
+targets.
 
 ## 8. Windows
 
 No Windows machine is available in this development environment
-(Darwin only) — nothing below claims otherwise.
+(Darwin only) — nothing below claims otherwise. Unchanged by this
+block's macOS-focused QA rounds.
 
 | Item | Status |
 |---|---|
-| Configure/Build | **NOT RUN locally.** `windows-debug`/`windows-release` CMake presets exist (`Visual Studio 17 2022` generator, x64) and `src/platform/windows/TransparentWindowSupport.cpp` compiles against the same verified SDL3 property names as the macOS side (`SDL_PROP_WINDOW_WIN32_HWND_POINTER`, confirmed present in the pinned SDL3 3.4.12 headers). A `.github/workflows/ci.yml` job (`windows-x64`) exists to configure/build/test on a real Windows runner — but per this block's Git rules, nothing is pushed in this block, so **that CI job has not executed yet**. "Added" is an accurate claim; "executed"/"passing" is not. |
-| Tests | **NOT RUN**, same reason. `tests/` has no SDL/platform dependency, so once CI does run, there's no reason to expect it to fail there. |
-| GUI runtime | **NOT TESTED.** No display, no Windows machine at all in this block. |
-
-### Differences from macOS (by design, not oversight)
-
-- Always-on-top: `NSFloatingWindowLevel` (macOS) vs. `SetWindowPos(...,
-  HWND_TOPMOST, ...)` (Windows) — different APIs, same effect.
-- Click-through: `NSWindow.ignoresMouseEvents` (macOS) vs. toggling
-  `WS_EX_TRANSPARENT` on `GWL_EXSTYLE` (Windows) — same driving signal
-  (`core::BlobSilhouette::Contains()` against a polled global cursor
-  position), different native mechanism.
-- High-DPI: confirmed working on macOS (§3, item 11). Windows per-monitor
-  DPI awareness (whether SDL3's Win32 backend needs an app manifest or
-  an explicit `SetProcessDpiAwarenessContext` call in our own code for
-  correct scaling) is an **open question** for the first real Windows
-  smoke test — not resolved in this block.
+| Configure/Build | **NOT RUN locally.** Presets and `src/platform/windows/TransparentWindowSupport.cpp` exist and compile against verified SDL3 property names. `.github/workflows/ci.yml`'s `windows-x64` job exists but has not executed (nothing is pushed in this block). |
+| Tests | **NOT RUN**, same reason. `tests/` has no SDL/platform dependency. |
+| GUI runtime | **NOT TESTED.** No display, no Windows machine in this block. |
+| Click-through mechanism | `platform::NativeShapeHitTestIsRenderSafe()` returns `false` for Windows (conservative default — not verified). It keeps using the poll-driven `SetWindowClickThrough()` fallback, **unchanged** by this block's SDL_SetWindowShape fix, which is macOS-specific (§5.1). Whether Windows' own `SDL_SetWindowShape` backend is *also* render-safe (contrary to the community reports DEC-017 cites) is an open question for real hardware, not assumed either way. |
 
 ### Pending before Windows can be trusted
 
 1. Push this branch (owner's decision, outside this block) and confirm
    the `windows-x64` CI job is green.
-2. On real Windows 10/11 x64 hardware: build via the `windows-release`
-   preset and run `nimvlets_spike.exe` directly.
-3. Repeat the §6 manual checklist there.
-4. Specifically watch the `WS_EX_TRANSPARENT` toggle — it is the one
-   native code path in this entire block that has never executed
-   anywhere, not even in CI (CI has no display).
+2. On real Windows 10/11 x64 hardware: build and run
+   `nimvlets_spike.exe`, repeat this block's manual QA (§3's items,
+   with Bunny).
+3. Specifically watch `WS_EX_TRANSPARENT` toggling — the one native
+   code path in this entire block that has never executed anywhere,
+   not even in CI (no display there).
+4. Optionally: investigate whether Windows' `SDL_SetWindowShape`
+   backend is also render-safe, the way §5.1 found macOS's to be — if
+   so, Windows could drop its poll-driven fallback too. Not attempted
+   here; no way to verify without Windows hardware.
 
 ## 9. Intel Mac / Universal2
 
 Built and verified on the Apple Silicon dev machine used for this
-block — see the Block 01 report §6 for the full `lipo -info` output and
-binary sizes. Summary: `cmake --preset macos-universal2-release` + build
-succeeds; the resulting `nimvlets_spike` and `nimvlets_tests` binaries
-both report `arm64 x86_64` via `lipo -info`; the host-arch (arm64)
-slice runs and passes all unit tests.
+block — see the Block 01 Final Closure Report for the full `lipo -info`
+output and binary sizes. `cmake --preset macos-universal2-release`
+configures and builds cleanly (including all fixes from §5); both
+`nimvlets_spike` and `nimvlets_tests` report `arm64 x86_64` via
+`lipo -info`; the host-arch slice runs and passes all unit tests.
 
 **A cross-compiled universal2 build is not a substitute for a real
-smoke test on Intel hardware** — no Intel Mac was available in this
-block. This remains a real, open item, not a formality: the transparent
-window / click-through / drag behavior on Intel has not been observed
-even once.
+smoke test on Intel hardware** — none was available in this block.
+Real, open item: the transparent window / click-through / drag
+behavior on Intel has never been observed.
 
 ## 10. SDL3 recommendation
 
-**KEEP SDL3 + native adapters.**
+**KEEP SDL3 + native adapters.** Reaffirmed with stronger evidence than
+the block's first close had.
 
-SDL3 correctly and portably handled window creation, the transparent
-buffer, borderless presentation, always-on-top, a real event loop
-without busy-waiting, and honoring high-DPI backing (objectively
-confirmed at 2x on this Retina display) — all via a small, well-behaved
-API that matched its own documentation exactly against the pinned
-3.4.12 source in every case checked in this block. Zero SDL3 API
-mismatches were found between what's documented and what the pinned
-version actually ships.
+The click-through investigation (§5.1) is itself the best evidence for
+this: the *first* verdict — reject `SDL_SetWindowShape`, hand-roll
+polling instead — was wrong, but SDL3 wasn't the reason it was wrong;
+an incomplete evaluation (community reports instead of the pinned
+source) was. Once the actual macOS backend source was read, the
+correct, minimal, event-driven mechanism was already sitting in SDL3's
+public API, needing only a `core::AlphaMask`-to-`SDL_Surface` adapter
+(≈15 lines) to use correctly. That's exactly what "native adapters"
+means in this recommendation: SDL3 as the cross-platform base, with
+platform-specific behavior isolated behind `src/platform/*` (here,
+`NativeShapeHitTestIsRenderSafe()`) rather than reason to abandon the
+framework.
 
-The one real gap — decoupling click-through from what gets rendered —
-isn't a flaw in SDL3's overall design; it's a specific, documented,
-currently-open upstream limitation of one function
-(`SDL_SetWindowShape`, see §5) for one specific use case (a
-custom-rendered, non-rectangular overlay). Working around it took two
-small (~60–90 line) platform files, already exactly where
-`AGENTS.md`'s architecture says platform-specific code belongs. That's
-the "native adapters" half of the recommendation: keep SDL3 as the
-cross-platform base, keep isolating the handful of things it can't do
-itself behind `src/platform/*`, and don't treat this gap as a reason to
-reconsider the framework choice.
+Two more real bugs were found and fixed in this block (§5.2 DPI scale,
+§5.3 focus steal) — both were **our own missing calls**
+(`SDL_SetRenderLogicalPresentation`, `SDL_SetHint`), not SDL defects;
+both have official, documented, one-line fixes. Zero SDL3 API
+mismatches were found between documentation and the pinned 3.4.12
+source across this entire block.
 
-Reconsider only if a block hits a *different* incompatibility SDL3
-can't be worked around for with a small adapter — not encountered here.
+Reconsider only if a block hits an incompatibility SDL3 can't be
+worked around for with a small adapter — not encountered here, even
+after two full rounds of real interactive QA and a genuine bug hunt.

@@ -64,33 +64,82 @@ shows up.
 The spike's placeholder creature is two overlapping filled circles
 defined by plain math (`core::BlobSilhouette`), rendered via manual
 scanline fill through `SDL_RenderFillRect` — no `SDL_image`, no texture
-loading, no bitmap asset. The same math is reused for hit-testing (see
-DEC-006), so rendering and click-through can never disagree with each
-other. Not final art — see `docs/PET_CONTENT_SPEC.md`.
+loading, no bitmap asset. The same math is rasterized into the shared
+`core::AlphaMask` hit-test representation (see DEC-017, DEC-018), so
+rendering and click-through can never disagree with each other. Not
+final art — see `docs/PET_CONTENT_SPEC.md`. Still the fallback visual
+when the Bunny QA fixture (DEC-018) isn't available, and still what
+`tests/SilhouetteTest.cpp` exercises directly.
 
 ---
 
 ### DEC-006 — Click-through via native API + cursor polling, not `SDL_SetWindowShape`
-**Status:** DECIDIDO · Block 01 (spike scope) — full evaluation and
-evidence in `docs/PLATFORM_SPIKE.md`.
+**Status:** SUPERSEDED by DEC-017 (macOS) — the poll-driven mechanism
+described below remains DECIDIDO as the **Windows fallback only**; see
+DEC-017.
 
 `SDL_SetWindowShape()` was evaluated first, per the block brief. On SDL
-3.4.12 it couples the click-through mask to what actually gets
-rendered (pixels outside the shape surface aren't drawn at all), which
-conflicts with wanting `src/graphics` to own drawing independently —
-and is a known upstream limitation, not specific to Nimvlets
-(libsdl-org/SDL#12683: "No way of creating a window which does not
-accept mouse inputs/events (click-through) but isn't totally
-transparent/invisible"). The shipped approach instead:
+3.4.12 it was believed to couple the click-through mask to what
+actually gets rendered (pixels outside the shape surface aren't drawn
+at all), based on community reports (libsdl-org/SDL#12683, #11199) —
+**this belief turned out to be Windows-specific, not true on macOS; see
+DEC-017.** The shipped approach instead:
 
 1. renders normally via `src/graphics`, with per-pixel alpha;
 2. on macOS, toggles `NSWindow.ignoresMouseEvents`; on Windows, toggles
    `WS_EX_TRANSPARENT` on the extended window style (Windows path
    compiled but not yet run on real hardware — see PLATFORM_SPIKE.md);
-3. decides which way to toggle by evaluating
-   `core::BlobSilhouette::Contains()` against the cursor position from
-   `SDL_GetGlobalMouseState()`, polled once per idle-animation tick (no
-   extra wakeups, no global input hook, no new permission).
+3. decides which way to toggle by evaluating the active hit-test
+   source against the cursor position from `SDL_GetGlobalMouseState()`,
+   polled (no global input hook, no new permission).
+
+Interactive macOS QA later found this **did not work reliably on
+macOS** — see DEC-017 for the root cause and the fix. It remains
+exactly as described above for Windows, where it is still the only
+verified-safe mechanism (see DEC-017's Windows note).
+
+---
+
+### DEC-017 — macOS click-through: `SDL_SetWindowShape`, not manual polling
+**Status:** DECIDIDO · Block 01 — full investigation, source citations,
+and owner-confirmed QA results in `docs/PLATFORM_SPIKE.md` §5.1.
+
+DEC-006's poll-driven mechanism was reported broken by the repository
+owner in interactive macOS QA — a click on a transparent point near the
+visible shape did not reach the application underneath, twice, even
+after moving the poll to its own faster (~60Hz) schedule. Root cause,
+found by reading the pinned **SDL 3.4.12 Cocoa backend source directly**
+(`src/video/cocoa/SDL_cocoawindow.m`): SDL's own `-mouseMoved:` handler
+calls `updateIgnoreMouseState:` on every real mouse-moved event for any
+`SDL_WINDOW_TRANSPARENT` window, and that function **unconditionally
+resets `NSWindow.ignoresMouseEvents` to `NO`** unless an
+`SDL_SetWindowShape()` surface is set — silently undoing DEC-006's own
+assignment on essentially every mouse movement, including the movement
+immediately preceding a click.
+
+Re-reading `SDL_SetWindowShape`'s actual macOS implementation
+(`src/video/cocoa/SDL_cocoashape.m`, `Cocoa_UpdateWindowShape`) showed
+DEC-006's original rejection reason didn't hold there: on macOS, that
+function **only ever touches `ignoresMouseEvents`** — it does not
+composite, clip, or otherwise touch rendered pixels. (The community
+reports DEC-006 cited remain accurate for **Windows**, where the
+classic `UpdateLayeredWindow` technique does use the shape bitmap as
+the actual rendered content — see the Windows note below.)
+
+**Decision:** on macOS, `SpikeApp::Init()` rasterizes whichever visual
+is active (Bunny's real alpha channel, or the analytic placeholder —
+see DEC-018) into an `SDL_Surface` and calls `SDL_SetWindowShape()`
+once at startup. SDL's own event-driven `updateIgnoreMouseState:` then
+handles all click-through toggling automatically, with zero polling
+from the app. `platform::NativeShapeHitTestIsRenderSafe()` gates this:
+`true` on macOS (verified via source), `false` on Windows (conservative
+default — DEC-006's poll-driven mechanism remains the Windows path,
+unverified either way on real hardware).
+
+**Owner-confirmed QA result:** click on visible region → registers;
+click on transparent region near the visible shape → reaches the
+application underneath; drag → moves the window, not counted as a
+click. See `docs/PLATFORM_SPIKE.md` §3 and §6.
 
 ---
 
@@ -206,3 +255,85 @@ without requesting `NSWindowCollectionBehaviorFullScreenAuxiliary`
 per the PRD and out of scope here). Not specified verbatim in the block
 brief — recorded here for visibility, not implied to be final product
 behavior.
+
+---
+
+### DEC-018 — Bunny: a real-asset QA fixture for hit-testing, not a content system
+**Status:** DECIDIDO · Block 01 (closure QA scope only) — see
+`docs/PLATFORM_SPIKE.md` §6.
+
+The analytic placeholder (DEC-005) is mathematically exact but can't
+validate hit-testing against real alpha data (antialiasing, a
+non-convex silhouette, an actual texture). For final macOS closure QA,
+the repository owner supplied a real illustrated asset ("Bunny") as a
+**temporary fixture only** — explicitly not the start of the content
+system `docs/PET_CONTENT_SPEC.md` describes, which still has zero
+implementation in Block 01.
+
+- **No new runtime PNG/image dependency:** `tools/prep_dev_sprite.py`
+  (dependency-free Python, reusing this block's own PNG-decoding logic)
+  converts the source PNG offline into `assets/dev/bunny.rgba`, a
+  trivial uncompressed format (magic + width + height + raw RGBA8) the
+  C++ side (`graphics::DevSprite`) reads with no PNG decoder and no
+  `SDL_image` — keeping AGENTS.md §10's "no dependency without a
+  concrete, current reason" intact.
+- **Hit-testing threshold — `DevSprite::kHitTestAlphaThreshold = 128`
+  (50%):** chosen from this asset's actual alpha histogram, not
+  guessed: background pixels are exactly alpha=0 (60.6% of the image);
+  interior/"visible" pixels cluster tightly at alpha≈253–254 (98% of
+  all non-zero-alpha pixels are ≥128); only a thin antialiased edge
+  band falls in between, which is exactly what a threshold should
+  decide. 128 is also the standard antialiased-edge midpoint
+  convention.
+- **One hit-test source of truth:** `DevSprite::BuildAlphaMask()`
+  rasterizes the loaded image's real alpha channel into the same
+  `core::AlphaMask` type the analytic placeholder rasterizes into (see
+  DEC-017) — both the `SDL_SetWindowShape` surface and the
+  MOUSE_BUTTON_DOWN defense-in-depth check read from whichever mask is
+  active, so rendering and click-through can never disagree, exactly
+  matching DEC-005's original guarantee for the placeholder.
+- **Fallback, not replacement:** if the fixture file can't be loaded,
+  `SpikeApp` logs that and falls back to the unchanged analytic
+  placeholder — Bunny never became a hard dependency of the spike
+  building or running.
+
+**Owner-confirmed QA result:** see `docs/PLATFORM_SPIKE.md` §6 —
+click-visible, click-through-transparent, and drag-not-click all
+confirmed with Bunny as the closure fixture.
+
+---
+
+### DEC-019 — High-DPI render scale fix: `SDL_SetRenderLogicalPresentation`
+**Status:** DECIDIDO · Block 01 (bug fix) — see
+`docs/PLATFORM_SPIKE.md` §5.2.
+
+Found by the agent pixel-inspecting a captured frame (not visually
+reported by the owner): on this 2x Retina display, the rendered visual
+filled only the window's top-left quadrant at half its intended size.
+`SDL_SetRenderLogicalPresentation()` was never called, so the default
+`SDL_LOGICAL_PRESENTATION_DISABLED` mapped render coordinates 1:1 to
+physical backbuffer pixels instead of scaling from the logical 160×160
+space `core::BlobSilhouette` (and, later, the Bunny fixture's
+destination rect) is authored in. Fixed with one call
+(`SDL_SetRenderLogicalPresentation(renderer, 160, 160,
+SDL_LOGICAL_PRESENTATION_LETTERBOX)`) right after creating the
+renderer. Pixel-confirmed fixed for both visuals.
+
+---
+
+### DEC-020 — Focus-steal fix: `SDL_HINT_MAC_BACKGROUND_APP`
+**Status:** DECIDIDO · Block 01 (bug fix) — see
+`docs/PLATFORM_SPIKE.md` §5.3.
+
+Found by the agent via objective frontmost-app inspection (not visually
+reported by the owner): launching the spike made it the
+frontmost/active application, even though `SDL_WINDOW_NOT_FOCUSABLE`
+already correctly kept the *window* from becoming key —
+`SDL_WINDOW_NOT_FOCUSABLE` only affects window-level key status, not
+app-level activation, and SDL's Cocoa backend calls `[NSApp
+activateIgnoringOtherApps:YES]` on startup by default. Fixed with
+`SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1")` before `SDL_Init()` —
+an official SDL hint documented for exactly this case. Confirmed fixed
+objectively: the frontmost app was unchanged (`Claude`, the owner's
+active app) immediately before and immediately after launching the
+spike.

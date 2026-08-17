@@ -49,14 +49,30 @@ source tree.
 ## Run the foundation spike
 
 ```bash
+# run from the repo root — the QA fixture below is loaded via a
+# relative path that resolves from the current working directory
 ./build/macos-debug/src/app/nimvlets_spike
 ```
 
 This opens a small (160×160), borderless, always-on-top, transparent
-window with a simple two-circle placeholder shape — deliberately not
-final art, see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md).
-Click the shape to log an in-memory click count to stdout; drag it to
-move the window.
+window. If `assets/dev/bunny.rgba` loads (it does when run from the
+repo root, as above), the window shows **Bunny** — a real illustrated
+QA fixture the repository owner supplied to validate click-through
+against real alpha data, *not* final content (see
+[`docs/DECISION_LOG.md`](docs/DECISION_LOG.md) DEC-018 and
+[`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) §6). Otherwise it
+falls back to the original two-circle analytic placeholder shape —
+deliberately not final art either way, see
+[`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md). Click the
+visible region to log an in-memory click count to stdout; drag it to
+move the window; click on the transparent area passes through to
+whatever's beneath the window.
+
+On macOS, click-through hit-testing is handed to SDL's own
+`SDL_SetWindowShape()` mechanism (event-driven, no polling) — see
+`docs/PLATFORM_SPIKE.md` §5.1 for why a manual approach was tried
+first and replaced. A poll-driven fallback exists for Windows, where
+that mechanism isn't verified safe yet.
 
 The window is intentionally borderless and non-focusable (that's the
 product requirement, not a bug), so it has no close button. Quit it from
@@ -91,11 +107,12 @@ output. See `AGENTS.md` §7 and `tools/stats_loc.py`'s own docstring.
 
 ```
 src/core       pure C++20 logic, no SDL — unit tested in isolation
-src/graphics   SDL rendering of the placeholder shape
+src/graphics   SDL rendering (placeholder shape + the Bunny QA fixture)
 src/platform   native macOS (AppKit) / Windows (Win32) window glue
 src/app        the spike executable: event loop + wiring
 tests/         CTest-driven unit tests for src/core
-tools/         dev tooling (stats_loc.py)
+tools/         dev tooling (stats_loc.py, prep_dev_sprite.py)
+assets/dev/    dev-only placeholder assets (see assets/dev/README.md)
 cmake/         CMake helper modules (warnings, SDL3 fetch)
 docs/          product + engineering contracts (see AGENTS.md §17)
 ```
