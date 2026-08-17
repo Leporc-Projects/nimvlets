@@ -12,6 +12,8 @@ add_executable(nimvlets_tests
   FrameSchedulerTest.cpp
   SilhouetteTest.h
   SilhouetteTest.cpp
+  AlphaMaskTest.h
+  AlphaMaskTest.cpp
   main.cpp
 )
 

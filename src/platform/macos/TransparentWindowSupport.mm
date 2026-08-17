@@ -4,21 +4,39 @@
 
 #import <AppKit/AppKit.h>
 
-// See docs/PLATFORM_SPIKE.md for the evaluation this implementation is
-// based on. Summary: SDL_SetWindowShape() was evaluated first (per the
-// block brief) and rejected for the shipped path because on SDL 3.4.12
-// it couples the click-through mask to what gets rendered — pixels
-// outside the shape surface are not drawn at all, which conflicts with
-// wanting our own renderer (src/graphics/BlobRenderer) to own drawing.
-// This is also a known upstream limitation, not a Nimvlets-specific bug
-// (libsdl-org/SDL#12683). Instead this file drives two plain,
-// permission-free AppKit/Win32 mechanisms:
-//   - NSWindow.ignoresMouseEvents, toggled per-state (not per-frame);
-//   - polling SDL_GetGlobalMouseState() from src/app's existing idle
-//     animation tick to decide when to toggle it.
-// Neither requires Accessibility, Input Monitoring, or any TCC prompt:
-// both are ordinary window-server/cursor-position queries, not global
-// input hooks.
+// See docs/PLATFORM_SPIKE.md for the full click-through investigation
+// this file's current shape is based on. Summary of the journey (kept
+// here because it's exactly the kind of thing a future reader will
+// re-discover the hard way otherwise):
+//
+// 1. SDL_SetWindowShape() was evaluated first, per the block brief, and
+//    initially rejected based on community reports (libsdl-org/SDL#12683,
+//    #11199) suggesting it couples the click-through mask to rendering.
+// 2. The fallback — manually polling SDL_GetGlobalMouseState() and
+//    toggling ignoresMouseEvents ourselves (SetWindowClickThrough(),
+//    below) — was shipped instead, and was interactively confirmed
+//    broken during macOS QA: SDL's own Cocoa backend
+//    (src/video/cocoa/SDL_cocoawindow.m, `-mouseMoved:` →
+//    `updateIgnoreMouseState:`) resets `ignoresMouseEvents` to NO on
+//    every real mouse-moved NSEvent whenever no SDL_SetWindowShape
+//    surface is set — silently undoing our own assignment moments after
+//    we made it, race-losing against the user's actual click.
+// 3. Reading the pinned SDL 3.4.12 Cocoa source directly (not
+//    community reports) showed step 1's rejection was wrong *for
+//    macOS specifically*: `Cocoa_UpdateWindowShape()`
+//    (SDL_cocoashape.m) only ever touches `ignoresMouseEvents`; it does
+//    not composite, clip, or otherwise touch rendered pixels on this
+//    platform. So `SDL_SetWindowShape()` is what src/app now uses on
+//    macOS (see NativeShapeHitTestIsRenderSafe()) — it hands hit-testing
+//    to SDL's own event-driven internals entirely, needing zero polling
+//    from us.
+//
+// SetWindowClickThrough() below is kept as the fallback mechanism for
+// platforms where NativeShapeHitTestIsRenderSafe() is false (Windows,
+// unverified) — see that function's doc comment in the shared header.
+// Neither mechanism requires Accessibility, Input Monitoring, or any
+// TCC prompt: both are ordinary window-server/cursor-position queries,
+// not global input hooks.
 
 namespace nimvlets::platform {
 
@@ -58,12 +76,21 @@ void ConfigureCompanionWindow(SDL_Window* window) {
     nsWindow.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary;
 }
 
-void SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
+bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     NSWindow* nsWindow = CocoaWindowFor(window);
     if (nsWindow == nil) {
-        return;
+        return clickThrough;
     }
     nsWindow.ignoresMouseEvents = clickThrough ? YES : NO;
+    // Read the property back rather than trusting the assignment stuck —
+    // this is the ground truth src/app's click-through instrumentation
+    // compares against "what we asked for" (see
+    // docs/PLATFORM_SPIKE.md's click-through instrumentation section).
+    return nsWindow.ignoresMouseEvents == YES;
+}
+
+bool NativeShapeHitTestIsRenderSafe() {
+    return true;
 }
 
 }  // namespace nimvlets::platform

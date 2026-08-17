@@ -6,6 +6,8 @@ add_library(nimvlets_core STATIC
   FrameScheduler.cpp
   Silhouette.h
   Silhouette.cpp
+  AlphaMask.h
+  AlphaMask.cpp
 )
 
 target_include_directories(nimvlets_core PUBLIC ${CMAKE_SOURCE_DIR}/src)

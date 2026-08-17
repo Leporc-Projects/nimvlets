@@ -51,15 +51,30 @@ void ConfigureCompanionWindow(SDL_Window* window) {
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-void SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
+bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     HWND hwnd = Win32WindowFor(window);
     if (hwnd == nullptr) {
-        return;
+        return clickThrough;
     }
 
     const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     const LONG_PTR next = clickThrough ? (exStyle | WS_EX_TRANSPARENT) : (exStyle & ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT));
     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+
+    // Read back rather than trusting the assignment stuck, mirroring
+    // src/platform/macos's ignoresMouseEvents readback — see
+    // docs/PLATFORM_SPIKE.md's click-through instrumentation section.
+    const LONG_PTR after = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    return (after & WS_EX_TRANSPARENT) != 0;
+}
+
+bool NativeShapeHitTestIsRenderSafe() {
+    // Conservative "no" — not verified in this block (no Windows
+    // machine available). See this function's doc comment in
+    // platform/TransparentWindowSupport.h for the community reports
+    // (libsdl-org/SDL#11199) this default is based on. SetWindowClickThrough()
+    // above is the mechanism src/app actually uses as a result.
+    return false;
 }
 
 #else
@@ -69,7 +84,8 @@ void SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
 // below exists solely so the file is not silently empty if that
 // invariant is ever broken.
 void ConfigureCompanionWindow(SDL_Window*) {}
-void SetWindowClickThrough(SDL_Window*, bool) {}
+bool SetWindowClickThrough(SDL_Window*, bool clickThrough) { return clickThrough; }
+bool NativeShapeHitTestIsRenderSafe() { return false; }
 
 #endif
 

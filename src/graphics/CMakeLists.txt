@@ -1,6 +1,8 @@
 add_library(nimvlets_graphics STATIC
   BlobRenderer.h
   BlobRenderer.cpp
+  DevSprite.h
+  DevSprite.cpp
 )
 
 target_include_directories(nimvlets_graphics PUBLIC ${CMAKE_SOURCE_DIR}/src)
