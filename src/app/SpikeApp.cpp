@@ -45,6 +45,16 @@ bool SpikeApp::Init() {
     std::signal(SIGINT, HandleTerminationSignal);
     std::signal(SIGTERM, HandleTerminationSignal);
 
+    // Without this, SDL's Cocoa backend calls
+    // [NSApp activateIgnoringOtherApps:YES] during startup, which makes
+    // the spike steal the foreground/active-app status (and, with it,
+    // the menu bar) from whatever the user was using — even though
+    // SDL_WINDOW_NOT_FOCUSABLE (below) already stops the *window* from
+    // ever becoming key. Found by interactive macOS QA — see
+    // docs/PLATFORM_SPIKE.md, "focus behavior". Must be set before
+    // SDL_Init().
+    SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("nimvlets: SDL_Init failed: %s", SDL_GetError());
         return false;
@@ -75,6 +85,23 @@ bool SpikeApp::Init() {
         SDL_Log("nimvlets: SDL_CreateRenderer failed: %s", SDL_GetError());
         return false;
     }
+
+    // Without this, SDL_LOGICAL_PRESENTATION_DISABLED is the default and
+    // render coordinates map 1:1 to physical backbuffer pixels — so on a
+    // 2x Retina display our BlobSilhouette's logical 160x160 coordinates
+    // (see core/Silhouette.h; deliberately DPI-independent) would only
+    // cover the top-left quarter of the real 320x320 backbuffer at half
+    // the intended size, instead of filling the window. Found by pixel-
+    // inspecting an actual captured frame during interactive macOS QA —
+    // see docs/PLATFORM_SPIKE.md. LETTERBOX (not STRETCH) because it's
+    // correct even if window and blob logical sizes ever diverge; the
+    // letterbox fill color is our own transparent clear color, so no
+    // visible bars appear in the square case this block actually uses.
+    SDL_SetRenderLogicalPresentation(
+        renderer_,
+        static_cast<int>(blob_.windowWidth),
+        static_cast<int>(blob_.windowHeight),
+        SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
     platform::ConfigureCompanionWindow(window_);
 
