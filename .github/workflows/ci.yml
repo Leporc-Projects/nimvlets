@@ -1,0 +1,71 @@
+name: CI
+
+# Configure/build/test verification only. This is NOT a substitute for
+# the manual visual QA in docs/PLATFORM_SPIKE.md — a green build here
+# proves the code compiles and src/core's unit tests pass on that OS; it
+# says nothing about whether a real window ever renders correctly on a
+# real display. See AGENTS.md §4.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  macos-arm64:
+    name: macOS (arm64, native) — configure/build/test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset macos-release
+
+      - name: Build
+        run: cmake --build --preset macos-release -j
+
+      - name: Test (src/core unit tests — no display required)
+        run: ctest --preset macos-release --output-on-failure
+
+  macos-universal2:
+    name: macOS universal2 (arm64 + x86_64) — configure/build/lipo check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (universal2)
+        run: cmake --preset macos-universal2-release
+
+      - name: Build (universal2)
+        run: cmake --build --preset macos-universal2-release -j
+
+      - name: Verify both architectures are present
+        run: |
+          set -euo pipefail
+          ARCHES=$(lipo -info build/macos-universal2-release/src/app/nimvlets_spike)
+          echo "$ARCHES"
+          echo "$ARCHES" | grep -q "arm64" || (echo "missing arm64 slice" && exit 1)
+          echo "$ARCHES" | grep -q "x86_64" || (echo "missing x86_64 slice" && exit 1)
+
+      # A cross-compiled universal2 build is not a substitute for
+      # actually running on Intel hardware — see docs/PLATFORM_SPIKE.md,
+      # "Intel Mac / Universal". This job proves the binary *contains*
+      # both slices, nothing about runtime behavior on either one.
+      - name: Test (host-arch slice only — no display required)
+        run: ctest --test-dir build/macos-universal2-release --output-on-failure
+
+  windows-x64:
+    name: Windows x64 — configure/build/test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset windows-release
+
+      - name: Build
+        run: cmake --build --preset windows-release
+
+      - name: Test (src/core unit tests — no display required)
+        run: ctest --preset windows-release --output-on-failure
