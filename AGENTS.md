@@ -256,7 +256,34 @@ easy (a Shop screen, persistence, tray icon, etc.) — check the current
 block's NON-SCOPE list first. Speculative future-proofing that isn't
 asked for is itself a form of scope creep.
 
-## 17. Documentation map
+## 17. Language conventions (code comments & documentation)
+
+Established starting Block 03; applied going forward, not as a
+retroactive rewrite of untouched Block 01/02 content:
+
+- First-party identifiers and code stay in English: variable/function/
+  class/type/namespace/file names, commit messages, log strings, CLI
+  flags/env vars, on-disk format magic (e.g. `"NVPACK1"`, `"NVSTATE1"`),
+  and anything an API, build script, or CI depends on matching exactly.
+- New, meaningful code comments are written in Spanish. A comment
+  earns its place by explaining *why* — rationale, an invariant, a
+  non-obvious behavior, a decision that isn't derivable from reading
+  the next line of code — never by restating what that syntax already
+  says.
+- New or materially updated project documentation (`docs/*.md`,
+  `README.md`, etc.) is written in Spanish where practical, while
+  preserving exact API names, file paths, commands, flags, and other
+  technical strings verbatim — never translated, never paraphrased.
+- Applying this does not require translating existing English
+  comments/docs wholesale. Convert a file's comments when that file is
+  materially touched for other reasons; don't open unrelated,
+  untouched files just to translate them.
+- Every final block report must include the complete
+  `tools/stats_loc.py` breakdown, not a subset: Application, Tooling,
+  Tests, CODE TOTAL, Editorial/data, Documentation, RELEVANT TOTAL,
+  Delta CODE TOTAL, Delta RELEVANT TOTAL.
+
+## 18. Documentation map
 
 | File | Purpose |
 |---|---|
@@ -269,3 +296,5 @@ asked for is itself a form of scope creep.
 | `docs/PERFORMANCE_BUDGETS.md` | Resource budgets and how they're measured. |
 | `docs/PRIVACY_SECURITY.md` | What we access, what we never access. |
 | `docs/PET_CONTENT_SPEC.md` | Data contract for a Nimvlet's content. |
+| `docs/ANIMATION_RUNTIME.md` | Content model, pack format, and animation/scheduler design (Block 02). |
+| `docs/PERSISTENCE.md` | Local state model, storage format, and write policy (Block 03). |
