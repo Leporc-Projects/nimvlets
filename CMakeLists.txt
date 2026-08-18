@@ -50,10 +50,22 @@ add_subdirectory(src/catalog)
 add_subdirectory(src/persistence)
 add_subdirectory(src/graphics)
 
+# nimvlets_platform_policy es lógica pura (sin SDL) y se compila en
+# cualquier OS -- a diferencia de los tres adapters de abajo, uno de
+# los cuales se agrega según CMAKE_SYSTEM_NAME -- ver
+# src/platform/CMakeLists.txt y src/platform/LinuxBackendPolicy.h.
+add_subdirectory(src/platform)
+
 if(APPLE)
   add_subdirectory(src/platform/macos)
 elseif(WIN32)
   add_subdirectory(src/platform/windows)
+elseif(UNIX)
+  # UNIX-no-Apple en este proyecto significa Linux x86_64 (único
+  # target Linux en alcance -- ver docs/LINUX_PLATFORM.md); `elseif`
+  # simple en vez de comparar CMAKE_SYSTEM_NAME porque WIN32/APPLE ya
+  # se descartaron arriba.
+  add_subdirectory(src/platform/linux)
 endif()
 
 add_subdirectory(src/app)

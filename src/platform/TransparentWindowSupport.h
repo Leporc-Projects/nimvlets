@@ -3,8 +3,9 @@
 // Shared declaration for the platform adapter seam described in
 // AGENTS.md ("core compartido y platform adapters, no dos codebases").
 //
-// Exactly one of src/platform/macos/TransparentWindowSupport.mm or
-// src/platform/windows/TransparentWindowSupport.cpp is compiled into any
+// Exactly one of src/platform/macos/TransparentWindowSupport.mm,
+// src/platform/windows/TransparentWindowSupport.cpp, or
+// src/platform/linux/TransparentWindowSupport.cpp is compiled into any
 // given build (selected in the root CMakeLists.txt by CMAKE_SYSTEM_NAME),
 // so src/app never contains an #ifdef for this.
 
@@ -73,5 +74,37 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough);
 //   using SetWindowClickThrough() above instead until this is verified
 //   on real hardware.
 bool NativeShapeHitTestIsRenderSafe();
+
+// True if it's worth running the poll-driven click-through fallback
+// (src/app/SpikeApp.cpp's hoverScheduler_ / PollHover() /
+// UpdateClickThrough(), which calls SetWindowClickThrough() above) on
+// this platform. Only ever consulted when NativeShapeHitTestIsRenderSafe()
+// is false — irrelevant otherwise, since that fallback isn't used at
+// all when the native shape path is render-safe.
+//
+// This exists because "no native shape path" and "poll-driven
+// click-through would actually work" turned out NOT to always be the
+// same fact once Linux (Block 04.1) added a third platform: on
+// Windows they coincide (no shape path, but the poll fallback does
+// work — WS_EX_TRANSPARENT genuinely changes OS-level click delivery),
+// but on Linux/Wayland neither the native shape path NOR the poll
+// fallback can do anything (see
+// src/platform/linux/TransparentWindowSupport.cpp and
+// docs/LINUX_PLATFORM.md for the pinned-SDL3-source evidence). Running
+// a ~60Hz wakeup loop forever, knowing in advance it can never change
+// anything, would be exactly the kind of permanent polling loop
+// AGENTS.md §2 ("event-driven scheduling") and this block's brief §8
+// forbid — so this function lets src/app skip starting that loop at
+// all on a platform where it would be pointless, without src/app ever
+// needing to know *why* per-platform.
+//
+// - macOS: never actually consulted (NativeShapeHitTestIsRenderSafe()
+//   is already true there), returns false for documentation purposes.
+// - Windows: true — same poll-driven mechanism this project has always
+//   used there.
+// - Linux/X11: never actually consulted (native shape path is
+//   render-safe there too — see the Linux adapter).
+// - Linux/Wayland: false — see docs/LINUX_PLATFORM.md.
+bool ClickThroughPollingIsMeaningful();
 
 }  // namespace nimvlets::platform

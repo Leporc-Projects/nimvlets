@@ -78,6 +78,17 @@ bool NativeShapeHitTestIsRenderSafe() {
     return false;
 }
 
+bool ClickThroughPollingIsMeaningful() {
+    // True: SetWindowClickThrough() above (WS_EX_TRANSPARENT) is a
+    // real, working mechanism here — this is the platform this
+    // fallback was built for (see its doc comment in
+    // platform/TransparentWindowSupport.h). Added in Block 04.1 when
+    // Linux/Wayland needed a way to say "false" for the same question
+    // (see src/platform/linux/TransparentWindowSupport.cpp) without
+    // changing Windows' own behavior at all.
+    return true;
+}
+
 #else
 
 // This translation unit is only ever added to the build when
@@ -87,6 +98,7 @@ bool NativeShapeHitTestIsRenderSafe() {
 void ConfigureCompanionWindow(SDL_Window*) {}
 bool SetWindowClickThrough(SDL_Window*, bool clickThrough) { return clickThrough; }
 bool NativeShapeHitTestIsRenderSafe() { return false; }
+bool ClickThroughPollingIsMeaningful() { return false; }
 
 #endif
 

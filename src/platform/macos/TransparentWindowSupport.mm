@@ -93,4 +93,12 @@ bool NativeShapeHitTestIsRenderSafe() {
     return true;
 }
 
+bool ClickThroughPollingIsMeaningful() {
+    // Nunca se consulta en la práctica -- NativeShapeHitTestIsRenderSafe()
+    // ya es true en macOS, así que SpikeApp jamás entra a la rama de
+    // polling. Retorna false por documentación/consistencia, no
+    // porque se haya medido nada acá.
+    return false;
+}
+
 }  // namespace nimvlets::platform
