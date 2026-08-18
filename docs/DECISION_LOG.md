@@ -708,3 +708,108 @@ ejecuta sus intentos sincrónicamente, una sola vez, antes del loop
 principal — nunca agrega un timer ni un tick recurrente al scheduler
 del event loop, preservando "sin polling" (block brief §5) incluso
 cuando está activo.
+
+### DEC-033 — Linux: transparencia/always-on-top/not-focusable no necesitan código nativo
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §3.1.
+
+Antes de escribir cualquier código Xlib/Wayland, se leyó directamente
+la fuente pineada de SDL 3.4.12 (bajo `_deps/sdl3-src/`, mismo método
+que Block 01 usó para macOS). Hallazgo: tanto `X11_CreateWindow` como
+el manejo de `SDL_WINDOW_TRANSPARENT` de Wayland
+(`SetSurfaceOpaqueRegion`) ya aplican transparencia real sin ningún
+llamado adicional; `X11_CreateWindow` también aplica
+`SDL_WINDOW_ALWAYS_ON_TOP` y traduce `SDL_WINDOW_NOT_FOCUSABLE` a WM
+hints ICCCM estándar directamente. Conclusión: `ConfigureCompanionWindow()`
+en Linux no necesita ningún llamado nativo para estos tres requisitos
+-- a diferencia de macOS (necesitó `NSWindow.opaque`/`hasShadow`/etc.
+explícitos) y Windows (`WS_EX_LAYERED`/`HWND_TOPMOST` explícitos).
+
+### DEC-034 — X11 reutiliza el mecanismo de shape de macOS; Wayland no tiene ninguno con la SDL pineada
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §3.2.
+
+`device->UpdateWindowShape` (el puntero de función que
+`SDL_SetWindowShape()` despacha) está wireado a
+`X11_UpdateWindowShape` (`src/video/x11/SDL_x11shape.c`, usa
+`XShapeCombineMask`/`Region` con `ShapeInput` -- solo hit-testing,
+nunca compone pixeles renderizados) pero **nunca** se asigna para el
+driver Wayland en absoluto -- no existe ningún `SDL_waylandshape.c` en
+el árbol fuente. X11 pasa a usar el mismo tier que macOS
+(`NativeShapeHitTestIsRenderSafe() == true`, event-driven, sin
+polling). Wayland queda en `false`, y además se determinó que ningún
+mecanismo de polling alternativo serviría ahí tampoco -- ver DEC-035.
+
+### DEC-035 — `ClickThroughPollingIsMeaningful()`: nueva función del seam compartido
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §4.
+
+Antes de este bloque, `usingNativeShapeHitTest_` (un solo booleano)
+alcanzaba para decidir "shape nativo vs. polling" porque, con solo
+macOS/Windows, "sin shape nativo" y "el polling funcionaría" siempre
+coincidían. La investigación de Wayland (DEC-034) encontró dos hechos
+adicionales de la fuente pineada que rompen esa coincidencia:
+`Wayland_GetGlobalMouseState()` solo retorna una posición útil con
+foco propio, y no existe ninguna forma pública de restringir la input
+region de una superficie (`wl_surface_set_input_region` es interno,
+sin `wl_compositor` expuesto) -- ningún polling podría cambiar el
+click-through ahí. Se agregó `platform::ClickThroughPollingIsMeaningful()`
+al header compartido (con implementaciones triviales y correctas en
+macOS/Windows también, documentadas explícitamente como "nunca
+consultadas en la práctica" ahí) y un nuevo miembro
+`usingPollDrivenClickThrough_` en `SpikeApp` que reemplaza los dos
+sitios de `Run()` que antes chequeaban `!usingNativeShapeHitTest_`
+directamente. Sin este cambio, Linux/Wayland heredaría un loop de
+polling ~60Hz permanente y comprobadamente inútil -- exactamente lo
+que el brief §8 y AGENTS.md §2 prohíben.
+
+### DEC-036 — Wayland: sin hack de posicionamiento; SpikeApp ahora chequea el retorno de SDL_SetWindowPosition
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §3.3/§6.
+
+`Wayland_SetWindowPosition()` retorna literalmente
+`SDL_SetError("wayland cannot position non-popup windows")` para
+cualquier toplevel normal -- una limitación del protocolo `xdg-shell`
+en sí, no de SDL ni de este proyecto. Se decidió explícitamente NO
+implementar ningún protocolo específico de compositor para forzar
+esto (el brief lo prohíbe: "do not implement compositor-specific hacks
+merely to force absolute positioning"). En cambio, `SpikeApp::Init()`
+ahora chequea el valor de retorno real de `SDL_SetWindowPosition()`
+(antes de este bloque no se chequeaba en ninguna plataforma) y loguea
+explícitamente cuándo no pudo aplicar una posición guardada, citando
+`SDL_GetError()` -- genérico, sin ningún `#ifdef` de plataforma;
+`appState_.lastWindowPosition` se sigue guardando y preservando igual
+en cualquier backend.
+
+### DEC-037 — Opciones de CMake de SDL3 para Linux: mínimas a propósito, con riesgo de FATAL_ERROR si no
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §2.
+
+`SDL_missing_dependency()` (`cmake/macros.cmake` en la fuente pineada)
+hace `FATAL_ERROR` -- no un warning silencioso -- en Linux cuando una
+sub-feature X11 que SDL deja en ON por defecto no encuentra su paquete
+de desarrollo. En vez de instalar en CI el listado "todas las
+features" que `docs/README-linux.md` de SDL documenta,
+`cmake/FetchSDL3.cmake` apaga explícitamente lo que este proyecto no
+usa (Xcursor/Xdbe/Xfixes/Xscrnsaver/Xsync/Xtest, `SDL_WAYLAND_LIBDECOR`
+-- nuestra ventana siempre es `SDL_WINDOW_BORDERLESS`, así que la ruta
+de decoración cliente-side de Wayland nunca se selecciona) y mantiene
+solo XShape (mecanismo de click-through, DEC-034), XInput2 (ruta de
+entrada moderna, no verificable sin hardware real así que se prefirió
+el default documentado de SDL en vez de apostar a que el protocolo
+core alcanza) y XRandr (consulta de escala/DPI precisa).
+
+### DEC-038 — CI de Linux: smoke de X11 bloqueante, smoke de Wayland intento real pero no bloqueante
+**Status:** DECIDIDO · Block 04.1 — ver `docs/LINUX_PLATFORM.md` §9.
+
+El brief §6 pide explícitamente smoke no interactivo de X11 bajo Xvfb
+sin condicionales, pero para Wayland permite documentar la brecha en
+vez de fingir un PASS si la validación headless no es confiable. Este
+bloque se corrió enteramente en un host macOS sin forma de ejecutar
+(`push` está prohibido para esta sesión) el workflow y observar si
+Weston headless (`--backend=headless-backend.so`) de verdad levanta en
+el runner `ubuntu-24.04` real -- hay fricciones conocidas en el
+ecosistema con `XDG_RUNTIME_DIR`/D-Bus/logind en imágenes CI mínimas
+que no se pudieron descartar sin poder correr esto. Se decidió: paso
+de X11 bloqueante (Xvfb+X11+SDL es un patrón de CI extremadamente
+estándar, riesgo bajo); paso de Wayland con `continue-on-error: true`
+más un intento real (no un placeholder), imprimiendo explícitamente
+`PASS`/`INCONCLUSIVE/FAIL` en el log en vez de forzar verde. El
+build/código Wayland en sí (`SDL_WAYLAND=ON`, la rama Wayland del
+adapter) queda completo y testeado independientemente del resultado de
+ese paso.

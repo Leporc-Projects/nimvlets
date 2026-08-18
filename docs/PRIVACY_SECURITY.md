@@ -96,3 +96,31 @@ para este documento específicamente:
   `SDL_GetPrefPath()`; el override `NIMVLETS_DEV_APPDATA_DIR` usado
   para testing es una variable de entorno, nunca una ruta literal en el
   código fuente.
+
+## F. Linux (Block 04.1)
+
+Ver `docs/LINUX_PLATFORM.md` para el diseño completo. Relevante para
+este documento específicamente: el soporte de Linux no requiere
+**ninguno** de los permisos que este documento ya prohíbe en general
+(§C) -- confirmado explícitamente para X11 y Wayland, no solo asumido
+por herencia de las reglas de arriba:
+
+- **Sin captura de pantalla.** Ninguna extensión X11 usada
+  (XShape/XInput2/XRandr, ver `docs/LINUX_PLATFORM.md` §2) lee
+  pixeles de otras ventanas ni de la pantalla; son extensiones
+  ordinarias de hit-testing/input/consulta de modo de video, sin
+  diálogo de permiso alguno en ningún escritorio Linux estándar.
+- **Sin Accessibility/Input Monitoring equivalentes.** X11 no tiene
+  ningún concepto de permiso análogo a los de macOS para lo que este
+  bloque usa; Wayland es, si acaso, *más* restrictivo por diseño de
+  protocolo (de ahí que ciertas cosas -- always-on-top, restauración
+  de posición, click-through real -- ni siquiera sean posibles para
+  ninguna app, con o sin permiso -- ver `docs/LINUX_PLATFORM.md` §6).
+- **Sin root/admin.** Xvfb y Weston (usados en el smoke de CI, ver
+  `docs/LINUX_PLATFORM.md` §9) corren sin privilegios elevados; nada
+  en `src/platform/linux/` ni en `cmake/FetchSDL3.cmake` requiere
+  `sudo` en tiempo de ejecución (solo la instalación de paquetes apt en
+  CI, que es responsabilidad del runner, no de la app).
+- **Sin red/telemetría en runtime**, igual que en toda otra
+  plataforma -- grep-verificable en `src/platform/linux/` igual que en
+  el resto de `src/` (§C de este documento).

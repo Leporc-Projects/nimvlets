@@ -55,10 +55,15 @@ src/core       <- pure C++20, no SDL, no platform headers. Testable in
 src/graphics   <- SDL-aware rendering. Depends on core. No platform
                    (AppKit/Win32) headers.
 src/platform/* <- native OS glue (Objective-C++ on macOS, Win32 on
-                   Windows), behind a small shared header
+                   Windows, X11/Wayland detection on Linux), behind a
+                   small shared header
                    (src/platform/TransparentWindowSupport.h). Depends on
                    core + SDL. Nothing outside src/platform/* includes
-                   AppKit or <windows.h>.
+                   AppKit or <windows.h>. src/platform/LinuxBackendPolicy.h
+                   is the one exception to "one adapter dir per OS": it's
+                   pure X11-vs-Wayland capability logic with no SDL/X11/
+                   Wayland headers of its own, so it's built and tested
+                   on every host — see docs/LINUX_PLATFORM.md §4.
 src/app        <- the executable: owns the window/event loop, wires
                    core + graphics + platform together.
 ```
@@ -85,13 +90,25 @@ see `.gitignore`.
   SDL3's cross-platform API can't do the job (documented per-case in
   `docs/PLATFORM_SPIKE.md`).
 - Win32 only behind `src/platform/windows/`.
+- X11/Wayland-specific code only behind `src/platform/linux/`, detected
+  at runtime via `SDL_GetCurrentVideoDriver()` — never force one
+  backend globally. Only add native X11/Wayland code where reading the
+  pinned SDL3 source first showed SDL's cross-platform API genuinely
+  insufficient — see `docs/LINUX_PLATFORM.md` §3 for the methodology
+  and its findings.
 - Never claim a platform behavior (transparency, hit-testing, focus,
   drag, always-on-top, GUI runtime in general) is verified unless it was
   actually run on that OS. `docs/PLATFORM_SPIKE.md` tracks PASS / FAIL /
   PARTIAL / NOT TESTED per item, per platform — CI compiling something
-  is not the same claim as a human having watched it run.
-- macOS supports both Apple Silicon and Intel (`universal2`); Linux is
-  out of scope for v1.
+  is not the same claim as a human having watched it run. Do not claim
+  parity where the window system itself imposes a limitation (e.g.
+  Wayland's `xdg-shell` has no client-requestable always-on-top or
+  absolute toplevel positioning — see `docs/LINUX_PLATFORM.md` §6);
+  document the limitation instead of hacking around it.
+- macOS supports both Apple Silicon and Intel (`universal2`). Linux
+  x86_64 (X11 and Wayland) is supported since Block 04.1 — see
+  `docs/LINUX_PLATFORM.md`; other Linux architectures and
+  packaging/distribution formats remain out of scope.
 
 ## 5. Privacy & security
 
@@ -126,7 +143,7 @@ automatically (pinned version — see §9).
 
 ```bash
 # Configure + build (pick the preset for your platform)
-cmake --preset macos-debug            # or macos-release, windows-debug, windows-release
+cmake --preset macos-debug            # or macos-release, windows-debug, windows-release, linux-debug, linux-release
 cmake --build --preset macos-debug
 
 # macOS universal2 (arm64 + x86_64)
@@ -299,3 +316,4 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/ANIMATION_RUNTIME.md` | Content model, pack format, and animation/scheduler design (Block 02). |
 | `docs/PERSISTENCE.md` | Local state model, storage format, and write policy (Block 03). |
 | `docs/CATALOG.md` | Pet identity, catalog format, and runtime switching design (Block 04). |
+| `docs/LINUX_PLATFORM.md` | Linux (X11/Wayland) build, platform adapter, and CI smoke design (Block 04.1). |

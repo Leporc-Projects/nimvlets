@@ -115,3 +115,21 @@ con lo esperado: nada se acumula por switch. CPU se mantuvo en 0.0%
 en ambos escenarios una vez completada la ráfaga (el trabajo real de
 cada switch — leer un archivo pequeño, crear/destruir una textura — es
 demasiado breve para registrarse en una muestra de `ps`).
+
+## Linux (Block 04.1)
+
+Sin números reales todavía. `.github/workflows/ci.yml`'s `linux-x64`
+job captura una muestra de `ps -o pid,rss,%cpu,%mem` durante su smoke
+X11 (ver `docs/LINUX_PLATFORM.md` §10) — pero como este bloque no pudo
+ejecutar (`push`/`publish` prohibidos para esta sesión, ver AGENTS.md
+§15) ese workflow, no existe ninguna medición real de Linux para
+reportar acá todavía; los primeros números existirán recién después de
+que ese job corra post-integración. Como con cualquier medición de
+CI-VM (ver "Methodology rules" arriba), esos números **nunca**
+establecerán un presupuesto final por sí solos — solo confirman ausencia
+de regresiones obvias (leaks, busy-wait) en ese entorno específico.
+Sin cambios de arquitectura esperados en el CPU/RSS de Linux: mismo
+event loop deadline-driven que macOS/Windows, sin ningún polling nuevo
+en X11 (mismo mecanismo event-driven que macOS) ni en Wayland
+(`usingPollDrivenClickThrough_` es `false` ahí específicamente para
+evitar un loop inútil — ver `docs/LINUX_PLATFORM.md` §4).

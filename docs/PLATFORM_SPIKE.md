@@ -19,6 +19,16 @@ with a deadline-driven scheduler that lets static idle stop rendering
 entirely; see `docs/ANIMATION_RUNTIME.md` §6 and
 `docs/PERFORMANCE_BUDGETS.md` for the current numbers.
 
+**Scope note (Block 04.1):** this document remains macOS/Windows-only
+below — Linux's own QA plan, results (source-inspection-based, since no
+Linux machine was available this block), and open gaps live entirely in
+the new `docs/LINUX_PLATFORM.md` instead of being folded in here. Ítem
+por ítem, Linux/X11 alcanza el mismo nivel que la fila de macOS de
+abajo (mismo mecanismo `SDL_SetWindowShape`, confirmado por lectura de
+la fuente pineada — ver `docs/LINUX_PLATFORM.md` §3.2/§5); Linux/Wayland
+tiene limitaciones reales del protocolo (`xdg-shell`) documentadas ahí
+mismo, no acá.
+
 ## 1. What was evaluated
 
 `SDL_SetWindowShape()` was evaluated first, as the block brief

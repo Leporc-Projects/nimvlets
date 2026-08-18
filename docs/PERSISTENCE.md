@@ -45,10 +45,16 @@ por usuario. Crea el directorio ella misma si hace falta y retorna:
 
 - macOS: `~/Library/Application Support/Leporc Projects/Nimvlets/`
 - Windows: `%APPDATA%\Leporc Projects\Nimvlets\`
+- Linux (verificado en Block 04.1, no reimplementado — ver
+  `docs/LINUX_PLATFORM.md` §7): `~/.local/share/Leporc Projects/Nimvlets/`
+  (basado en `$XDG_DATA_HOME`, el mecanismo estándar de Linux para
+  datos de usuario por app), tanto en X11 como en Wayland — la
+  resolución de `SDL_GetPrefPath()` no depende del backend de video.
 
 No hizo falta código específico de plataforma para esto (a diferencia
 de la transparencia/click-through de ventana) — SDL ya lo abstrae por
-completo, así que `src/platform/*` queda intacto en este bloque.
+completo, así que `src/platform/*` queda intacto en este bloque (y en
+Block 04.1: el adapter Linux nuevo tampoco toca nada de persistencia).
 
 **Override solo-DEV:** `NIMVLETS_DEV_APPDATA_DIR`, verificado antes de
 llamar a `SDL_GetPrefPath()`. Si se setea a una ruta no vacía, esa ruta
@@ -218,6 +224,15 @@ ventana guardada se restaura exactamente como se guardó, aunque la
 configuración de pantalla haya cambiado desde entonces (se desconectó
 un monitor, cambió la resolución). No se intenta en este bloque — ver
 las limitaciones del informe de Block 03.
+
+**Linux/Wayland (Block 04.1) no puede aplicar la posición guardada en
+absoluto** — no es una limitación de validación de límites, es que el
+protocolo `xdg-shell` no tiene ningún mecanismo para que un cliente
+pida una posición absoluta para una toplevel normal (ver
+`docs/LINUX_PLATFORM.md` §3.3/§6). La coordenada se guarda y se
+preserva igual que en cualquier otra plataforma — `SpikeApp::Init()`
+solo deja de poder *aplicarla* ahí, y lo loguea explícitamente en vez
+de fallar en silencio.
 
 ## 8. Testeabilidad
 
