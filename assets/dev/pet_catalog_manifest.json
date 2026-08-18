@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "pet_id": "bunny_dev",
+      "variant_id": "",
+      "display_name": "Bunny (dev fixture)",
+      "pack_path": "assets/dev/bunny_pack.nvpack",
+      "is_default": true
+    }
+  ]
+}
