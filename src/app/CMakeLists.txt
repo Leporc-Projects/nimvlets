@@ -9,9 +9,12 @@ target_include_directories(nimvlets_spike PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # nimvlets_core and SDL3::SDL3 are already PUBLIC dependencies of
 # nimvlets_graphics (and of the platform adapter below), so they reach
 # this target transitively — linking them again here would just produce
-# harmless-but-noisy "duplicate library" warnings.
+# harmless-but-noisy "duplicate library" warnings. nimvlets_persistence
+# has no such transitive path (it depends on nothing project-specific —
+# see src/persistence/CMakeLists.txt), so it's linked explicitly here.
 target_link_libraries(nimvlets_spike PRIVATE
   nimvlets_graphics
+  nimvlets_persistence
   nimvlets_warnings
 )
 

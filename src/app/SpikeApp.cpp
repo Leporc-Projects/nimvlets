@@ -9,6 +9,7 @@
 #include <cmath>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 
 namespace nimvlets::app {
 
@@ -25,6 +26,25 @@ constexpr const char* kPetPackPath = "assets/dev/bunny_pack.nvpack";
 // Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS — see
 // SpikeApp::ComputeEffectivePassiveIntervalSeconds()'s doc comment.
 constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS";
+
+// Identifies the per-user app-data directory SDL_GetPrefPath()
+// resolves (see docs/PERSISTENCE.md, "storage location policy"). "org"
+// matches AGENTS.md's "built by Leporc Projects"; both strings contain
+// only letters/spaces per SDL_GetPrefPath()'s own documented naming
+// rules, and — per that same documentation — must never change once
+// chosen, since they become part of the on-disk path.
+constexpr const char* kPrefPathOrg = "Leporc Projects";
+constexpr const char* kPrefPathApp = "Nimvlets";
+
+// DEV-only override for the persistence directory, mirroring
+// NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS's pattern (Block 02): when set
+// to a non-empty path, that path is used *instead of*
+// SDL_GetPrefPath() for this run only — production behavior (the
+// unset case) is completely unchanged. This is what lets manual QA
+// and automated smoke tests exercise the real save/load path against
+// an isolated temp directory instead of the real per-user app-data
+// location — see docs/PERSISTENCE.md.
+constexpr const char* kDevAppDataDirEnvVar = "NIMVLETS_DEV_APPDATA_DIR";
 
 // signal-safe: only ever written by the signal handler and read by the
 // main loop, both via std::atomic. No allocation or cleanup happens
@@ -169,6 +189,60 @@ bool SpikeApp::Init() {
         return false;
     }
 
+    // Resolve the per-user app-data directory and load any existing
+    // save (see docs/PERSISTENCE.md). Unlike the pet pack above, a
+    // failure here is NOT fatal: persistence is not required for the
+    // app to be visually/interactively functional, so this only
+    // disables load/save for the session rather than aborting startup.
+    std::string appDataDir;
+    if (const char* devDir = std::getenv(kDevAppDataDirEnvVar); devDir != nullptr && devDir[0] != '\0') {
+        std::error_code ec;
+        std::filesystem::create_directories(devDir, ec);
+        if (ec) {
+            SDL_Log(
+                "nimvlets: could not create DEV app-data dir '%s' (%s) -- persistence disabled for this run",
+                devDir, ec.message().c_str());
+        } else {
+            appDataDir = devDir;
+            SDL_Log(
+                "nimvlets: DEV override active — %s='%s' (production uses SDL_GetPrefPath instead)",
+                kDevAppDataDirEnvVar, devDir);
+        }
+    } else {
+        // SDL_GetPrefPath() creates the directory itself if needed and
+        // returns an absolute, always-freeable string — see its doc
+        // comment in <SDL3/SDL_filesystem.h>.
+        char* prefPathRaw = SDL_GetPrefPath(kPrefPathOrg, kPrefPathApp);
+        if (prefPathRaw != nullptr) {
+            appDataDir = prefPathRaw;
+            SDL_free(prefPathRaw);
+        } else {
+            SDL_Log("nimvlets: SDL_GetPrefPath failed: %s -- persistence disabled for this run", SDL_GetError());
+        }
+    }
+
+    if (!appDataDir.empty()) {
+        appStateStore_.emplace(appDataDir);
+
+        std::string loadWarning;
+        appState_ = appStateStore_->Load(&loadWarning);
+        if (!loadWarning.empty()) {
+            SDL_Log("nimvlets: %s", loadWarning.c_str());
+        }
+    }
+
+    // Keep the persisted active-pet id truthfully in sync with
+    // whichever pet actually loaded. This block implements no
+    // selection logic — exactly one pack always loads, unconditionally
+    // — so the two are always the same pet; the field should still
+    // reflect reality (a real, meaningful value a future block's
+    // selection UI could read) rather than sit stale or empty. See
+    // docs/PERSISTENCE.md.
+    if (appState_.activePetId != pet_.id) {
+        appState_.activePetId = pet_.id;
+        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    }
+
     const SDL_WindowFlags flags =
         SDL_WINDOW_TRANSPARENT |
         SDL_WINDOW_BORDERLESS |
@@ -187,7 +261,17 @@ bool SpikeApp::Init() {
         return false;
     }
 
-    SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    // Reopen where the user last left it (see docs/PERSISTENCE.md,
+    // "last window position") if a drag was ever persisted; otherwise
+    // fall back to the original centered-on-launch default. A saved
+    // position is used exactly as stored — no off-screen/monitor-
+    // bounds validation is attempted in this block (see the Block 03
+    // report's "limitations").
+    if (appState_.lastWindowPosition.has_value()) {
+        SDL_SetWindowPosition(window_, appState_.lastWindowPosition->x, appState_.lastWindowPosition->y);
+    } else {
+        SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
 
     renderer_ = SDL_CreateRenderer(window_, nullptr);
     if (renderer_ == nullptr) {
@@ -265,14 +349,35 @@ bool SpikeApp::Init() {
     SDL_Log(
         "nimvlets: pet '%s' (%s) ready — %dx%d canvas, alpha hit threshold=%d/255, "
         "passive action every ~%.0fs. Click the shape; drag to move; close the window to quit. "
-        "Clicks are counted in-memory only (stdout log), not persisted.",
+        "Click balance: %llu (%s).",
         pet_.id.c_str(), pet_.displayName.c_str(), pet_.canvasWidth, pet_.canvasHeight,
-        static_cast<int>(pet_.alphaHitThreshold), passiveIntervalSecondsEffective_);
+        static_cast<int>(pet_.alphaHitThreshold), passiveIntervalSecondsEffective_,
+        static_cast<unsigned long long>(appState_.clickBalance),
+        appStateStore_.has_value() ? "persisted locally" : "persistence unavailable this run");
 
     return true;
 }
 
+void SpikeApp::FlushPersistedState() {
+    if (!appStateStore_.has_value() || !persistenceScheduler_.IsDirty()) {
+        return;
+    }
+    std::string error;
+    if (appStateStore_->Save(appState_, error)) {
+        persistenceScheduler_.OnFlushSucceeded();
+    } else {
+        SDL_Log("nimvlets: failed to save app state: %s", error.c_str());
+        persistenceScheduler_.OnFlushFailed(static_cast<double>(SDL_GetTicks()));
+    }
+}
+
 void SpikeApp::Shutdown() {
+    // Flush first, before tearing down anything else — see
+    // FlushPersistedState()'s doc comment: clean shutdown always
+    // writes whatever's still dirty, regardless of the debounce
+    // deadline.
+    FlushPersistedState();
+
     ReleaseAllTextures();
     if (renderer_ != nullptr) {
         SDL_DestroyRenderer(renderer_);
@@ -282,7 +387,9 @@ void SpikeApp::Shutdown() {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
     }
-    SDL_Log("nimvlets: clean shutdown, %d click(s) recorded this session", clickCount_);
+    SDL_Log(
+        "nimvlets: clean shutdown, %d click(s) this session, click balance %llu",
+        clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
     SDL_Quit();
 }
 
@@ -496,6 +603,7 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 static_cast<double>(event.button.y),
             };
             const core::PointerGesture gesture = dragClassifier_.End(localEnd);
+            const double nowMs = static_cast<double>(SDL_GetTicks());
             if (gesture == core::PointerGesture::kClick) {
                 // Click counting is unconditional and entirely separate
                 // from the visual reaction: it always increments, even
@@ -504,13 +612,28 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 // *animation* state (see AnimationController's doc
                 // comment). Repeated clicks during an active reaction
                 // count but never restart the visual.
+                //
+                // clickCount_ (this session only) and
+                // appState_.clickBalance (persisted, cumulative across
+                // sessions — see docs/PERSISTENCE.md) are deliberately
+                // two separate counters, not one repurposed field: one
+                // is a diagnostic, the other is the actual product
+                // currency (see AGENTS.md §2).
                 ++clickCount_;
-                const double nowMs = static_cast<double>(SDL_GetTicks());
+                ++appState_.clickBalance;
+                persistenceScheduler_.MarkDirty(nowMs);
                 animController_->TriggerClick(nowMs);
                 needsRedraw_ = true;
-                SDL_Log("nimvlets: click #%d (in-memory only, not persisted)", clickCount_);
+                SDL_Log(
+                    "nimvlets: click #%d this session (balance: %llu)",
+                    clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
             } else {
-                SDL_Log("nimvlets: drag ended (correctly not counted as a click)");
+                int endX = 0;
+                int endY = 0;
+                SDL_GetWindowPosition(window_, &endX, &endY);
+                appState_.lastWindowPosition = persistence::WindowPosition{endX, endY};
+                persistenceScheduler_.MarkDirty(nowMs);
+                SDL_Log("nimvlets: drag ended at (%d, %d) (correctly not counted as a click)", endX, endY);
             }
             break;
         }
@@ -532,23 +655,33 @@ int SpikeApp::Run() {
     while (running && !ShutdownRequested()) {
         const double nowMs = static_cast<double>(SDL_GetTicks());
 
-        // The wait is always bounded by the passive-action deadline (at
-        // most ~300s away by default), then tightened by whichever of
-        // the animation's own next-frame deadline (nullopt while idle is
-        // static — see AnimationController::NextFrameDeadlineMs()) and
-        // the Windows-fallback hover-poll schedule are actually in play.
-        // A truly static idle with a distant passive deadline can block
-        // here for minutes at a stretch: this is the mechanism behind
-        // Block 02's static-idle CPU improvement over Block 01's fixed
-        // ~12fps tick — see docs/ANIMATION_RUNTIME.md and
-        // docs/PERFORMANCE_BUDGETS.md. Real input events (including the
-        // mouse-moved events SDL's own Cocoa backend needs to keep
-        // click-through correct) wake SDL_WaitEventTimeout immediately
-        // regardless of how long this timeout is; the timeout only
-        // bounds how long *we* block when nothing happens.
+        // The wait is bounded by the passive-action deadline (at most
+        // ~300s away by default), then tightened by whichever of the
+        // animation's own next-frame deadline (nullopt while idle is
+        // static — see AnimationController::NextFrameDeadlineMs()), the
+        // pending-persistence-flush deadline (nullopt unless something
+        // is actually dirty — see persistence::PersistenceScheduler and
+        // docs/PERSISTENCE.md), and the Windows-fallback hover-poll
+        // schedule are actually in play — then capped at kMaxWaitMs
+        // below purely for shutdown-signal responsiveness (see its own
+        // comment). A truly static idle with nothing pending to save
+        // still does zero redraw/hit-mask/disk work between wakes: this
+        // is the mechanism behind Block 02's static-idle CPU
+        // improvement over Block 01's fixed ~12fps tick — see
+        // docs/ANIMATION_RUNTIME.md and docs/PERFORMANCE_BUDGETS.md —
+        // and Block 03's persistence deadline reuses the exact same
+        // mechanism rather than adding any polling of its own. Real
+        // input events (including the mouse-moved events SDL's own
+        // Cocoa backend needs to keep click-through correct) wake
+        // SDL_WaitEventTimeout immediately regardless of how long this
+        // timeout is; the timeout only bounds how long *we* block when
+        // nothing happens.
         double waitMs = nextPassiveDeadlineMs_ - nowMs;
         if (const std::optional<double> frameDeadline = animController_->NextFrameDeadlineMs()) {
             waitMs = std::min(waitMs, *frameDeadline - nowMs);
+        }
+        if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs()) {
+            waitMs = std::min(waitMs, *flushDeadline - nowMs);
         }
         if (!usingNativeShapeHitTest_) {
             waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
@@ -556,11 +689,24 @@ int SpikeApp::Run() {
         if (waitMs < 0.0) {
             waitMs = 0.0;
         }
-        // Defensive cap (well above any real deadline this app computes,
-        // including the default ~300s passive interval) so an
-        // unreasonable DEV override can't overflow the Sint32 timeout
-        // SDL_WaitEventTimeout takes.
-        waitMs = std::min(waitMs, 2'000'000'000.0);
+        // Capped so a pending SIGINT/SIGTERM is always noticed within
+        // about a second even during a truly static idle stretch with
+        // nothing else scheduled for minutes (see ShutdownRequested()'s
+        // doc comment and docs/PERSISTENCE.md's "shutdown responsiveness"
+        // note) — found by this block's own non-interactive smoke
+        // testing: a signal does not itself interrupt a blocking
+        // SDL_WaitEventTimeout on this platform, so without this cap
+        // the loop would only re-check ShutdownRequested() when the
+        // *real* next deadline (up to the ~300s passive interval) was
+        // finally reached. Waking once a second and doing nothing but
+        // re-check a few already-cheap conditions before going back to
+        // sleep is not the "no busy-wait"/"static-idle sleeping"
+        // regression this block is required to avoid — no redraw, no
+        // hit-mask rebuild, no disk I/O happens on a wake unless a real
+        // deadline actually arrived; see docs/PERFORMANCE_BUDGETS.md,
+        // which reconfirms idle CPU is unaffected by this cap.
+        constexpr double kMaxWaitMs = 1000.0;
+        waitMs = std::min(waitMs, kMaxWaitMs);
         const Sint32 timeoutMs = static_cast<Sint32>(waitMs);
 
         // Blocks (no busy-wait) until either a real input/window event
@@ -596,6 +742,11 @@ int SpikeApp::Run() {
                 needsRedraw_ = true;
             }
             nextPassiveDeadlineMs_ = afterMs + passiveIntervalSecondsEffective_ * 1000.0;
+        }
+
+        if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs();
+            flushDeadline && afterMs >= *flushDeadline) {
+            FlushPersistedState();
         }
 
         if (needsRedraw_) {

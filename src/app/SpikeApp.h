@@ -5,6 +5,9 @@
 #include "core/AlphaMask.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
+#include "persistence/AppState.h"
+#include "persistence/AppStateStore.h"
+#include "persistence/PersistenceScheduler.h"
 
 #include <SDL3/SDL.h>
 
@@ -13,14 +16,15 @@
 namespace nimvlets::app {
 
 // Owns the SDL window/renderer lifecycle and the main event loop for the
-// small, data-driven content+animation runtime built in Block 02 on top
-// of Block 01's platform-feasibility spike.
+// small, data-driven content+animation+persistence runtime built across
+// Block 01 (platform spike), Block 02 (content/animation), and Block 03
+// (local state persistence — see docs/PERSISTENCE.md).
 //
 // This is still explicitly a foundation/spike executable, not the
 // product — see docs/PLATFORM_SPIKE.md, docs/ANIMATION_RUNTIME.md, and
 // the block briefs' NON-SCOPE lists for what it deliberately does not do
-// (Shop, Collection, onboarding, persistence, audio, global click mode,
-// final content for all 8 Nimvlets, ...).
+// (Shop, Collection, onboarding, pet-selection UI, audio, global click
+// mode, final content for all 8 Nimvlets, ...).
 //
 // The one pet this runtime shows is entirely data (a compiled
 // content::PetDefinition loaded from a ".nvpack" file at startup, see
@@ -79,6 +83,16 @@ private:
     // docs/ANIMATION_RUNTIME.md, "DEV passive-interval override".
     double ComputeEffectivePassiveIntervalSeconds() const;
 
+    // Writes appState_ via appStateStore_ if — and only if —
+    // persistenceScheduler_ is currently dirty; a no-op otherwise, and
+    // a no-op if appStateStore_ was never initialized (see Init()'s
+    // doc comment on SDL_GetPrefPath() failure). Called both from the
+    // event loop when persistenceScheduler_'s deadline is reached and
+    // unconditionally from Shutdown() (clean shutdown always flushes
+    // whatever's still dirty, regardless of the debounce deadline —
+    // see docs/PERSISTENCE.md).
+    void FlushPersistedState();
+
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 
@@ -124,6 +138,26 @@ private:
     double passiveIntervalSecondsEffective_ = 300.0;
     double nextPassiveDeadlineMs_ = 0.0;
     std::size_t nextPassiveActionIndex_ = 0;
+
+    // --- Block 03: local persistence (see docs/PERSISTENCE.md) ---
+    // Loaded once in Init() (or left at safe defaults if no save
+    // exists yet, or the save can't be read) and mutated as the app
+    // runs; never re-read from disk until the *next* process start.
+    persistence::AppState appState_;
+
+    // Constructed in Init() once the per-user app-data directory is
+    // resolved via SDL_GetPrefPath(). std::nullopt only if that
+    // resolution fails (rare — e.g. an unwritable home directory); in
+    // that case the app runs completely normally, it just doesn't
+    // load or save anything this session — see Init()'s doc comment.
+    // std::optional rather than a plain member for the same reason as
+    // animController_ above: no path is known until Init() runs.
+    std::optional<persistence::AppStateStore> appStateStore_;
+
+    // Debounces disk writes so rapid clicks coalesce into one write
+    // instead of one per click — see docs/PERSISTENCE.md and
+    // FlushPersistedState()'s doc comment.
+    persistence::PersistenceScheduler persistenceScheduler_;
 
     // True once Init() has successfully handed hit-testing to the
     // platform's own native mechanism (SDL_SetWindowShape on macOS —
