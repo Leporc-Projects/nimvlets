@@ -5,6 +5,14 @@ name: CI
 # proves the code compiles and src/core's unit tests pass on that OS; it
 # says nothing about whether a real window ever renders correctly on a
 # real display. See AGENTS.md §4.
+#
+# Exception (Block 04.1): linux-x64 below also runs a real, non-
+# interactive GUI smoke — the app actually launches a window under
+# Xvfb (X11) / a headless Weston (Wayland attempt) and is asked to shut
+# down cleanly. This is still not the interactive manual QA
+# docs/PLATFORM_SPIKE.md tracks (no human ever watches a real click/
+# drag on Linux in this block — see docs/LINUX_PLATFORM.md), but it is
+# a step beyond the other three jobs' pure compile+unit-test scope.
 
 on:
   push:
@@ -54,6 +62,128 @@ jobs:
       # both slices, nothing about runtime behavior on either one.
       - name: Test (host-arch slice only — no display required)
         run: ctest --test-dir build/macos-universal2-release --output-on-failure
+
+  linux-x64:
+    name: Linux x86_64 (Ubuntu 24.04) — configure/build/test + GUI smoke
+    # Pinned to ubuntu-24.04, not ubuntu-latest, mirroring windows-x64's
+    # own precedent below (an exact runner image, not a moving target)
+    # — see docs/LINUX_PLATFORM.md for why Block 04.1 chose this image.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Solo lo que este proyecto realmente usa (SpikeApp solo llama
+      # SDL_Init(SDL_INIT_VIDEO) -- sin audio, sin joystick, sin
+      # haptics) — ver cmake/FetchSDL3.cmake y docs/LINUX_PLATFORM.md
+      # para por qué esta lista es más chica que el "todas las
+      # features" que docs/README-linux.md de SDL documenta. libx11-dev
+      # + libxext-dev (XShape -- el mecanismo real de click-through en
+      # X11) + libxi-dev (XInput2) + libxrandr-dev (consulta de
+      # escala/DPI) cubren X11; libwayland-dev + libwayland-bin
+      # (wayland-scanner) + libxkbcommon-dev cubren Wayland. Sin
+      # libgl1-mesa-dev/libegl1-mesa-dev a propósito: SDL_OPENGL es un
+      # feature "soft" en la fuente pineada (se desactiva solo si
+      # falta, nunca falla el configure) y Xvfb no tiene GPU real de
+      # todos modos, así que el renderer de software es lo que
+      # realmente corre acá.
+      - name: Install build dependencies (minimal X11 + Wayland set)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config \
+            libx11-dev libxext-dev libxi-dev libxrandr-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev
+
+      - name: Configure
+        run: cmake --preset linux-release
+
+      - name: Build
+        run: cmake --build --preset linux-release -j
+
+      - name: Test (src/core, src/persistence, src/catalog, src/platform unit tests — no display required)
+        run: ctest --preset linux-release --output-on-failure
+
+      # X11: requisito directo del brief de Block 04.1 §6 — smoke no
+      # interactivo bajo Xvfb, SDL_VIDEODRIVER=x11 explícito. Este paso
+      # SÍ bloquea el job (a diferencia del de Wayland más abajo):
+      # Xvfb+X11+SDL es un patrón de CI extremadamente estándar y bien
+      # probado en todo el ecosistema, sin la incertidumbre real que sí
+      # existe para un compositor Wayland headless (ver el paso
+      # siguiente).
+      - name: X11 GUI smoke (Xvfb, non-interactive)
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends xvfb
+          Xvfb :99 -screen 0 1280x800x24 &
+          XVFB_PID=$!
+          sleep 2
+          export DISPLAY=:99
+          export SDL_VIDEODRIVER=x11
+          export NIMVLETS_DEV_APPDATA_DIR="${RUNNER_TEMP}/nimvlets_x11_smoke"
+          export NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5
+          ./build/linux-release/src/app/nimvlets_spike > x11_smoke.log 2>&1 &
+          APP_PID=$!
+          sleep 2
+          # Medición de recursos best-effort para el brief §8 -- una
+          # sola muestra, explícitamente NO tratada como presupuesto
+          # final (ver docs/PERFORMANCE_BUDGETS.md: "no establecer
+          # presupuestos finales desde VMs de CI").
+          ps -o pid,rss,%cpu,%mem,comm -p "${APP_PID}" || true
+          sleep 1
+          kill -TERM "${APP_PID}"
+          wait "${APP_PID}" || true
+          kill "${XVFB_PID}" || true
+          cat x11_smoke.log
+          grep -q "click-through mechanism = native SDL_SetWindowShape" x11_smoke.log
+          grep -q "clean shutdown" x11_smoke.log
+
+      # Wayland: intento real, no un placeholder -- pero explícitamente
+      # NO bloqueante (continue-on-error), y por una razón concreta:
+      # este bloque se corrió enteramente en un host macOS sin forma de
+      # ejecutar este job y observar si Weston headless de verdad
+      # levanta en la imagen ubuntu-24.04 de GitHub Actions (requiere
+      # XDG_RUNTIME_DIR válido, y hay reportes conocidos en el
+      # ecosistema de fricción con D-Bus/logind en runners CI mínimos
+      # que no se pudieron descartar sin poder correr esto). El brief
+      # §6 es explícito: "if reliable headless Wayland runtime
+      # validation is not achievable, do not fake PASS; report the
+      # exact gap while keeping Wayland build/code support intact" — el
+      # build/código de Wayland SÍ está completo y testeado (ver
+      # SDL_WAYLAND=ON en cmake/FetchSDL3.cmake y la rama Wayland de
+      # src/platform/linux/TransparentWindowSupport.cpp); lo que este
+      # paso no puede prometer, sin haberlo visto correr, es que el
+      # compositor headless en sí sea confiable en este runner exacto.
+      # Ver docs/LINUX_PLATFORM.md, "brecha de validación Wayland en
+      # CI", para el detalle completo.
+      - name: Wayland GUI smoke (best-effort, non-blocking — see docs/LINUX_PLATFORM.md)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          sudo apt-get install -y --no-install-recommends weston
+          mkdir -p "${RUNNER_TEMP}/nimvlets_xdg_runtime"
+          chmod 0700 "${RUNNER_TEMP}/nimvlets_xdg_runtime"
+          export XDG_RUNTIME_DIR="${RUNNER_TEMP}/nimvlets_xdg_runtime"
+          weston --backend=headless-backend.so --socket=nimvlets-weston-ci-0 --idle-time=0 > weston.log 2>&1 &
+          WESTON_PID=$!
+          sleep 2
+          export WAYLAND_DISPLAY=nimvlets-weston-ci-0
+          export SDL_VIDEODRIVER=wayland
+          export NIMVLETS_DEV_APPDATA_DIR="${RUNNER_TEMP}/nimvlets_wayland_smoke"
+          export NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5
+          ./build/linux-release/src/app/nimvlets_spike > wayland_smoke.log 2>&1 &
+          APP_PID=$!
+          sleep 3
+          kill -TERM "${APP_PID}" 2>/dev/null || true
+          wait "${APP_PID}" 2>/dev/null || true
+          kill "${WESTON_PID}" 2>/dev/null || true
+          echo "--- weston.log ---"; cat weston.log || true
+          echo "--- wayland_smoke.log ---"; cat wayland_smoke.log || true
+          if grep -q "clean shutdown" wayland_smoke.log 2>/dev/null; then
+            echo "WAYLAND SMOKE RESULT: PASS (clean shutdown observed under headless Weston)"
+          else
+            echo "WAYLAND SMOKE RESULT: INCONCLUSIVE/FAIL (see logs above) -- does not fail the job, see docs/LINUX_PLATFORM.md"
+            exit 1
+          fi
 
   windows-x64:
     name: Windows x64 — configure/build/test
