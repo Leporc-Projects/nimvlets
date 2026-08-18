@@ -90,3 +90,28 @@ hizo una medición dedicada de CPU/latencia por escritura en este
 bloque, ya que ninguno de sus requisitos la pedía y el mecanismo (una
 pequeña escritura bufferizada + un rename) no tiene ningún camino
 realista para ser un costo medible a esta escala.
+
+## Mediciones reales de Block 04
+
+Block 04 (`src/catalog`, ver `docs/CATALOG.md`) no agrega ningún
+polling ni toca el cálculo de `waitMs` del event loop — el requisito
+específico de este bloque (§5 del brief: "confirmar que el switching
+repetido no deja crecimiento obvio de recursos") se midió comparando
+el RSS en steady-state tras una ráfaga chica de switches contra una
+ráfaga grande, vía el mecanismo solo-DEV
+`NIMVLETS_DEV_SWITCH_TEST_COUNT` (ver `docs/CATALOG.md` §7), Release,
+arm64 nativo:
+
+| Escenario | RSS (steady state, tras completar la ráfaga) |
+|---|---|
+| 5 switches automatizados (todos al mismo pet — solo Bunny es real) | ≈76.3–76.4 MB |
+| 500 switches automatizados (mismo pet, 100x más) | ≈76.4–76.5 MB |
+
+Diferencia de bien menos de 1 MB entre 5 y 500 switches — dentro del
+ruido normal del allocator, no una tendencia de crecimiento. Cada
+switch suelta las texturas del pet anterior antes de adjuntar las del
+nuevo (ver `docs/CATALOG.md` §6), así que este resultado es consistente
+con lo esperado: nada se acumula por switch. CPU se mantuvo en 0.0%
+en ambos escenarios una vez completada la ráfaga (el trabajo real de
+cada switch — leer un archivo pequeño, crear/destruir una textura — es
+demasiado breve para registrarse en una muestra de `ps`).

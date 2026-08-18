@@ -298,3 +298,4 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/PET_CONTENT_SPEC.md` | Data contract for a Nimvlet's content. |
 | `docs/ANIMATION_RUNTIME.md` | Content model, pack format, and animation/scheduler design (Block 02). |
 | `docs/PERSISTENCE.md` | Local state model, storage format, and write policy (Block 03). |
+| `docs/CATALOG.md` | Pet identity, catalog format, and runtime switching design (Block 04). |

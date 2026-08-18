@@ -5,18 +5,21 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está actualmente en **Block 03 — Persistencia Local de
-Estado**, construido sobre el Content + Animation Foundation de
-Block 02 (un pequeño runtime de contenido+animación, data-driven — ver
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)) y sobre el
-Foundation + Platform Feasibility Spike de Block 01 (bootstrap
-disciplinado del repo más una prueba de que el enfoque central de
-windowing/transparencia/hit-testing/drag es viable). Block 03 agrega
-una pequeña capa de persistencia local y solo-offline — el click
-balance, el id del pet activo, y la última posición de ventana
-sobreviven a un reinicio — ver
-[`docs/PERSISTENCE.md`](docs/PERSISTENCE.md). Esto explícitamente
-*no* es todavía el producto terminado — ver
+Este repositorio está actualmente en **Block 04 — Catálogo de Pets +
+Switching en Runtime**, construido sobre Block 03 — Persistencia Local
+de Estado (el click balance, el id del pet activo, y la última
+posición de ventana sobreviven a un reinicio — ver
+[`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)), Block 02 — Content +
+Animation Foundation (un pequeño runtime de contenido+animación,
+data-driven — ver
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)), y Block 01 —
+Foundation + Platform Feasibility Spike (bootstrap disciplinado del
+repo más una prueba de que el enfoque central de
+windowing/transparencia/hit-testing/drag es viable). Block 04 agrega
+un catálogo de pets data-driven y una API reutilizable de switching en
+runtime — resolver/cambiar cuál pet está activo sin ninguna rama de
+C++ específica de un pet — ver [`docs/CATALOG.md`](docs/CATALOG.md).
+Esto explícitamente *no* es todavía el producto terminado — ver
 [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está
 verificado y lo que no, y `AGENTS.md` para los contratos de ingeniería
 permanentes que sigue este bloque y cada bloque futuro.
@@ -57,7 +60,7 @@ source tree.
 ## Run the foundation spike
 
 ```bash
-# run from the repo root — the pet pack below is loaded via a
+# run from the repo root — the catalog below is loaded via a
 # relative path that resolves from the current working directory
 ./build/macos-debug/src/app/nimvlets_spike
 
@@ -68,18 +71,27 @@ NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5 ./build/macos-debug/src/app/nimvlets_spi
 # conveniencia de QA: persiste a un directorio aislado en vez de la
 # ubicación real de app-data por usuario (ver docs/PERSISTENCE.md §2)
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nimvlets_dev_state ./build/macos-debug/src/app/nimvlets_spike
+
+# conveniencia de QA: ejecuta N switches de pet automáticos y no
+# interactivos justo después de arrancar, para smoke-testear el
+# switching (no es comportamiento de producto — ver docs/CATALOG.md §7)
+NIMVLETS_DEV_SWITCH_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 ```
 
 This opens a small (160×160), borderless, always-on-top, transparent
-window showing **Bunny** — a deterministically-generated DEV animation
-pack (`assets/dev/bunny_pack.nvpack`) derived from a real illustrated
-QA fixture the repository owner supplied in Block 01, *not* final
-content (see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). The pack is
-required, not optional — if it can't be loaded (e.g. not run from the
-repo root), the app logs a specific error and exits rather than
-falling back to any placeholder. Haz click en la región visible para
-incrementar el click balance (persistido localmente — ver
+window showing whichever pet the catalog resolves as active (see
+[`docs/CATALOG.md`](docs/CATALOG.md)) — for now, always **Bunny**, a
+deterministically-generated DEV animation pack
+(`assets/dev/bunny_pack.nvpack`) derived from a real illustrated QA
+fixture the repository owner supplied in Block 01, *not* final content
+(see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). The catalog
+and the active pet's pack are required, not optional — if either can't
+be loaded (e.g. not run from the repo root), the app logs a specific
+error and exits rather than falling back to any placeholder; if a
+*previously saved* pet selection can't be resolved or loaded, it falls
+back to the catalog's default instead of crashing. Haz click en la
+región visible para incrementar el click balance (persistido localmente — ver
 [`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)) y reproducir una reacción
 de click corta; cada ~300s (o el override DEV de arriba) también
 reproduce una acción pasiva corta por su cuenta. Arrástrala para mover
@@ -127,15 +139,16 @@ output. See `AGENTS.md` §7 and `tools/stats_loc.py`'s own docstring.
 ```
 src/core         pure C++20 logic, no SDL — unit tested in isolation
 src/content      pure, data-driven content model + animation controller + pack loader (no SDL)
+src/catalog      pure pet identity + catalog + active-selection/switching logic (no SDL)
 src/persistence  pure local state model + serializer + atomic-write store + debounce scheduler (no SDL)
 src/graphics     SDL rendering: turns a content::FrameDefinition into a texture
 src/platform     native macOS (AppKit) / Windows (Win32) window glue
 src/app          the spike executable: event loop + wiring
-tests/           CTest-driven unit tests for src/core, src/content, and src/persistence
-tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, generate_bunny_dev_pack.py)
+tests/           CTest-driven unit tests for src/core, src/content, src/catalog, and src/persistence
+tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, compile_pet_catalog.py, generate_bunny_dev_pack.py)
 assets/dev/      dev-only placeholder assets (see assets/dev/README.md)
 cmake/           CMake helper modules (warnings, SDL3 fetch)
-docs/            product + engineering contracts (see AGENTS.md §17)
+docs/            product + engineering contracts (see AGENTS.md §18)
 ```
 
 See [`AGENTS.md`](AGENTS.md) for the full engineering contract

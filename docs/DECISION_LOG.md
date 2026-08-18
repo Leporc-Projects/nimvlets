@@ -572,3 +572,139 @@ reproduciendo exactamente el escenario que antes se colgaba (una
 corrida en idle completamente asentada, con un estado persistido que
 ya coincidía y estaba sincronizado) y observando una salida limpia poco
 después del `SIGTERM`.
+
+---
+
+### DEC-029 — `src/catalog`: nueva librería para identidad + catálogo de pets, sin SDL
+**Status:** DECIDIDO · Block 04 — ver `docs/CATALOG.md`.
+
+Block 04 necesitaba saber qué Nimvlets existen y resolver/cambiar cuál
+mostrar, sin ninguna rama de C++ específica de un pet (AGENTS.md §13) y
+sin reescribir la capa de persistencia de Block 03. Siguiendo el
+precedente de una librería enfocada por cada feature grande
+(`src/content` en Block 02, `src/persistence` en Block 03), se creó
+`src/catalog`:
+
+- `catalog::PetIdentity` — un struct plano (`petId` + `variantId`
+  opcional), sin ningún enum de Nimvlets conocidos, con
+  igualdad/orden/hash.
+- `catalog::PetCatalog`/`CatalogEntry` — el catálogo ya validado
+  (`Find`/`Default`/`Entries`), construido a partir de una lista que el
+  llamador garantiza válida — el mismo reparto de responsabilidades que
+  `content::PetDefinition` (no se autovalida) y `content::PetPackLoader`
+  (sí valida) ya establecieron.
+- `catalog::PetCatalogLoader` — parseo puro del formato binario
+  "NVCATLG1" desde un buffer en memoria, sin I/O de archivos en la
+  lógica central.
+- `catalog::ActivePetResolution` — `ResolveActiveSelection()` (puro,
+  sin filesystem) y `LoadPetForIdentity()` (reutiliza
+  `content::LoadPetPackFromFile`), la única función que tanto la
+  resolución de arranque como el switching en runtime comparten.
+
+`nimvlets_catalog` enlaza `nimvlets_content` PUBLIC (necesita
+`PetDefinition` + `LoadPetPackFromFile`) pero nada de SDL ni de
+`nimvlets_persistence` — la conexión entre selección de catálogo y
+persistencia la hace `src/app`, no esta librería, igual que
+`src/app` ya era el único lugar que conectaba clicks/drag con
+`persistence::AppState` en Block 03.
+
+---
+
+### DEC-030 — Formato "NVCATLG1": validación estricta en el parser, existencia de `packPath` solo como chequeo de tooling
+**Status:** DECIDIDO · Block 04 — ver `docs/CATALOG.md` §3.
+
+Mismo patrón de formato binario custom que "NVPACK1"/"NVSTATE1"
+(magic + strings con prefijo de longitud + campos de ancho fijo,
+little-endian, compilado por un script Python sin dependencias de
+terceros) por consistencia con el pipeline de assets ya establecido —
+"mantener el formato/tooling simple y consistente" (block brief §2).
+
+El loader en C++ (`catalog::LoadCatalogFromMemory`) rechaza: cero
+entradas, `petId`/`packPath` vacíos, una identidad `(petId, variantId)`
+duplicada, y cualquier cantidad de entradas `isDefault` distinta de
+exactamente una — cubriendo "duplicados rechazados", "default único
+resoluble", y "referencia de pack inválida rechazada claramente" del
+block brief (§2) de la forma estructural, en memoria, que el brief
+exige. Deliberadamente NO verifica que cada `packPath` apunte a un
+archivo que realmente existe: eso requeriría tocar el filesystem desde
+un parser que de otro modo es puro y testeable con buffers sintéticos,
+y verificarlo cargando cada pack violaría "el runtime no debe cargar
+todos los packs al arranque" (block brief §2). Un pack faltante o
+corrupto se descubre y reporta claramente recién cuando algo
+efectivamente intenta cargarlo — vía el mismo camino
+`content::LoadPetPackFromFile` que ya falla claramente en ese caso
+desde Block 02, sin duplicar esa lógica.
+
+`tools/compile_pet_catalog.py` sí verifica `pack_path` en tiempo de
+*compilación* (existencia relativa al directorio de trabajo, mismo
+supuesto "correr desde la raíz del repo" que el resto de `tools/`) —
+un chequeo de cordura para quien autora el catálogo, complementario al
+runtime, no un reemplazo de él.
+
+---
+
+### DEC-031 — Resolución de arranque con cadena de fallback: persistido -> default -> fallo genuino
+**Status:** DECIDIDO · Block 04 — ver `docs/CATALOG.md` §5.
+
+El block brief exige explícitamente "no debe crashear porque un pet
+guardado ya no existe" (§3). `SpikeApp::Init()` intenta cargar el pack
+de la entrada que `ResolveActiveSelection()` resolvió (calce exacto o
+ya el default); si esa carga falla y la entrada no era ya el default,
+reintenta una vez más con el default del catálogo antes de rendirse.
+Solo si *ambos* intentos fallan es un fallo de arranque genuino,
+reportado tan ruidosamente como un catálogo ausente (mismo principio
+de "fail loudly" que Block 02 estableció para packs individuales —
+DEC-023) — no hay una tercera capa de fallback inventada que no pidió
+el brief.
+
+Cuando se termina usando algo distinto de lo persistido — identidad
+desconocida, vacía (primera ejecución), o el pack guardado dejó de
+cargar — `appState_.activePetId`/`activeVariantId` se reparan en
+memoria para reflejar la verdad y se marca el scheduler de
+persistencia dirty (reutilizando exactamente el mecanismo de debounce
+de Block 03, sin ninguna escritura especial). Esto reemplaza la
+sincronización más simple que Block 03 hacía (comparar solo contra
+`pet_.id`) con la versión completa que ya anticipaba su propio
+comentario: "un valor real y con sentido que la UI de selección de un
+bloque futuro pueda leer."
+
+---
+
+### DEC-032 — `TrySwitchActivePet`: cargar antes de descartar, reset del controller antes de reemplazar `pet_`, redimensionar ventana si el canvas cambia
+**Status:** DECIDIDO · Block 04 — ver `docs/CATALOG.md` §6.
+
+El pack nuevo siempre se carga en un `content::PetDefinition` local
+*antes* de tocar cualquier estado vivo — solo tras confirmar éxito se
+sueltan las texturas del pet anterior y se reemplaza `pet_`. Esto es lo
+que garantiza, sin ningún código adicional, que "un switch fallido
+preserva el pet activo previo" (block brief §4): en el camino de
+fallo, literalmente nada se tocó todavía.
+
+`animController_.reset()` ocurre explícitamente *antes* de reasignar
+`pet_` (y se vuelve a construir después, vía `.emplace(pet_)`, ya
+apuntando al contenido nuevo). Razón concreta: `AnimationController`
+guarda una referencia al `PetDefinition` activo y un puntero interno a
+la animación actual, que puede apuntar dentro de
+`pet_.passiveActions[i]` — un `std::vector`, cuyo buffer puede
+reubicarse al reasignarse si el pet nuevo tiene una cantidad distinta
+de acciones pasivas que el viejo. Sin el reset explícito, ese puntero
+podría quedar colgando en el instante entre "`pet_` ya cambió" y "el
+controller todavía no se reconstruyó". Con el reset, nunca existe un
+`AnimationController` vivo mientras el contenido de `pet_` está en
+proceso de reemplazo.
+
+El tamaño lógico de la ventana y `SDL_SetRenderLogicalPresentation` se
+reaplican incondicionalmente después de cada switch exitoso (no solo
+si el tamaño de canvas efectivamente cambió) — más simple que rastrear
+el tamaño anterior, y sin costo real cuando no cambió. No estaba
+listado explícitamente en el brief ("texture/hit mask/window shape"),
+pero es necesario para que "reemplazar el contenido activo" en efecto
+funcione correctamente para el caso general que el catálogo está
+diseñado para soportar — sin esto, un futuro pet con un canvas de
+tamaño distinto al de Bunny se vería mal escalado tras un switch.
+
+El mecanismo solo-DEV de smoke test (`NIMVLETS_DEV_SWITCH_TEST_COUNT`)
+ejecuta sus intentos sincrónicamente, una sola vez, antes del loop
+principal — nunca agrega un timer ni un tick recurrente al scheduler
+del event loop, preservando "sin polling" (block brief §5) incluso
+cuando está activo.

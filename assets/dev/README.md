@@ -23,11 +23,20 @@ see `docs/PET_CONTENT_SPEC.md` and `AGENTS.md` §11).
   (the `tools/compile_pet_pack.py` input describing how they combine
   into idle/click-reaction/passive animations). Regenerated in full by
   `tools/generate_bunny_dev_pack.py`; never hand-edited.
-- **`bunny_pack.nvpack`** — the compiled runtime pack `src/app`
-  actually loads at startup (`content::LoadPetPackFromFile`), built from
+- **`bunny_pack.nvpack`** — the compiled runtime pack, built from
   `bunny_pack/manifest.json` by `tools/compile_pet_pack.py`. Binary,
   not meant to be read directly — see `docs/ANIMATION_RUNTIME.md` §4
   for the exact on-disk format.
+- **`pet_catalog_manifest.json`** — the Block 04 catalog manifest (see
+  `docs/CATALOG.md`): a single entry, Bunny, marked default. Hand-
+  written, not generated — there's no derivation step for a catalog
+  the way there is for pixel frames.
+- **`pet_catalog.nvcat`** — the compiled catalog `src/app` actually
+  loads at startup (`catalog::LoadCatalogFromFile`), built from
+  `pet_catalog_manifest.json` by `tools/compile_pet_catalog.py`.
+  Binary, not meant to be read directly — see `docs/CATALOG.md` §3 for
+  the exact on-disk format. Regenerate after editing the manifest:
+  `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
 
 Regenerate everything derived from `bunny_source.png` with one command:
 
@@ -38,13 +47,16 @@ python3 tools/generate_bunny_dev_pack.py
 This is deterministic — an unchanged `bunny_source.png` always produces
 byte-identical frame PNGs, manifest, and compiled pack.
 
-`src/app/SpikeApp` loads `bunny_pack.nvpack` as the one pet it shows and
-derives every frame's click-through hit-test region from that frame's
-own real alpha channel (see `PetDefinition::alphaHitThreshold`, default
-128). If the pack can't be loaded (e.g. the process isn't launched from
-the repo root, where this relative path resolves from), the app fails
-loudly — logs a specific fatal error and exits non-zero — rather than
-falling back to any hardcoded shape; see `docs/DECISION_LOG.md` DEC-023.
+`src/app/SpikeApp` loads `pet_catalog.nvcat` at startup and resolves
+which pack to load against it (see `docs/CATALOG.md`) — with only one
+real entry, that's always `bunny_pack.nvpack` today. It derives every
+frame's click-through hit-test region from that frame's own real alpha
+channel (see `PetDefinition::alphaHitThreshold`, default 128). If
+either the catalog or the resolved pack can't be loaded (e.g. the
+process isn't launched from the repo root, where these relative paths
+resolve from), the app fails loudly — logs a specific fatal error and
+exits non-zero — rather than falling back to any hardcoded shape; see
+`docs/DECISION_LOG.md` DEC-023 and DEC-031.
 
 **Superseded, no longer present:** `bunny.rgba` (Block 01's single-frame
 uncompressed runtime format, loaded by the now-retired

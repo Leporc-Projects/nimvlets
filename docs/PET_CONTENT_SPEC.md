@@ -133,3 +133,19 @@ per-pet Shop/Collection metadata. The Bunny DEV pack
 deterministic pixel transforms from Block 01's Bunny QA image — see
 `docs/ANIMATION_RUNTIME.md` §5 and `assets/dev/README.md` — not a
 Nimvlet, not final art, not referenced by `docs/PRD_V1.md`.
+
+## Relación de Block 04 con este spec
+
+Block 04 no agrega campos a `content::PetDefinition` — implementa una
+capa aparte, `catalog::PetIdentity`/`PetCatalog` (ver
+`docs/CATALOG.md`), que resuelve *cuál* pack cargar sin tocar el
+modelo de contenido de un pack ya cargado. La fila de "variant
+grouping" de la tabla de arriba (`PetDefinition::variantGroup`,
+schema-only desde Block 02) sigue schema-only en el sentido de que
+ningún pack individual lo usa para nada en runtime — pero Block 04 sí
+introduce el mecanismo de selección que el brief de Block 02
+anticipaba para ese campo: `catalog::PetIdentity.variantId` distingue
+entradas del catálogo que comparten un mismo `petId` (el caso Frin
+male/female), sin exigir ninguna relación fija entre ese `variantId` de
+catálogo y el `variantGroup` interno de un pack — ver
+`docs/CATALOG.md` §2.
