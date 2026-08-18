@@ -1,27 +1,37 @@
 #pragma once
 
+#include "content/AnimationController.h"
+#include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
-#include "core/Silhouette.h"
-#include "graphics/BlobRenderer.h"
-#include "graphics/DevSprite.h"
 
 #include <SDL3/SDL.h>
+
+#include <optional>
 
 namespace nimvlets::app {
 
 // Owns the SDL window/renderer lifecycle and the main event loop for the
-// Block 01 platform-feasibility spike.
+// small, data-driven content+animation runtime built in Block 02 on top
+// of Block 01's platform-feasibility spike.
 //
-// This is explicitly a foundation/spike executable, not the product —
-// see docs/PLATFORM_SPIKE.md and the block brief's NON-SCOPE list for
-// what it deliberately does not do (Shop, Collection, onboarding,
-// persistence, audio, global click mode, ...).
+// This is still explicitly a foundation/spike executable, not the
+// product — see docs/PLATFORM_SPIKE.md, docs/ANIMATION_RUNTIME.md, and
+// the block briefs' NON-SCOPE lists for what it deliberately does not do
+// (Shop, Collection, onboarding, persistence, audio, global click mode,
+// final content for all 8 Nimvlets, ...).
+//
+// The one pet this runtime shows is entirely data (a compiled
+// content::PetDefinition loaded from a ".nvpack" file at startup, see
+// Init()) — this class contains no pet-specific branches, no hardcoded
+// shapes, and no knowledge of "Bunny" beyond the path it happens to load
+// in this block. Swapping which pack loads swaps the pet.
 class SpikeApp {
 public:
     // Runs until the window is closed. Returns a process exit code (0 on
-    // clean shutdown, non-zero if SDL initialization failed).
+    // clean shutdown, non-zero if SDL initialization or content loading
+    // failed).
     int Run();
 
 private:
@@ -29,66 +39,108 @@ private:
     void Shutdown();
 
     void HandleEvent(const SDL_Event& event, bool& running);
+
+    // Draws content::AnimationController::CurrentFrame()'s texture.
+    // Called only when needsRedraw_ is set — see that field's doc
+    // comment — never on a fixed per-frame tick.
     void RenderFrame();
+
+    // Rebuilds activeHitMask_ from the controller's current frame (see
+    // core::AlphaMask::FromAlphaChannel) and, on platforms where it's
+    // render-safe (see platform::NativeShapeHitTestIsRenderSafe()),
+    // pushes it to the OS via SDL_SetWindowShape. Called alongside
+    // RenderFrame() only when the displayed frame actually changed —
+    // never every tick — so the window shape surface is rebuilt exactly
+    // as often as the picture it hit-tests against.
+    void ApplyCurrentHitMask();
+
     void PollHover();
     void UpdateClickThrough(bool cursorOverOpaque);
 
     // True if `localPoint` (window-local, logical coordinates) is over
-    // the currently active visible/interactive region — the Bunny QA
-    // fixture's real alpha-derived mask when loaded, or the analytic
-    // placeholder shape otherwise. Every hit-test in this file (the
-    // MOUSE_BUTTON_DOWN defense-in-depth check, the poll-driven
-    // fallback's hover check, and the SDL_SetWindowShape surface built
-    // in Init()) goes through this one predicate.
+    // the currently active pet frame's real alpha-derived hit region.
+    // Every hit-test in this file (the MOUSE_BUTTON_DOWN defense-in-
+    // depth check, the poll-driven fallback's hover check, and the
+    // SDL_SetWindowShape surface built in ApplyCurrentHitMask()) goes
+    // through this one predicate.
     bool IsPointInteractive(core::Point localPoint) const;
+
+    // Creates/releases one SDL_Texture per frame across pet_'s idle,
+    // click-reaction, and every passive action — see
+    // graphics::AttachFrameTexture()/ReleaseFrameTexture().
+    void AttachAllTextures();
+    void ReleaseAllTextures();
+
+    // Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS (if set to a valid
+    // positive number) to shorten the passive-action wait for manual QA,
+    // without ever touching pet_.passiveIntervalSeconds itself — the
+    // pack's authored ~300s default stays the production value in every
+    // build; this is purely an opt-in override for *this run*. See
+    // docs/ANIMATION_RUNTIME.md, "DEV passive-interval override".
+    double ComputeEffectivePassiveIntervalSeconds() const;
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
-    graphics::BlobRenderer blobRenderer_;
 
-    core::BlobSilhouette blob_ = core::BlobSilhouette::Default();
+    // The one active pet's data-driven content — loaded once in Init()
+    // from assets/dev/bunny_pack.nvpack (see kPetPackPath in
+    // SpikeApp.cpp) via content::LoadPetPackFromFile(). Declared before
+    // animController_ so it exists (default-constructed, if not yet
+    // loaded) at the point animController_'s member-initializer binds a
+    // reference to it — see animController_'s doc comment for why that
+    // ordering matters and why it's still safe.
+    content::PetDefinition pet_;
+
+    // Constructed only after pet_ is successfully loaded (Init() calls
+    // animController_.emplace(pet_)) — std::optional rather than binding
+    // a reference to pet_ before it holds real content, so there is
+    // never a window where a reference exists to not-yet-loaded data.
+    std::optional<content::AnimationController> animController_;
+
+    // The rasterized hit-test region for animController_'s *current*
+    // frame — rebuilt by ApplyCurrentHitMask() only when the frame
+    // changes. 1x1 placeholder until Init() populates real content
+    // (never used as such: Init() always calls ApplyCurrentHitMask()
+    // before the window becomes interactive).
+    core::AlphaMask activeHitMask_{1, 1};
+
     core::DragClassifier dragClassifier_;
-    core::FrameScheduler frameScheduler_{1000.0 / 12.0};  // ~12 fps idle animation, not 60/144
-
-    // Block 01 closure QA fixture ("Bunny") — a realistic, non-analytic
-    // asset used to validate hit-testing against real alpha data,
-    // replacing the analytic blob as the spike's default visual for
-    // this closure pass. See docs/DECISION_LOG.md and
-    // docs/PLATFORM_SPIKE.md. NOT the content-loading system
-    // docs/PET_CONTENT_SPEC.md describes — see graphics::DevSprite's
-    // doc comment. Falls back to the analytic blob (still exercised by
-    // tests/) if the fixture file can't be loaded, e.g. because the
-    // process wasn't launched from the repo root.
-    graphics::DevSprite bunnySprite_;
-    SDL_Texture* bunnyTexture_ = nullptr;
-
-    // The rasterized hit-test region actually in effect: built once in
-    // Init() from whichever source is active (bunny fixture or,
-    // failing that, the analytic blob at rest). Declared after blob_ so
-    // its member-initializer can safely reference blob_.windowWidth/
-    // windowHeight (C++ initializes members in declaration order) as a
-    // valid, if provisional, size before Init() replaces it.
-    core::AlphaMask activeHitMask_{static_cast<int>(blob_.windowWidth), static_cast<int>(blob_.windowHeight)};
-
     int clickCount_ = 0;
+
+    // Set whenever something that affects the displayed picture happens
+    // (a frame-advance from animController_->Advance(), a
+    // TriggerClick()/TriggerPassiveAction() call, or an
+    // SDL_EVENT_WINDOW_EXPOSED asking us to repaint) and cleared right
+    // after RenderFrame()+ApplyCurrentHitMask() run for it. This is the
+    // mechanism that makes static idle render/redraw *nothing* — no
+    // fixed tick exists anymore (contrast Block 01's frameScheduler_).
+    // Starts true so the very first frame renders.
+    bool needsRedraw_ = true;
+
+    // Effective seconds between sparse passive actions for this run —
+    // see ComputeEffectivePassiveIntervalSeconds(). Computed once in
+    // Init(); pet_.passiveIntervalSeconds (the pack's authored default)
+    // is never mutated.
+    double passiveIntervalSecondsEffective_ = 300.0;
+    double nextPassiveDeadlineMs_ = 0.0;
+    std::size_t nextPassiveActionIndex_ = 0;
 
     // True once Init() has successfully handed hit-testing to the
     // platform's own native mechanism (SDL_SetWindowShape on macOS —
     // see platform::NativeShapeHitTestIsRenderSafe()). When true, the
     // poll-driven fallback below (hoverScheduler_, PollHover(),
     // UpdateClickThrough()) is never invoked — the OS handles
-    // click-through on every real mouse event, with zero polling and
-    // less CPU than even the original render-tied approach.
+    // click-through on every real mouse event, with zero polling.
     bool usingNativeShapeHitTest_ = false;
 
     // --- poll-driven click-through FALLBACK, used only when
     // usingNativeShapeHitTest_ is false (currently: Windows; see
     // platform::NativeShapeHitTestIsRenderSafe()'s doc comment for why
-    // macOS doesn't need this anymore). ---
-    // Click-through responsiveness needs a much shorter interval than
-    // the idle animation does — see PollHover()'s doc comment. Reuses
-    // the same tested FrameScheduler class/logic as frameScheduler_,
-    // just with a shorter interval; no new scheduling logic.
+    // macOS doesn't need this anymore). Unchanged in spirit from
+    // Block 01 — still a bounded SDL_WaitEventTimeout wakeup at ~60 Hz,
+    // never a busy-wait, still a cursor-*position* poll
+    // (SDL_GetGlobalMouseState), not a global input hook. See
+    // AGENTS.md's privacy rules. ---
     core::FrameScheduler hoverScheduler_{1000.0 / 60.0};
     bool currentlyClickThrough_ = false;
 

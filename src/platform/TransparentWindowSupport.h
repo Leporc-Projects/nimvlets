@@ -32,8 +32,9 @@ void ConfigureCompanionWindow(SDL_Window* window);
 // on platforms where NativeShapeHitTestIsRenderSafe() is false (see its
 // doc comment) — currently Windows. src/app calls this once per state
 // change (not every frame) with the result of evaluating
-// core::BlobSilhouette::Contains() against a polled global cursor
-// position.
+// core::AlphaMask::Contains() — the current animation frame's real
+// alpha-derived hit region, see docs/ANIMATION_RUNTIME.md — against a
+// polled global cursor position.
 //
 // Returns the *actual* resulting state, read back from the native
 // property immediately after setting it (on macOS:

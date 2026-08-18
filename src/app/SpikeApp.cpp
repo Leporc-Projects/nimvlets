@@ -1,15 +1,30 @@
 #include "app/SpikeApp.h"
 
+#include "content/PetPackLoader.h"
+#include "graphics/FrameTexture.h"
 #include "platform/TransparentWindowSupport.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <csignal>
+#include <cstdlib>
 
 namespace nimvlets::app {
 
 namespace {
+
+// Where the one pet this runtime shows is loaded from. A relative path,
+// resolved from the process's current working directory (matching
+// Block 01's asset-loading precedent) — see docs/ANIMATION_RUNTIME.md,
+// "running the spike", for the "run from the repo root" requirement this
+// implies. Deliberately the *only* pet-specific string literal in this
+// entire file: swapping it swaps the pet, with zero other code changes.
+constexpr const char* kPetPackPath = "assets/dev/bunny_pack.nvpack";
+
+// Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS — see
+// SpikeApp::ComputeEffectivePassiveIntervalSeconds()'s doc comment.
+constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS";
 
 // signal-safe: only ever written by the signal handler and read by the
 // main loop, both via std::atomic. No allocation or cleanup happens
@@ -44,13 +59,13 @@ CursorSample SampleCursor(SDL_Window* window) {
     return sample;
 }
 
-// Rasterizes an already-built core::AlphaMask (either from the Bunny QA
-// fixture's real alpha channel, or — failing that — from
-// core::BlobSilhouette at rest) into an SDL_Surface for
-// SDL_SetWindowShape() — the primary click-through mechanism on
-// platforms where platform::NativeShapeHitTestIsRenderSafe() is true
-// (currently macOS; see that function's doc comment for the SDL-source-
-// level evidence behind this).
+// Rasterizes an already-built core::AlphaMask (the current animation
+// frame's real alpha channel, thresholded per pet_.alphaHitThreshold)
+// into an SDL_Surface for SDL_SetWindowShape() — the primary click-
+// through mechanism on platforms where
+// platform::NativeShapeHitTestIsRenderSafe() is true (currently macOS;
+// see that function's doc comment for the SDL-source-level evidence
+// behind this).
 SDL_Surface* BuildHitTestShapeSurface(const core::AlphaMask& mask) {
     SDL_Surface* surface = SDL_CreateSurface(mask.Width(), mask.Height(), SDL_PIXELFORMAT_RGBA32);
     if (surface == nullptr) {
@@ -67,28 +82,58 @@ SDL_Surface* BuildHitTestShapeSurface(const core::AlphaMask& mask) {
     return surface;
 }
 
-// Rasterizes core::BlobSilhouette::Contains() (at rest, phase=0) into a
-// core::AlphaMask — the fallback hit-test source used only when the
-// Bunny QA fixture can't be loaded (see SpikeApp::Init()). Not
-// re-rasterized per animation frame; the hit region can lag the ~4px
-// idle head-bob by a few pixels at the very top of the head when this
-// fallback is active. A documented, accepted limitation for this spike,
-// not attempted to be pixel-perfect — see docs/PLATFORM_SPIKE.md.
-core::AlphaMask RasterizeBlobIntoAlphaMask(const core::BlobSilhouette& blob, int width, int height) {
-    core::AlphaMask mask(width, height);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const core::Point sample{static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5};
-            mask.SetOpaque(x, y, blob.Contains(sample, /*phaseSeconds=*/0.0));
-        }
-    }
-    return mask;
-}
-
 }  // namespace
 
 bool ShutdownRequested() {
     return g_shutdownRequested.load(std::memory_order_relaxed);
+}
+
+double SpikeApp::ComputeEffectivePassiveIntervalSeconds() const {
+    const char* overrideEnv = std::getenv(kDevPassiveIntervalEnvVar);
+    if (overrideEnv == nullptr) {
+        return pet_.passiveIntervalSeconds;
+    }
+
+    char* end = nullptr;
+    const double parsed = std::strtod(overrideEnv, &end);
+    if (end == overrideEnv || parsed <= 0.0) {
+        SDL_Log(
+            "nimvlets: %s='%s' is not a valid positive number; ignoring (using pack default %.1fs)",
+            kDevPassiveIntervalEnvVar, overrideEnv, pet_.passiveIntervalSeconds);
+        return pet_.passiveIntervalSeconds;
+    }
+
+    SDL_Log(
+        "nimvlets: DEV override active — %s=%.3fs (pack/production default stays %.1fs; "
+        "this only affects this run)",
+        kDevPassiveIntervalEnvVar, parsed, pet_.passiveIntervalSeconds);
+    return parsed;
+}
+
+void SpikeApp::AttachAllTextures() {
+    auto attach = [&](content::AnimationDefinition& anim) {
+        for (content::FrameDefinition& frame : anim.frames) {
+            graphics::AttachFrameTexture(renderer_, frame);
+        }
+    };
+    attach(pet_.idle);
+    attach(pet_.clickReaction);
+    for (content::AnimationDefinition& passive : pet_.passiveActions) {
+        attach(passive);
+    }
+}
+
+void SpikeApp::ReleaseAllTextures() {
+    auto release = [&](content::AnimationDefinition& anim) {
+        for (content::FrameDefinition& frame : anim.frames) {
+            graphics::ReleaseFrameTexture(frame);
+        }
+    };
+    release(pet_.idle);
+    release(pet_.clickReaction);
+    for (content::AnimationDefinition& passive : pet_.passiveActions) {
+        release(passive);
+    }
 }
 
 bool SpikeApp::Init() {
@@ -110,6 +155,20 @@ bool SpikeApp::Init() {
         return false;
     }
 
+    // Load the one pet this runtime shows *before* creating any window —
+    // fail loudly and exit non-zero if it can't be loaded, rather than
+    // falling back to a hardcoded analytic shape. A data-driven runtime
+    // with no content to show is a real problem to surface, not paper
+    // over — matching the asset pipeline's own "fail loudly" contract
+    // (tools/compile_pet_pack.py) applied consistently at the app level.
+    // See docs/ANIMATION_RUNTIME.md and docs/DECISION_LOG.md.
+    std::string loadError;
+    if (!content::LoadPetPackFromFile(kPetPackPath, pet_, loadError)) {
+        SDL_Log("nimvlets: FATAL: could not load pet pack '%s': %s", kPetPackPath, loadError.c_str());
+        SDL_Log("nimvlets: (run from the repository root, or regenerate it: python3 tools/generate_bunny_dev_pack.py)");
+        return false;
+    }
+
     const SDL_WindowFlags flags =
         SDL_WINDOW_TRANSPARENT |
         SDL_WINDOW_BORDERLESS |
@@ -120,8 +179,8 @@ bool SpikeApp::Init() {
 
     window_ = SDL_CreateWindow(
         "Nimvlets Foundation Spike",
-        static_cast<int>(blob_.windowWidth),
-        static_cast<int>(blob_.windowHeight),
+        pet_.canvasWidth,
+        pet_.canvasHeight,
         flags);
     if (window_ == nullptr) {
         SDL_Log("nimvlets: SDL_CreateWindow failed: %s", SDL_GetError());
@@ -138,49 +197,25 @@ bool SpikeApp::Init() {
 
     // Without this, SDL_LOGICAL_PRESENTATION_DISABLED is the default and
     // render coordinates map 1:1 to physical backbuffer pixels — so on a
-    // 2x Retina display our BlobSilhouette's logical 160x160 coordinates
-    // (see core/Silhouette.h; deliberately DPI-independent) would only
-    // cover the top-left quarter of the real 320x320 backbuffer at half
-    // the intended size, instead of filling the window. Found by pixel-
-    // inspecting an actual captured frame during interactive macOS QA —
-    // see docs/PLATFORM_SPIKE.md. LETTERBOX (not STRETCH) because it's
-    // correct even if window and blob logical sizes ever diverge; the
+    // 2x Retina display our pet's logical canvas coordinates would only
+    // cover a quarter of the real backbuffer at half the intended size,
+    // instead of filling the window. Found by pixel-inspecting an actual
+    // captured frame during Block 01's interactive macOS QA — see
+    // docs/PLATFORM_SPIKE.md. LETTERBOX (not STRETCH) because it's
+    // correct even if window and canvas logical sizes ever diverge; the
     // letterbox fill color is our own transparent clear color, so no
     // visible bars appear in the square case this block actually uses.
     SDL_SetRenderLogicalPresentation(
         renderer_,
-        static_cast<int>(blob_.windowWidth),
-        static_cast<int>(blob_.windowHeight),
+        pet_.canvasWidth,
+        pet_.canvasHeight,
         SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
     platform::ConfigureCompanionWindow(window_);
 
-    // Block 01 closure QA fixture: try to load "Bunny" — a realistic,
-    // non-analytic asset used to validate transparency/hit-testing
-    // against real alpha data (see docs/DECISION_LOG.md). Falls back to
-    // the analytic placeholder shape (unchanged, still exercised by
-    // tests/) if the fixture can't be loaded — e.g. if the process
-    // isn't run from the repo root, where this relative path resolves
-    // from. Not a content system; see graphics::DevSprite's doc
-    // comment.
-    static const char* const kBunnyFixturePath = "assets/dev/bunny.rgba";
-    if (bunnySprite_.LoadFromFile(kBunnyFixturePath)) {
-        bunnyTexture_ = bunnySprite_.CreateTexture(renderer_);
-    }
-    const int windowW = static_cast<int>(blob_.windowWidth);
-    const int windowH = static_cast<int>(blob_.windowHeight);
-    if (bunnyTexture_ != nullptr) {
-        activeHitMask_ = bunnySprite_.BuildAlphaMask(windowW, windowH);
-        SDL_Log(
-            "nimvlets: QA fixture loaded: %s (%dx%d native, hit-test alpha threshold=%d/255)",
-            kBunnyFixturePath, bunnySprite_.Width(), bunnySprite_.Height(),
-            static_cast<int>(graphics::DevSprite::kHitTestAlphaThreshold));
-    } else {
-        activeHitMask_ = RasterizeBlobIntoAlphaMask(blob_, windowW, windowH);
-        SDL_Log(
-            "nimvlets: QA fixture %s not loaded; rendering the analytic placeholder shape instead",
-            kBunnyFixturePath);
-    }
+    AttachAllTextures();
+
+    animController_.emplace(pet_);
 
     // Hand click-through hit-testing to the platform's own native
     // mechanism where it's safe to do so (see
@@ -188,22 +223,25 @@ bool SpikeApp::Init() {
     // was added after interactive macOS QA proved the poll-driven
     // fallback below unreliable: SDL's own Cocoa backend silently resets
     // NSWindow.ignoresMouseEvents on every real mouse-moved event unless
-    // a shape is set). SDL_SetWindowShape() copies the surface
-    // internally, so it's destroyed right after the call either way.
-    if (platform::NativeShapeHitTestIsRenderSafe()) {
-        SDL_Surface* hitTestShape = BuildHitTestShapeSurface(activeHitMask_);
-        if (hitTestShape != nullptr) {
-            if (SDL_SetWindowShape(window_, hitTestShape)) {
-                usingNativeShapeHitTest_ = true;
-            } else {
-                SDL_Log("nimvlets: SDL_SetWindowShape failed: %s (falling back to poll-driven click-through)", SDL_GetError());
-            }
-            SDL_DestroySurface(hitTestShape);
-        }
-    }
+    // a shape is set). Determined once, up front: ApplyCurrentHitMask()
+    // (called just below, and on every later frame change) branches on
+    // this flag.
+    usingNativeShapeHitTest_ = platform::NativeShapeHitTestIsRenderSafe();
     SDL_Log(
         "nimvlets: click-through mechanism = %s",
         usingNativeShapeHitTest_ ? "native SDL_SetWindowShape (event-driven, no polling)" : "poll-driven fallback");
+
+    // Establish the initial frame + hit-test region before entering the
+    // wait loop, mirroring Block 01's precedent of an immediate first
+    // frame. needsRedraw_ starts true (see its doc comment) but this
+    // call handles it explicitly rather than relying on the loop's first
+    // iteration, so the window is never briefly visible-but-unshaped.
+    RenderFrame();
+    ApplyCurrentHitMask();
+    needsRedraw_ = false;
+
+    passiveIntervalSecondsEffective_ = ComputeEffectivePassiveIntervalSeconds();
+    nextPassiveDeadlineMs_ = static_cast<double>(SDL_GetTicks()) + passiveIntervalSecondsEffective_ * 1000.0;
 
     // Objective, non-visual confirmation of high-DPI backing: logical
     // ("point") size vs. actual backbuffer size in pixels. On a Retina
@@ -225,20 +263,17 @@ bool SpikeApp::Init() {
         static_cast<double>(SDL_GetWindowDisplayScale(window_)));
 
     SDL_Log(
-        "nimvlets: spike window ready (%dx%d @ ~%.0f fps idle). Click the shape; drag to move; "
-        "close the window to quit. Clicks are counted in-memory only (stdout log), not persisted.",
-        static_cast<int>(blob_.windowWidth),
-        static_cast<int>(blob_.windowHeight),
-        1000.0 / frameScheduler_.FrameIntervalMs());
+        "nimvlets: pet '%s' (%s) ready — %dx%d canvas, alpha hit threshold=%d/255, "
+        "passive action every ~%.0fs. Click the shape; drag to move; close the window to quit. "
+        "Clicks are counted in-memory only (stdout log), not persisted.",
+        pet_.id.c_str(), pet_.displayName.c_str(), pet_.canvasWidth, pet_.canvasHeight,
+        static_cast<int>(pet_.alphaHitThreshold), passiveIntervalSecondsEffective_);
 
     return true;
 }
 
 void SpikeApp::Shutdown() {
-    if (bunnyTexture_ != nullptr) {
-        SDL_DestroyTexture(bunnyTexture_);
-        bunnyTexture_ = nullptr;
-    }
+    ReleaseAllTextures();
     if (renderer_ != nullptr) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
@@ -256,33 +291,48 @@ bool SpikeApp::IsPointInteractive(core::Point localPoint) const {
 }
 
 void SpikeApp::RenderFrame() {
-    const double nowMs = static_cast<double>(SDL_GetTicks());
-    const double phaseSeconds = nowMs / 1000.0;
+    const content::FrameDefinition& frame = animController_->CurrentFrame();
+    SDL_Texture* texture = static_cast<SDL_Texture*>(frame.rendererHandle);
 
-    if (bunnyTexture_ != nullptr) {
-        // Bunny is a static QA fixture (no animation frames — see
-        // graphics::DevSprite's doc comment), so this redraws the same
-        // texture every tick. Clear-then-draw-then-present mirrors
-        // graphics::BlobRenderer::Render()'s own sequence.
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
-        SDL_RenderClear(renderer_);
-        const SDL_FRect dst{0.0f, 0.0f, static_cast<float>(blob_.windowWidth), static_cast<float>(blob_.windowHeight)};
-        SDL_RenderTexture(renderer_, bunnyTexture_, nullptr, &dst);
-        SDL_RenderPresent(renderer_);
-    } else {
-        blobRenderer_.Render(renderer_, blob_, phaseSeconds);
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+    SDL_RenderClear(renderer_);
+    if (texture != nullptr) {
+        const SDL_FRect dst{0.0f, 0.0f, static_cast<float>(pet_.canvasWidth), static_cast<float>(pet_.canvasHeight)};
+        SDL_RenderTexture(renderer_, texture, nullptr, &dst);
     }
-    frameScheduler_.OnFramePresented(nowMs);
+    SDL_RenderPresent(renderer_);
+}
+
+void SpikeApp::ApplyCurrentHitMask() {
+    const content::FrameDefinition& frame = animController_->CurrentFrame();
+    activeHitMask_ = core::AlphaMask::FromAlphaChannel(
+        frame.pixels.empty() ? nullptr : frame.pixels.data(),
+        frame.width, frame.height,
+        pet_.canvasWidth, pet_.canvasHeight,
+        pet_.alphaHitThreshold);
+
+    // Only pushed to the OS on platforms where it's render-safe (see
+    // usingNativeShapeHitTest_'s doc comment). On the Windows fallback
+    // path, activeHitMask_ is simply left updated here for PollHover()'s
+    // next scheduled tick to read — no extra native call needed.
+    if (usingNativeShapeHitTest_) {
+        SDL_Surface* shape = BuildHitTestShapeSurface(activeHitMask_);
+        if (shape != nullptr) {
+            if (!SDL_SetWindowShape(window_, shape)) {
+                SDL_Log("nimvlets: SDL_SetWindowShape (frame update) failed: %s", SDL_GetError());
+            }
+            SDL_DestroySurface(shape);
+        }
+    }
 }
 
 void SpikeApp::PollHover() {
     // Fallback path only (Windows, or if SDL_SetWindowShape ever fails
-    // on macOS) — see usingNativeShapeHitTest_'s doc comment. Originally
-    // piggybacked on the ~83ms (12 fps) idle-animation tick; moved to
-    // its own ~60Hz schedule after interactive macOS QA found that lag
-    // made click-through unreliable there (a click landing shortly
-    // after the cursor left the shape could see a stale
-    // ignoresMouseEvents=NO). Still a plain, bounded
+    // on macOS) — see usingNativeShapeHitTest_'s doc comment. Runs on
+    // its own ~60Hz schedule, independent of animation frame timing —
+    // click-through responsiveness and animation cadence are two
+    // different concerns with two different (and, for the pet's static
+    // idle, very different) natural rates. Still a plain, bounded
     // SDL_WaitEventTimeout wakeup, not a busy-wait, and still a
     // cursor-*position* poll (SDL_GetGlobalMouseState), not a global
     // input hook — see AGENTS.md's privacy rules.
@@ -290,12 +340,11 @@ void SpikeApp::PollHover() {
     // The diagnostic logging below (six pipeline stages, transition-only
     // — a value is only printed when it differs from the last-logged
     // value for that stage) was added to debug exactly this mechanism
-    // during macOS QA — see docs/PLATFORM_SPIKE.md, "click-through
-    // instrumentation" — and is compiled out entirely in Release builds
-    // (#ifndef NDEBUG) so it can't flood a normal run's log, per that
-    // section's closing note. It stays available in Debug builds for
-    // whoever eventually brings up the Windows fallback on real
-    // hardware.
+    // during Block 01's macOS QA — see docs/PLATFORM_SPIKE.md,
+    // "click-through instrumentation" — and is compiled out entirely in
+    // Release builds (#ifndef NDEBUG) so it can't flood a normal run's
+    // log. It stays available in Debug builds for whoever eventually
+    // brings up the Windows fallback on real hardware.
     const double nowMs = static_cast<double>(SDL_GetTicks());
 
     const CursorSample sample = SampleCursor(window_);
@@ -376,6 +425,15 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             running = false;
             break;
 
+        // The OS is asking us to repaint (e.g. another window that was
+        // covering ours moved away, or we were minimized/restored) —
+        // "platform/render semantics require it", independent of
+        // whether the pet's animation state changed at all. See
+        // needsRedraw_'s doc comment.
+        case SDL_EVENT_WINDOW_EXPOSED:
+            needsRedraw_ = true;
+            break;
+
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             if (event.button.button != SDL_BUTTON_LEFT) {
                 break;
@@ -390,7 +448,7 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             // elsewhere): never start a click/drag gesture for a press
             // that isn't actually on the visible region. Only the
             // opaque/interactive region is interactive — see
-            // docs/PLATFORM_SPIKE.md.
+            // docs/ANIMATION_RUNTIME.md.
             if (!IsPointInteractive(localOrigin)) {
                 break;
             }
@@ -439,7 +497,17 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             };
             const core::PointerGesture gesture = dragClassifier_.End(localEnd);
             if (gesture == core::PointerGesture::kClick) {
+                // Click counting is unconditional and entirely separate
+                // from the visual reaction: it always increments, even
+                // if a click reaction is already playing and
+                // TriggerClick() below is therefore a no-op for
+                // *animation* state (see AnimationController's doc
+                // comment). Repeated clicks during an active reaction
+                // count but never restart the visual.
                 ++clickCount_;
+                const double nowMs = static_cast<double>(SDL_GetTicks());
+                animController_->TriggerClick(nowMs);
+                needsRedraw_ = true;
                 SDL_Log("nimvlets: click #%d (in-memory only, not persisted)", clickCount_);
             } else {
                 SDL_Log("nimvlets: drag ended (correctly not counted as a click)");
@@ -459,27 +527,46 @@ int SpikeApp::Run() {
     }
 
     bool running = true;
-    RenderFrame();  // first frame, presented immediately
-    if (!usingNativeShapeHitTest_) {
-        PollHover();  // establish correct initial click-through state immediately too
-    }
 
     SDL_Event event;
     while (running && !ShutdownRequested()) {
         const double nowMs = static_cast<double>(SDL_GetTicks());
-        // The hover-poll fallback isn't part of the wait calculation at
-        // all when usingNativeShapeHitTest_ — no extra wakeups are
-        // introduced beyond the idle-animation tick on macOS.
-        const double waitMs = usingNativeShapeHitTest_
-            ? frameScheduler_.MillisUntilNextFrame(nowMs)
-            : std::min(frameScheduler_.MillisUntilNextFrame(nowMs), hoverScheduler_.MillisUntilNextFrame(nowMs));
-        const Sint32 timeoutMs = static_cast<Sint32>(waitMs > 0.0 ? waitMs : 0.0);
+
+        // The wait is always bounded by the passive-action deadline (at
+        // most ~300s away by default), then tightened by whichever of
+        // the animation's own next-frame deadline (nullopt while idle is
+        // static — see AnimationController::NextFrameDeadlineMs()) and
+        // the Windows-fallback hover-poll schedule are actually in play.
+        // A truly static idle with a distant passive deadline can block
+        // here for minutes at a stretch: this is the mechanism behind
+        // Block 02's static-idle CPU improvement over Block 01's fixed
+        // ~12fps tick — see docs/ANIMATION_RUNTIME.md and
+        // docs/PERFORMANCE_BUDGETS.md. Real input events (including the
+        // mouse-moved events SDL's own Cocoa backend needs to keep
+        // click-through correct) wake SDL_WaitEventTimeout immediately
+        // regardless of how long this timeout is; the timeout only
+        // bounds how long *we* block when nothing happens.
+        double waitMs = nextPassiveDeadlineMs_ - nowMs;
+        if (const std::optional<double> frameDeadline = animController_->NextFrameDeadlineMs()) {
+            waitMs = std::min(waitMs, *frameDeadline - nowMs);
+        }
+        if (!usingNativeShapeHitTest_) {
+            waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
+        }
+        if (waitMs < 0.0) {
+            waitMs = 0.0;
+        }
+        // Defensive cap (well above any real deadline this app computes,
+        // including the default ~300s passive interval) so an
+        // unreasonable DEV override can't overflow the Sint32 timeout
+        // SDL_WaitEventTimeout takes.
+        waitMs = std::min(waitMs, 2'000'000'000.0);
+        const Sint32 timeoutMs = static_cast<Sint32>(waitMs);
 
         // Blocks (no busy-wait) until either a real input/window event
-        // arrives or the next scheduled tick (render, and — fallback
-        // platforms only — hover-poll) is due. A pending SIGINT/SIGTERM
-        // is picked up at most one timeout period later (see
-        // ShutdownRequested()).
+        // arrives or the next scheduled deadline is due. A pending
+        // SIGINT/SIGTERM is picked up at most one timeout period later
+        // (see ShutdownRequested()).
         if (SDL_WaitEventTimeout(&event, timeoutMs)) {
             HandleEvent(event, running);
             while (running && SDL_PollEvent(&event)) {
@@ -491,9 +578,55 @@ int SpikeApp::Run() {
         }
 
         const double afterMs = static_cast<double>(SDL_GetTicks());
-        if (afterMs >= frameScheduler_.NextFrameDeadline(afterMs)) {
-            RenderFrame();
+
+        if (animController_->Advance(afterMs)) {
+            needsRedraw_ = true;
         }
+
+        if (afterMs >= nextPassiveDeadlineMs_) {
+            // Only actually triggers while idle (see
+            // AnimationController::TriggerPassiveAction()'s doc comment:
+            // passive action never interrupts anything) — but the
+            // deadline is always rescheduled either way, so a passive
+            // action that arrives mid-click-reaction is simply skipped
+            // for this cycle rather than queued or fired late.
+            if (animController_->State() == content::ControllerState::kIdle && !pet_.passiveActions.empty()) {
+                animController_->TriggerPassiveAction(nextPassiveActionIndex_, afterMs);
+                nextPassiveActionIndex_ = (nextPassiveActionIndex_ + 1) % pet_.passiveActions.size();
+                needsRedraw_ = true;
+            }
+            nextPassiveDeadlineMs_ = afterMs + passiveIntervalSecondsEffective_ * 1000.0;
+        }
+
+        if (needsRedraw_) {
+#ifndef NDEBUG
+            // Transition-only diagnostic for the animation lifecycle (state
+            // machine + scheduler) — see docs/ANIMATION_RUNTIME.md §3 and
+            // the Block 02 report's "passive action technical verification"
+            // section. Fires only when a redraw is actually about to
+            // happen, i.e. only on a real state/frame change — never on a
+            // fixed cadence, same "log transitions, not every tick"
+            // discipline as PollHover()'s click-through instrumentation
+            // (see its doc comment). Logs the current frame's own address
+            // (not its pixel content) as a cheap, allocation-free way to
+            // show *which distinct frame* is on screen across consecutive
+            // log lines, without adding a new public accessor to
+            // AnimationController just for this.
+            const char* stateName = "Idle";
+            if (animController_->State() == content::ControllerState::kClickReaction) {
+                stateName = "ClickReaction";
+            } else if (animController_->State() == content::ControllerState::kPassiveAction) {
+                stateName = "PassiveAction";
+            }
+            SDL_Log(
+                "nimvlets: [diag] animation redraw: state=%s frame=%p t=%.0fms",
+                stateName, static_cast<const void*>(&animController_->CurrentFrame()), afterMs);
+#endif  // NDEBUG
+            RenderFrame();
+            ApplyCurrentHitMask();
+            needsRedraw_ = false;
+        }
+
         if (!usingNativeShapeHitTest_ && afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
             PollHover();
         }

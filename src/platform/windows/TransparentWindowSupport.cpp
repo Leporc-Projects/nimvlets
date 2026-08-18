@@ -21,9 +21,10 @@
 // click-through on a layered window and mirrors
 // src/platform/macos/TransparentWindowSupport.mm's use of
 // NSWindow.ignoresMouseEvents: both are driven by the same
-// core::BlobSilhouette::Contains() decision computed once in
-// src/app/SpikeApp.cpp, so the platform layer only ever reacts to a
-// bool — it never reimplements hit-testing.
+// core::AlphaMask::Contains() decision (the current animation frame's
+// real alpha-derived hit region — see docs/ANIMATION_RUNTIME.md)
+// computed once in src/app/SpikeApp.cpp, so the platform layer only
+// ever reacts to a bool — it never reimplements hit-testing.
 
 namespace nimvlets::platform {
 
