@@ -2,6 +2,8 @@
 
 #include "core/AlphaMask.h"
 
+#include <cstdint>
+
 using nimvlets::core::AlphaMask;
 using nimvlets::core::Point;
 
@@ -76,6 +78,82 @@ bool DimensionsAreReportedCorrectly() {
     return true;
 }
 
+// --- FromAlphaChannel (Block 02: per-frame, threshold-configurable masks) ---
+
+bool FromAlphaChannel_Threshold127Vs128Boundary() {
+    // A single pixel with alpha exactly 127.
+    const std::uint8_t pixel[4] = {255, 255, 255, 127};
+
+    const AlphaMask maskAt128 = AlphaMask::FromAlphaChannel(pixel, 1, 1, 1, 1, /*alphaThreshold=*/128);
+    NIMVLETS_CHECK(!maskAt128.Contains(Point{0.0, 0.0}));  // 127 < 128 -> transparent
+
+    const AlphaMask maskAt127 = AlphaMask::FromAlphaChannel(pixel, 1, 1, 1, 1, /*alphaThreshold=*/127);
+    NIMVLETS_CHECK(maskAt127.Contains(Point{0.0, 0.0}));  // 127 >= 127 -> opaque (inclusive)
+    return true;
+}
+
+bool FromAlphaChannel_DifferentFramesProduceDifferentMasks() {
+    const std::uint8_t opaqueFrame[2 * 2 * 4] = {
+        0, 0, 0, 255, 0, 0, 0, 255,
+        0, 0, 0, 255, 0, 0, 0, 255,
+    };
+    const std::uint8_t transparentFrame[2 * 2 * 4] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    };
+
+    const AlphaMask maskA = AlphaMask::FromAlphaChannel(opaqueFrame, 2, 2, 2, 2, 128);
+    const AlphaMask maskB = AlphaMask::FromAlphaChannel(transparentFrame, 2, 2, 2, 2, 128);
+
+    NIMVLETS_CHECK(maskA.Contains(Point{0.5, 0.5}));
+    NIMVLETS_CHECK(!maskB.Contains(Point{0.5, 0.5}));
+    return true;
+}
+
+bool FromAlphaChannel_DifferentThresholdsSupportedPerPet() {
+    // A pixel at alpha=150 — "visible" under a lenient (lower) threshold,
+    // "transparent" under a strict (higher) one, on the exact same source
+    // data. Demonstrates the threshold is a per-call parameter, not a
+    // baked-in constant — see content::PetDefinition::alphaHitThreshold.
+    const std::uint8_t pixel[4] = {10, 20, 30, 150};
+
+    const AlphaMask lenient = AlphaMask::FromAlphaChannel(pixel, 1, 1, 1, 1, /*alphaThreshold=*/100);
+    NIMVLETS_CHECK(lenient.Contains(Point{0.0, 0.0}));
+
+    const AlphaMask strict = AlphaMask::FromAlphaChannel(pixel, 1, 1, 1, 1, /*alphaThreshold=*/200);
+    NIMVLETS_CHECK(!strict.Contains(Point{0.0, 0.0}));
+    return true;
+}
+
+bool FromAlphaChannel_UpsamplesWithNearestNeighbor() {
+    // 2x2 source: opaque left column, transparent right column.
+    const std::uint8_t src[2 * 2 * 4] = {
+        0, 0, 0, 255, /* (1,0) */ 0, 0, 0, 0,
+        0, 0, 0, 255, /* (1,1) */ 0, 0, 0, 0,
+    };
+    const AlphaMask mask = AlphaMask::FromAlphaChannel(src, 2, 2, /*targetWidth=*/4, /*targetHeight=*/4, 128);
+    NIMVLETS_CHECK(mask.Width() == 4 && mask.Height() == 4);
+    // Left half of the upsampled target should be opaque, right half transparent.
+    NIMVLETS_CHECK(mask.Contains(Point{0.5, 0.5}));
+    NIMVLETS_CHECK(mask.Contains(Point{1.5, 2.5}));
+    NIMVLETS_CHECK(!mask.Contains(Point{2.5, 0.5}));
+    NIMVLETS_CHECK(!mask.Contains(Point{3.5, 3.5}));
+    return true;
+}
+
+bool FromAlphaChannel_DegenerateInputsProduceEmptyMaskNotCrash() {
+    const std::uint8_t pixel[4] = {0, 0, 0, 255};
+    const AlphaMask nullSrc = AlphaMask::FromAlphaChannel(nullptr, 1, 1, 2, 2, 128);
+    NIMVLETS_CHECK(!nullSrc.Contains(Point{0.5, 0.5}));
+
+    const AlphaMask zeroSize = AlphaMask::FromAlphaChannel(pixel, 0, 0, 2, 2, 128);
+    NIMVLETS_CHECK(!zeroSize.Contains(Point{0.5, 0.5}));
+
+    const AlphaMask zeroTarget = AlphaMask::FromAlphaChannel(pixel, 1, 1, 0, 0, 128);
+    NIMVLETS_CHECK(zeroTarget.Width() == 0 && zeroTarget.Height() == 0);
+    return true;
+}
+
 }  // namespace
 
 void RegisterAlphaMaskTests(testing::TestRunner& runner) {
@@ -86,6 +164,11 @@ void RegisterAlphaMaskTests(testing::TestRunner& runner) {
     runner.Add("AlphaMask/SetOpaqueOutOfBoundsIsIgnoredNotUndefined", SetOpaqueOutOfBoundsIsIgnoredNotUndefined);
     runner.Add("AlphaMask/SetOpaqueCanClearAPreviouslySetCell", SetOpaqueCanClearAPreviouslySetCell);
     runner.Add("AlphaMask/DimensionsAreReportedCorrectly", DimensionsAreReportedCorrectly);
+    runner.Add("AlphaMask/FromAlphaChannel_Threshold127Vs128Boundary", FromAlphaChannel_Threshold127Vs128Boundary);
+    runner.Add("AlphaMask/FromAlphaChannel_DifferentFramesProduceDifferentMasks", FromAlphaChannel_DifferentFramesProduceDifferentMasks);
+    runner.Add("AlphaMask/FromAlphaChannel_DifferentThresholdsSupportedPerPet", FromAlphaChannel_DifferentThresholdsSupportedPerPet);
+    runner.Add("AlphaMask/FromAlphaChannel_UpsamplesWithNearestNeighbor", FromAlphaChannel_UpsamplesWithNearestNeighbor);
+    runner.Add("AlphaMask/FromAlphaChannel_DegenerateInputsProduceEmptyMaskNotCrash", FromAlphaChannel_DegenerateInputsProduceEmptyMaskNotCrash);
 }
 
 }  // namespace nimvlets::tests

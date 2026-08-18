@@ -45,6 +45,7 @@ include(FetchSDL3)
 enable_testing()
 
 add_subdirectory(src/core)
+add_subdirectory(src/content)
 add_subdirectory(src/graphics)
 
 if(APPLE)
