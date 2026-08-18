@@ -1,3 +1,4 @@
+#include "ActivePetResolutionTest.h"
 #include "AlphaMaskTest.h"
 #include "AnimationControllerTest.h"
 #include "AppStateSerializerTest.h"
@@ -7,7 +8,10 @@
 #include "FrameSchedulerTest.h"
 #include "PersistenceIntegrationTest.h"
 #include "PersistenceSchedulerTest.h"
+#include "PetCatalogLoaderTest.h"
+#include "PetIdentityTest.h"
 #include "PetPackLoaderTest.h"
+#include "PetSwitchingTest.h"
 #include "SilhouetteTest.h"
 #include "TestRunner.h"
 
@@ -25,6 +29,10 @@ int main() {
     nimvlets::tests::RegisterAppStateStoreTests(runner);
     nimvlets::tests::RegisterPersistenceSchedulerTests(runner);
     nimvlets::tests::RegisterPersistenceIntegrationTests(runner);
+    nimvlets::tests::RegisterPetIdentityTests(runner);
+    nimvlets::tests::RegisterPetCatalogLoaderTests(runner);
+    nimvlets::tests::RegisterActivePetResolutionTests(runner);
+    nimvlets::tests::RegisterPetSwitchingTests(runner);
 
     return runner.RunAll();
 }

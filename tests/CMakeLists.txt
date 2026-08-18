@@ -29,13 +29,22 @@ add_executable(nimvlets_tests
   PersistenceSchedulerTest.cpp
   PersistenceIntegrationTest.h
   PersistenceIntegrationTest.cpp
+  PetIdentityTest.h
+  PetIdentityTest.cpp
+  PetCatalogLoaderTest.h
+  PetCatalogLoaderTest.cpp
+  ActivePetResolutionTest.h
+  ActivePetResolutionTest.cpp
+  PetSwitchingTest.h
+  PetSwitchingTest.cpp
   main.cpp
 )
 
 target_include_directories(nimvlets_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
-# nimvlets_core reaches this target transitively via nimvlets_content's
-# PUBLIC link — linking it again here just produces a harmless-but-noisy
-# "duplicate library" warning (same lesson as Block 01's src/app/CMakeLists.txt).
-target_link_libraries(nimvlets_tests PRIVATE nimvlets_content nimvlets_persistence nimvlets_warnings)
+# nimvlets_core and nimvlets_content reach this target transitively via
+# nimvlets_catalog's PUBLIC link — linking them again here just
+# produces a harmless-but-noisy "duplicate library" warning (same
+# lesson as Block 01's src/app/CMakeLists.txt).
+target_link_libraries(nimvlets_tests PRIVATE nimvlets_persistence nimvlets_catalog nimvlets_warnings)
 
 add_test(NAME nimvlets_unit_tests COMMAND nimvlets_tests)
