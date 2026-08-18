@@ -33,10 +33,10 @@ AppState AppStateStore::Load(std::string* outWarning) const {
         return AppState{};
     }
 
-    // Same whole-file-into-a-buffer approach as
+    // Mismo enfoque de "todo el archivo a un buffer" que
     // content::LoadPetPackFromFile (src/content/PetPackLoader.cpp) —
-    // kept consistent rather than introducing a different idiom for
-    // reading a small binary file.
+    // se mantiene consistente en vez de introducir un idioma distinto
+    // para leer un archivo binario pequeño.
     file.seekg(0, std::ios::end);
     const std::streamoff length = file.tellg();
     if (length < 0) {
@@ -88,8 +88,9 @@ bool AppStateStore::Save(const AppState& state, std::string& outError) const {
             outError = "failed writing app state to temp file: " + tempPath;
             return false;
         }
-        // `file` is flushed and closed here (end of scope), before the
-        // rename below — the rename must never race an open handle.
+        // `file` se flushea y cierra aquí (fin del scope), antes del
+        // rename de abajo — el rename nunca debe competir con un
+        // handle abierto.
     }
 
     std::error_code ec;

@@ -27,23 +27,26 @@ constexpr const char* kPetPackPath = "assets/dev/bunny_pack.nvpack";
 // SpikeApp::ComputeEffectivePassiveIntervalSeconds()'s doc comment.
 constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS";
 
-// Identifies the per-user app-data directory SDL_GetPrefPath()
-// resolves (see docs/PERSISTENCE.md, "storage location policy"). "org"
-// matches AGENTS.md's "built by Leporc Projects"; both strings contain
-// only letters/spaces per SDL_GetPrefPath()'s own documented naming
-// rules, and — per that same documentation — must never change once
-// chosen, since they become part of the on-disk path.
+// Identifica el directorio de app-data por usuario que resuelve
+// SDL_GetPrefPath() (ver docs/PERSISTENCE.md, "política de ubicación
+// de almacenamiento"). "org" coincide con el "built by Leporc
+// Projects" de AGENTS.md; ambos strings contienen solo letras/espacios
+// según las reglas de nombrado documentadas por el propio
+// SDL_GetPrefPath(), y — según esa misma documentación — nunca deben
+// cambiar una vez elegidos, ya que pasan a formar parte de la ruta en
+// disco.
 constexpr const char* kPrefPathOrg = "Leporc Projects";
 constexpr const char* kPrefPathApp = "Nimvlets";
 
-// DEV-only override for the persistence directory, mirroring
-// NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS's pattern (Block 02): when set
-// to a non-empty path, that path is used *instead of*
-// SDL_GetPrefPath() for this run only — production behavior (the
-// unset case) is completely unchanged. This is what lets manual QA
-// and automated smoke tests exercise the real save/load path against
-// an isolated temp directory instead of the real per-user app-data
-// location — see docs/PERSISTENCE.md.
+// Override solo-DEV para el directorio de persistencia, reflejando el
+// patrón de NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS (Block 02): si se
+// setea a una ruta no vacía, esa ruta se usa *en vez de*
+// SDL_GetPrefPath() solo para esta ejecución — el comportamiento de
+// producción (el caso sin setear) queda completamente igual. Esto es
+// lo que permite que la QA manual y los smoke tests automatizados
+// ejerciten el camino real de save/load contra un directorio temporal
+// aislado en vez de la ubicación real de app-data del usuario — ver
+// docs/PERSISTENCE.md.
 constexpr const char* kDevAppDataDirEnvVar = "NIMVLETS_DEV_APPDATA_DIR";
 
 // signal-safe: only ever written by the signal handler and read by the
@@ -189,11 +192,12 @@ bool SpikeApp::Init() {
         return false;
     }
 
-    // Resolve the per-user app-data directory and load any existing
-    // save (see docs/PERSISTENCE.md). Unlike the pet pack above, a
-    // failure here is NOT fatal: persistence is not required for the
-    // app to be visually/interactively functional, so this only
-    // disables load/save for the session rather than aborting startup.
+    // Resuelve el directorio de app-data por usuario y carga cualquier
+    // save existente (ver docs/PERSISTENCE.md). A diferencia del pet
+    // pack de arriba, un fallo aquí NO es fatal: la persistencia no es
+    // necesaria para que la app sea visual/interactivamente funcional,
+    // así que esto solo deshabilita load/save para la sesión en vez de
+    // abortar el arranque.
     std::string appDataDir;
     if (const char* devDir = std::getenv(kDevAppDataDirEnvVar); devDir != nullptr && devDir[0] != '\0') {
         std::error_code ec;
@@ -209,9 +213,10 @@ bool SpikeApp::Init() {
                 kDevAppDataDirEnvVar, devDir);
         }
     } else {
-        // SDL_GetPrefPath() creates the directory itself if needed and
-        // returns an absolute, always-freeable string — see its doc
-        // comment in <SDL3/SDL_filesystem.h>.
+        // SDL_GetPrefPath() crea el directorio ella misma si hace
+        // falta y retorna un string absoluto que siempre se puede
+        // liberar — ver su comentario de documentación en
+        // <SDL3/SDL_filesystem.h>.
         char* prefPathRaw = SDL_GetPrefPath(kPrefPathOrg, kPrefPathApp);
         if (prefPathRaw != nullptr) {
             appDataDir = prefPathRaw;
@@ -231,12 +236,13 @@ bool SpikeApp::Init() {
         }
     }
 
-    // Keep the persisted active-pet id truthfully in sync with
-    // whichever pet actually loaded. This block implements no
-    // selection logic — exactly one pack always loads, unconditionally
-    // — so the two are always the same pet; the field should still
-    // reflect reality (a real, meaningful value a future block's
-    // selection UI could read) rather than sit stale or empty. See
+    // Mantiene el activePetId persistido sincronizado con la verdad:
+    // cualquier pet que se haya cargado realmente. Este bloque no
+    // implementa lógica de selección — siempre carga exactamente un
+    // pack, incondicionalmente — así que ambos son siempre el mismo
+    // pet; aun así el campo debería reflejar la realidad (un valor
+    // real y con sentido que la UI de selección de un bloque futuro
+    // pueda leer) en vez de quedar obsoleto o vacío. Ver
     // docs/PERSISTENCE.md.
     if (appState_.activePetId != pet_.id) {
         appState_.activePetId = pet_.id;
@@ -261,12 +267,13 @@ bool SpikeApp::Init() {
         return false;
     }
 
-    // Reopen where the user last left it (see docs/PERSISTENCE.md,
-    // "last window position") if a drag was ever persisted; otherwise
-    // fall back to the original centered-on-launch default. A saved
-    // position is used exactly as stored — no off-screen/monitor-
-    // bounds validation is attempted in this block (see the Block 03
-    // report's "limitations").
+    // Reabre donde el usuario la dejó por última vez (ver
+    // docs/PERSISTENCE.md, "last window position") si alguna vez se
+    // persistió un drag; si no, usa el default original de centrado al
+    // iniciar. Una posición guardada se usa exactamente como se
+    // guardó — este bloque no intenta ninguna validación de
+    // límites de pantalla/monitor (ver las "limitaciones" del informe
+    // de Block 03).
     if (appState_.lastWindowPosition.has_value()) {
         SDL_SetWindowPosition(window_, appState_.lastWindowPosition->x, appState_.lastWindowPosition->y);
     } else {
@@ -372,10 +379,10 @@ void SpikeApp::FlushPersistedState() {
 }
 
 void SpikeApp::Shutdown() {
-    // Flush first, before tearing down anything else — see
-    // FlushPersistedState()'s doc comment: clean shutdown always
-    // writes whatever's still dirty, regardless of the debounce
-    // deadline.
+    // Flushea primero, antes de desmontar cualquier otra cosa — ver el
+    // comentario de FlushPersistedState(): el shutdown limpio siempre
+    // escribe lo que quede dirty, sin importar el deadline de
+    // debounce.
     FlushPersistedState();
 
     ReleaseAllTextures();
@@ -613,12 +620,12 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 // comment). Repeated clicks during an active reaction
                 // count but never restart the visual.
                 //
-                // clickCount_ (this session only) and
-                // appState_.clickBalance (persisted, cumulative across
-                // sessions — see docs/PERSISTENCE.md) are deliberately
-                // two separate counters, not one repurposed field: one
-                // is a diagnostic, the other is the actual product
-                // currency (see AGENTS.md §2).
+                // clickCount_ (solo esta sesión) y appState_.clickBalance
+                // (persistido, acumulado entre sesiones — ver
+                // docs/PERSISTENCE.md) son deliberadamente dos
+                // contadores separados, no un campo reutilizado: uno
+                // es un diagnóstico, el otro es la moneda real del
+                // producto (ver AGENTS.md §2).
                 ++clickCount_;
                 ++appState_.clickBalance;
                 persistenceScheduler_.MarkDirty(nowMs);
@@ -655,27 +662,31 @@ int SpikeApp::Run() {
     while (running && !ShutdownRequested()) {
         const double nowMs = static_cast<double>(SDL_GetTicks());
 
-        // The wait is bounded by the passive-action deadline (at most
-        // ~300s away by default), then tightened by whichever of the
-        // animation's own next-frame deadline (nullopt while idle is
-        // static — see AnimationController::NextFrameDeadlineMs()), the
-        // pending-persistence-flush deadline (nullopt unless something
-        // is actually dirty — see persistence::PersistenceScheduler and
-        // docs/PERSISTENCE.md), and the Windows-fallback hover-poll
-        // schedule are actually in play — then capped at kMaxWaitMs
-        // below purely for shutdown-signal responsiveness (see its own
-        // comment). A truly static idle with nothing pending to save
-        // still does zero redraw/hit-mask/disk work between wakes: this
-        // is the mechanism behind Block 02's static-idle CPU
-        // improvement over Block 01's fixed ~12fps tick — see
-        // docs/ANIMATION_RUNTIME.md and docs/PERFORMANCE_BUDGETS.md —
-        // and Block 03's persistence deadline reuses the exact same
-        // mechanism rather than adding any polling of its own. Real
-        // input events (including the mouse-moved events SDL's own
-        // Cocoa backend needs to keep click-through correct) wake
-        // SDL_WaitEventTimeout immediately regardless of how long this
-        // timeout is; the timeout only bounds how long *we* block when
-        // nothing happens.
+        // La espera está acotada por el deadline de acción pasiva (a
+        // lo sumo ~300s por defecto), luego se ajusta según cuál de
+        // estos esté en juego: el propio deadline de siguiente frame
+        // de la animación (nullopt mientras el idle es estático — ver
+        // AnimationController::NextFrameDeadlineMs()), el deadline de
+        // flush de persistencia pendiente (nullopt salvo que algo esté
+        // realmente dirty — ver persistence::PersistenceScheduler y
+        // docs/PERSISTENCE.md), y el schedule de poll de hover
+        // (fallback de Windows) — y después se acota a kMaxWaitMs más
+        // abajo, únicamente por capacidad de respuesta ante señales de
+        // shutdown (ver su propio comentario). Un idle verdaderamente
+        // estático sin nada pendiente que guardar sigue sin hacer
+        // ningún trabajo de redraw/hit-mask/disco entre despertares:
+        // este es el mecanismo detrás de la mejora de CPU en idle
+        // estático de Block 02 sobre el tick fijo de ~12fps de
+        // Block 01 — ver docs/ANIMATION_RUNTIME.md y
+        // docs/PERFORMANCE_BUDGETS.md — y el deadline de persistencia
+        // de Block 03 reutiliza exactamente el mismo mecanismo en vez
+        // de agregar ningún polling propio. Los eventos de input
+        // reales (incluyendo los eventos de mouse-moved que el propio
+        // backend de Cocoa de SDL necesita para mantener correcto el
+        // click-through) despiertan SDL_WaitEventTimeout de inmediato
+        // sin importar cuán largo sea este timeout; el timeout solo
+        // acota cuánto tiempo *nosotros* bloqueamos cuando no pasa
+        // nada.
         double waitMs = nextPassiveDeadlineMs_ - nowMs;
         if (const std::optional<double> frameDeadline = animController_->NextFrameDeadlineMs()) {
             waitMs = std::min(waitMs, *frameDeadline - nowMs);
@@ -689,22 +700,25 @@ int SpikeApp::Run() {
         if (waitMs < 0.0) {
             waitMs = 0.0;
         }
-        // Capped so a pending SIGINT/SIGTERM is always noticed within
-        // about a second even during a truly static idle stretch with
-        // nothing else scheduled for minutes (see ShutdownRequested()'s
-        // doc comment and docs/PERSISTENCE.md's "shutdown responsiveness"
-        // note) — found by this block's own non-interactive smoke
-        // testing: a signal does not itself interrupt a blocking
-        // SDL_WaitEventTimeout on this platform, so without this cap
-        // the loop would only re-check ShutdownRequested() when the
-        // *real* next deadline (up to the ~300s passive interval) was
-        // finally reached. Waking once a second and doing nothing but
-        // re-check a few already-cheap conditions before going back to
-        // sleep is not the "no busy-wait"/"static-idle sleeping"
-        // regression this block is required to avoid — no redraw, no
-        // hit-mask rebuild, no disk I/O happens on a wake unless a real
-        // deadline actually arrived; see docs/PERFORMANCE_BUDGETS.md,
-        // which reconfirms idle CPU is unaffected by this cap.
+        // Acotado para que un SIGINT/SIGTERM pendiente siempre se note
+        // dentro de aproximadamente un segundo, incluso durante un
+        // tramo de idle verdaderamente estático sin nada más programado
+        // por minutos (ver el comentario de ShutdownRequested() y la
+        // nota de "capacidad de respuesta ante shutdown" en
+        // docs/PERSISTENCE.md) — encontrado por los propios smoke tests
+        // no interactivos de este bloque: una señal no interrumpe por
+        // sí misma un SDL_WaitEventTimeout bloqueante en esta
+        // plataforma, así que sin este cap el loop solo volvería a
+        // chequear ShutdownRequested() cuando finalmente se alcanzara
+        // el *próximo* deadline real (hasta el intervalo pasivo de
+        // ~300s). Despertar una vez por segundo y no hacer nada más que
+        // volver a chequear un puñado de condiciones ya baratas antes
+        // de volver a dormir no es la regresión de "sin busy-wait"/
+        // "static-idle sleeping" que este bloque debe evitar — no hay
+        // redraw, no hay reconstrucción de hit-mask, no hay I/O de
+        // disco en un despertar salvo que haya llegado realmente un
+        // deadline; ver docs/PERFORMANCE_BUDGETS.md, que reconfirma que
+        // el CPU en idle no se ve afectado por este cap.
         constexpr double kMaxWaitMs = 1000.0;
         waitMs = std::min(waitMs, kMaxWaitMs);
         const Sint32 timeoutMs = static_cast<Sint32>(waitMs);

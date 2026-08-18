@@ -64,25 +64,29 @@ above is a reasonable proxy, not a claim of an identically-measured
 data point). RSS remains well within the < 100 MB budget across all
 three scenarios.
 
-## Block 03's actual measurements
+## Mediciones reales de Block 03
 
-Persistence (`src/persistence`) adds a debounced disk write and, per
-`docs/PERSISTENCE.md` §9, a capped 1-second maximum event-loop wait
-(fixing a shutdown-latency bug that block's own testing found — see
-`docs/DECISION_LOG.md` DEC-028). Re-measured with the same method as
-Block 02, Release, native arm64, persistence active
-(`NIMVLETS_DEV_APPDATA_DIR` pointed at an isolated temp directory):
+La persistencia (`src/persistence`) agrega una escritura a disco con
+debounce y, según `docs/PERSISTENCE.md` §9, una espera máxima del
+event loop acotada a 1 segundo (corrigiendo un bug de latencia de
+shutdown que encontraron los propios tests de ese bloque — ver
+`docs/DECISION_LOG.md` DEC-028). Re-medido con el mismo método que
+Block 02, Release, arm64 nativo, persistencia activa
+(`NIMVLETS_DEV_APPDATA_DIR` apuntado a un directorio temporal
+aislado):
 
-| Scenario | CPU (average, steady state) | RSS |
+| Escenario | CPU (promedio, steady state) | RSS |
 |---|---|---|
-| Block 03, static idle, persistence active, no pending writes | **≈0.0%** | ≈73–74 MB |
+| Block 03, idle estático, persistencia activa, sin escrituras pendientes | **≈0.0%** | ≈73–74 MB |
 
-Unchanged from Block 02 within measurement noise — the 1-second wait
-cap and the (idle, non-dirty) persistence scheduler add a wake that
-does no work the overwhelming majority of the time, not a busy-wait or
-periodic render tick. A single debounced write (a few dozen bytes,
-atomically renamed) is not large enough to register on a 3-second-
-interval `ps` sample; no dedicated per-write CPU/latency measurement
-was made in this block, since none of the block's requirements called
-for one and the mechanism (one small buffered write + one rename) has
-no realistic path to being a measurable cost at this scale.
+Sin cambios respecto a Block 02 dentro del ruido de medición — el cap
+de espera de 1 segundo y el scheduler de persistencia (en idle, no
+dirty) agregan un despertar que no hace ningún trabajo la abrumadora
+mayoría de las veces, no un busy-wait ni un tick de render periódico.
+Una única escritura con debounce (unas pocas decenas de bytes,
+renombrada atómicamente) no es suficientemente grande como para
+registrarse en una muestra de `ps` a intervalos de 3 segundos; no se
+hizo una medición dedicada de CPU/latencia por escritura en este
+bloque, ya que ninguno de sus requisitos la pedía y el mecanismo (una
+pequeña escritura bufferizada + un rename) no tiene ningún camino
+realista para ser un costo medible a esta escala.

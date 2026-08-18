@@ -16,12 +16,13 @@ namespace nimvlets::tests {
 
 namespace {
 
-// A fresh, isolated temporary directory per test, cleaned up on
-// destruction — never the user's real per-user app-data directory (see
-// docs/PERSISTENCE.md and the block brief's testability requirements).
-// Each instance gets a distinct subdirectory of the system temp path;
-// tests in this file run sequentially in one process, so a simple
-// incrementing counter is sufficient for uniqueness.
+// Un directorio temporal fresco y aislado por test, limpiado al
+// destruirse — nunca el directorio real de app-data del usuario (ver
+// docs/PERSISTENCE.md y los requisitos de testeabilidad del brief del
+// bloque). Cada instancia recibe un subdirectorio distinto de la ruta
+// temporal del sistema; los tests de este archivo corren
+// secuencialmente en un mismo proceso, así que un contador incremental
+// simple alcanza para garantizar unicidad.
 class TempTestDirectory {
  public:
     TempTestDirectory() {
@@ -33,7 +34,7 @@ class TempTestDirectory {
 
     ~TempTestDirectory() {
         std::error_code ec;
-        std::filesystem::remove_all(path_, ec);  // best-effort cleanup
+        std::filesystem::remove_all(path_, ec);  // limpieza best-effort
     }
 
     TempTestDirectory(const TempTestDirectory&) = delete;
@@ -53,7 +54,7 @@ bool TestLoadReturnsDefaultsWhenNoSaveExists() {
     const AppState state = store.Load(&warning);
 
     NIMVLETS_CHECK(state == AppState{});
-    NIMVLETS_CHECK(!warning.empty());  // explains *why* it's defaults
+    NIMVLETS_CHECK(!warning.empty());  // explica *por qué* son defaults
     return true;
 }
 
@@ -73,7 +74,7 @@ bool TestSaveThenLoadRoundTrips() {
     std::string loadWarning;
     const AppState loaded = store.Load(&loadWarning);
     NIMVLETS_CHECK(loaded == original);
-    NIMVLETS_CHECK(loadWarning.empty());  // a valid, current-schema save was found
+    NIMVLETS_CHECK(loadWarning.empty());  // se encontró un save válido con el schema actual
     return true;
 }
 
@@ -95,9 +96,9 @@ bool TestLoadRecoversFromCorruptFile() {
     TempTestDirectory dir;
     const AppStateStore store(dir.path());
 
-    // Write garbage directly, bypassing Save() entirely, to simulate
-    // real on-disk corruption (partial write, bit rot, a stray editor
-    // save, ...).
+    // Escribe basura directamente, evitando Save() por completo, para
+    // simular corrupción real en disco (escritura parcial, bit rot,
+    // un guardado accidental de un editor, ...).
     {
         std::ofstream garbage(std::filesystem::path(dir.path()) / "state.nvstate", std::ios::binary);
         const std::vector<std::uint8_t> junk = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
@@ -106,19 +107,21 @@ bool TestLoadRecoversFromCorruptFile() {
 
     std::string warning;
     const AppState state = store.Load(&warning);
-    NIMVLETS_CHECK(state == AppState{});  // safe defaults, not a crash
+    NIMVLETS_CHECK(state == AppState{});  // defaults seguros, no un crash
     NIMVLETS_CHECK(!warning.empty());
     return true;
 }
 
 bool TestFailedWriteDoesNotCrashAndReportsError() {
     TempTestDirectory dir;
-    // Pre-create a *directory* at exactly the path AppStateStore would
-    // use for its temp file — opening a directory for writing as a
-    // regular file fails uniformly on every platform this project
-    // targets, giving a portable, deterministic write failure without
-    // relying on filesystem-permission tricks (chmod semantics differ
-    // enough between POSIX and Windows to make that fragile in CI).
+    // Pre-crea un *directorio* exactamente en la ruta que
+    // AppStateStore usaría para su archivo temporal — abrir un
+    // directorio para escritura como si fuera un archivo regular falla
+    // de forma uniforme en cada plataforma que este proyecto soporta,
+    // dando un fallo de escritura portátil y determinista sin depender
+    // de trucos de permisos de filesystem (la semántica de chmod
+    // difiere bastante entre POSIX y Windows como para volverlo frágil
+    // en CI).
     std::filesystem::create_directories(std::filesystem::path(dir.path()) / "state.nvstate.tmp");
 
     const AppStateStore store(dir.path());
@@ -141,8 +144,9 @@ bool TestFailedWritePreservesPriorValidSave() {
     std::string firstSaveError;
     NIMVLETS_CHECK(store.Save(good, firstSaveError));
 
-    // Now force the *next* save to fail via the same directory-
-    // collision technique, after a valid save already landed on disk.
+    // Ahora fuerza a que el *siguiente* save falle, vía la misma
+    // técnica de colisión de directorio, después de que un save válido
+    // ya quedó en disco.
     std::filesystem::create_directories(std::filesystem::path(dir.path()) / "state.nvstate.tmp");
 
     AppState bad;
@@ -152,7 +156,7 @@ bool TestFailedWritePreservesPriorValidSave() {
     NIMVLETS_CHECK(!store.Save(bad, secondSaveError));
     NIMVLETS_CHECK(!secondSaveError.empty());
 
-    // The previously good save must be completely untouched.
+    // El save previo bueno debe quedar completamente intacto.
     std::string loadWarning;
     const AppState loaded = store.Load(&loadWarning);
     NIMVLETS_CHECK(loaded == good);

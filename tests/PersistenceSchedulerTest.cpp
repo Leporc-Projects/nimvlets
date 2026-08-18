@@ -25,14 +25,15 @@ bool TestMarkDirtyArmsADeadlineDebounceMsInTheFuture() {
     return true;
 }
 
-// The core "rapid clicks coalesce into one write" behavior: repeated
-// MarkDirty() calls before the deadline fires must not push it further
-// out, or continuous activity could starve persistence indefinitely.
+// El comportamiento central de "los clicks rápidos se coalescen en una
+// escritura": llamadas repetidas a MarkDirty() antes de que dispare el
+// deadline no deben empujarlo más lejos, o la actividad continua
+// podría dejar la persistencia sin escribir indefinidamente.
 bool TestRepeatedMarkDirtyCallsDoNotExtendTheDeadline() {
     PersistenceScheduler scheduler(2000.0);
-    scheduler.MarkDirty(1000.0);  // arms deadline at 3000.0
-    scheduler.MarkDirty(1500.0);  // already dirty -> no-op
-    scheduler.MarkDirty(2900.0);  // still already dirty -> no-op, even though close to the deadline
+    scheduler.MarkDirty(1000.0);  // arma el deadline en 3000.0
+    scheduler.MarkDirty(1500.0);  // ya estaba dirty -> no hace nada
+    scheduler.MarkDirty(2900.0);  // sigue dirty -> no hace nada, aunque esté cerca del deadline
     NIMVLETS_CHECK(scheduler.IsDirty());
     NIMVLETS_CHECK(*scheduler.NextFlushDeadlineMs() == 3000.0);
     return true;
@@ -47,9 +48,10 @@ bool TestOnFlushSucceededClearsDirtyState() {
     return true;
 }
 
-// A flush that fails must not silently drop the pending change, but
-// must also not retry on literally the next event-loop wake — it's
-// rescheduled a further debounceMs out.
+// Un flush que falla no debe descartar en silencio el cambio
+// pendiente, pero tampoco debe reintentar en el despertar
+// inmediatamente siguiente del event loop — se reprograma otro
+// debounceMs más adelante.
 bool TestOnFlushFailedKeepsDirtyAndReschedules() {
     PersistenceScheduler scheduler(2000.0);
     scheduler.MarkDirty(1000.0);  // deadline = 3000.0
@@ -72,14 +74,14 @@ bool TestMarkDirtyAfterFlushSucceededArmsANewDeadline() {
     PersistenceScheduler scheduler(2000.0);
     scheduler.MarkDirty(1000.0);
     scheduler.OnFlushSucceeded();
-    scheduler.MarkDirty(10000.0);  // a brand new change, well after the first cycle
+    scheduler.MarkDirty(10000.0);  // un cambio totalmente nuevo, bastante después del primer ciclo
     NIMVLETS_CHECK(scheduler.IsDirty());
     NIMVLETS_CHECK(*scheduler.NextFlushDeadlineMs() == 12000.0);
     return true;
 }
 
 bool TestDefaultDebounceIntervalMatchesDocumentedConstant() {
-    PersistenceScheduler scheduler;  // uses kDefaultDebounceMs
+    PersistenceScheduler scheduler;  // usa kDefaultDebounceMs
     scheduler.MarkDirty(0.0);
     NIMVLETS_CHECK(*scheduler.NextFlushDeadlineMs() == PersistenceScheduler::kDefaultDebounceMs);
     return true;

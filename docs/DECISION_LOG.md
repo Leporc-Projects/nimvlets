@@ -441,122 +441,134 @@ override reads around it rather than through it.
 
 ---
 
-### DEC-025 — `src/persistence`: a new, SDL-free library for local state
-**Status:** DECIDIDO · Block 03 — see `docs/PERSISTENCE.md`.
+### DEC-025 — `src/persistence`: una nueva librería sin SDL para el estado local
+**Status:** DECIDIDO · Block 03 — ver `docs/PERSISTENCE.md`.
 
-Block 03 needed a small persistence layer (click balance, active pet
-id/variant, last window position) that stays testable without a
-display, per AGENTS.md §12 and this project's established pattern
-(`src/core`, `src/content` are both pure/SDL-free for exactly this
-reason). Rather than fold storage logic into `src/app/SpikeApp` (SDL-
-coupled) or into `src/content` (a different concern — content
-describes *what a pet looks like*, not *what the user has done*), a
-new top-level library was created, mirroring Block 02's precedent of
-one focused library per major feature:
+Block 03 necesitaba una pequeña capa de persistencia (click balance,
+pet/variante activos, última posición de ventana) que se mantuviera
+testeable sin display, según AGENTS.md §12 y el patrón ya establecido
+de este proyecto (`src/core`, `src/content` son ambos puros/sin SDL por
+exactamente esta razón). En vez de meter la lógica de storage dentro de
+`src/app/SpikeApp` (acoplado a SDL) o dentro de `src/content` (una
+preocupación distinta — content describe *cómo se ve un pet*, no *qué
+hizo el usuario*), se creó una nueva librería de nivel superior,
+replicando el precedente de Block 02 de una librería enfocada por cada
+feature grande:
 
-- `persistence::AppState` — a plain struct, no SDL, no file I/O.
-  Generic by construction: `activePetId`/`activeVariantId` are strings,
-  not an enum, so a new pet or variant never requires a schema or code
-  change.
-- `persistence::AppStateSerializer` — pure (de)serialization to/from
-  an in-memory byte buffer, mirroring `content::PetPackLoader`'s own
-  separation between parsing and file access.
-- `persistence::AppStateStore` — the only piece that touches a
-  filesystem; takes a directory path as a constructor argument rather
-  than resolving one itself, so tests point it at temp directories and
-  the real app points it at `SDL_GetPrefPath()`'s result — the same
-  path never appears twice.
-- `persistence::PersistenceScheduler` — pure debounce/dirty-flag
-  timing, tested with fabricated timestamps exactly like
+- `persistence::AppState` — un struct simple, sin SDL, sin I/O de
+  archivos. Genérico por construcción: `activePetId`/`activeVariantId`
+  son strings, no un enum, así que un nuevo pet o variante nunca
+  requiere un cambio de schema ni de código.
+- `persistence::AppStateSerializer` — (de)serialización pura hacia/
+  desde un buffer de bytes en memoria, reflejando la propia separación
+  de `content::PetPackLoader` entre parseo y acceso a archivos.
+- `persistence::AppStateStore` — la única pieza que toca un filesystem;
+  recibe una ruta de directorio como argumento del constructor en vez
+  de resolverla ella misma, así los tests la apuntan a directorios
+  temporales y la app real la apunta al resultado de
+  `SDL_GetPrefPath()` — el mismo camino nunca aparece dos veces.
+- `persistence::PersistenceScheduler` — timing puro de debounce/dirty-
+  flag, testeado con timestamps fabricados exactamente igual que
   `core::FrameScheduler`.
 
-`nimvlets_persistence` links nothing project-specific (not even
-`nimvlets_core`) — see `src/persistence/CMakeLists.txt` — it depends
-only on the C++ standard library (`<filesystem>`, `<optional>`, ...).
+`nimvlets_persistence` no enlaza nada propio del proyecto (ni siquiera
+`nimvlets_core`) — ver `src/persistence/CMakeLists.txt` — depende solo
+de la standard library de C++ (`<filesystem>`, `<optional>`, ...).
 
 ---
 
-### DEC-026 — Two separate click counters; storage location via `SDL_GetPrefPath` + a DEV override
-**Status:** DECIDIDO · Block 03 — see `docs/PERSISTENCE.md` §§2, 7.
+### DEC-026 — Dos contadores de click separados; ubicación de storage vía `SDL_GetPrefPath` + override DEV
+**Status:** DECIDIDO · Block 03 — ver `docs/PERSISTENCE.md` §§2, 7.
 
-`clickCount_` (Block 01/02's existing session-only diagnostic, logged
-at shutdown) and `AppState::clickBalance` (the new, persisted,
-cumulative product currency — AGENTS.md §2) are kept as two distinct
-fields rather than repurposing one: they answer different questions
-("how many clicks this run" vs. "how many clicks ever, spendable
-later") and conflating them would make a future Shop's balance
-depend on session-diagnostic logging code.
+`clickCount_` (el diagnóstico existente de solo-sesión de Block 01/02,
+logueado al shutdown) y `AppState::clickBalance` (la nueva moneda de
+producto, persistida y acumulada — AGENTS.md §2) se mantienen como dos
+campos distintos en vez de reutilizar uno: responden preguntas
+distintas ("cuántos clicks en esta corrida" vs. "cuántos clicks en
+total, gastables después") y mezclarlos haría que el balance de un
+futuro Shop dependiera de código de logging de diagnóstico de sesión.
 
-Storage location: `SDL_GetPrefPath("Leporc Projects", "Nimvlets")` —
-SDL's own cross-platform per-user app-data resolver, which already
-fully handles the macOS/Windows difference, so no new
-`src/platform/*` code was needed (unlike window transparency/click-
-through, which SDL can't fully abstract — see `docs/PLATFORM_SPIKE.md`).
-`NIMVLETS_DEV_APPDATA_DIR` (checked before `SDL_GetPrefPath()` is ever
-called) lets manual QA and this block's own non-interactive smoke
-tests redirect persistence to an isolated temp directory — mirroring
-Block 02's `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS` pattern exactly.
-This was necessary in practice: an early smoke-test attempt that tried
-overriding the `HOME` environment variable instead did **not** redirect
-`SDL_GetPrefPath()` on macOS (its Cocoa backend resolves the app-
-support directory via Foundation APIs, not the `HOME` env var),
-briefly writing a real file under the actual per-user directory before
-this override was added — caught immediately, the stray file was
-deleted, and no other test in this block touches the real location.
-
----
-
-### DEC-027 — Debounced write policy with atomic rename-based writes
-**Status:** DECIDIDO · Block 03 — see `docs/PERSISTENCE.md` §§4, 6.
-
-Rapid clicks must not become one disk write each. `PersistenceScheduler`
-implements a fixed-window debounce (2000ms,
-`kDefaultDebounceMs`): the first dirty-marking change arms a single
-deadline; further changes before it fires update the in-memory state
-but never push the deadline out — this is what makes continuous
-activity coalesce into periodic writes instead of either flooding the
-disk or starving persistence indefinitely. A failed flush stays dirty
-and is retried one debounce interval later, never immediately (bounds
-retry frequency under a persistent failure) and never silently
-dropped. Clean shutdown flushes unconditionally, ignoring the deadline.
-
-Writes are atomic via the standard write-to-temp-then-rename technique
-(`AppStateStore::Save()`): the real `state.nvstate` file is only ever
-replaced by one same-directory `std::filesystem::rename()`, never
-opened for writing directly, so a write that fails at any earlier step
-leaves the previous valid save completely untouched — verified
-directly in `tests/AppStateStoreTest.cpp` via a portable failure-
-simulation technique (occupying the temp-file path with a directory,
-which fails to open as a regular file identically on every platform
-this project targets, avoiding fragile `chmod`-based tricks).
+Ubicación de storage: `SDL_GetPrefPath("Leporc Projects", "Nimvlets")`
+— el propio resolutor multiplataforma de SDL para app-data por usuario,
+que ya maneja por completo la diferencia entre macOS/Windows, así que
+no hizo falta código nuevo en `src/platform/*` (a diferencia de la
+transparencia/click-through de ventana, que SDL no puede abstraer del
+todo — ver `docs/PLATFORM_SPIKE.md`). `NIMVLETS_DEV_APPDATA_DIR`
+(verificado antes de llamar a `SDL_GetPrefPath()`) le permite a la QA
+manual y a los smoke tests no interactivos propios de este bloque
+redirigir la persistencia a un directorio temporal aislado — reflejando
+exactamente el patrón de `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS` de
+Block 02. Esto fue necesario en la práctica: un intento temprano de
+smoke test que probó sobrescribir la variable de entorno `HOME` en su
+lugar **no** redirigió `SDL_GetPrefPath()` en macOS (su backend de
+Cocoa resuelve el directorio de app-support vía APIs de Foundation, no
+la variable de entorno `HOME`), escribiendo brevemente un archivo real
+bajo el directorio real por usuario antes de agregar este override —
+detectado de inmediato, el archivo perdido se eliminó, y ningún otro
+test de este bloque toca la ubicación real.
 
 ---
 
-### DEC-028 — Event-loop shutdown-responsiveness fix: capped maximum wait
-**Status:** DECIDIDO · Block 03 (bug fix, found via this block's own
-automated testing) — see `docs/PERSISTENCE.md` §9.
+### DEC-027 — Política de escritura con debounce y escrituras atómicas basadas en rename
+**Status:** DECIDIDO · Block 03 — ver `docs/PERSISTENCE.md` §§4, 6.
 
-This block's "no manual QA" constraint required genuinely reliable
-non-interactive smoke tests, including letting the app fully settle
-into static idle before sending it `SIGTERM` — a scenario no earlier
-block's testing had exercised (every prior CPU/behavior measurement
-either sent the signal shortly after launch, while startup-related
-events were still trickling in, or ran under a short DEV interval
-override that kept the loop waking frequently). That exposed a real,
-pre-existing characteristic: a delivered `SIGINT`/`SIGTERM` does not
-itself interrupt a blocking `SDL_WaitEventTimeout` on this platform —
-the loop only re-checks `ShutdownRequested()` when its own wait
-naturally returns. With nothing else scheduled for minutes (the ~300s
-passive-action deadline being the only remaining bound), a termination
-signal could in principle take that long to be noticed.
+Los clicks rápidos no deben convertirse en una escritura a disco cada
+uno. `PersistenceScheduler` implementa un debounce de ventana fija
+(2000ms, `kDefaultDebounceMs`): el primer cambio que marca dirty arma
+un único deadline; los cambios posteriores antes de que dispare
+actualizan el estado en memoria pero nunca empujan el deadline — esto
+es lo que hace que la actividad continua se coalesca en escrituras
+periódicas en vez de inundar el disco o dejar la persistencia sin
+escribir indefinidamente. Un flush fallido queda dirty y se reintenta
+un intervalo de debounce más tarde, nunca de inmediato (acota la
+frecuencia de reintento bajo un fallo persistente) y nunca se descarta
+en silencio. El shutdown limpio flushea incondicionalmente, ignorando
+el deadline.
 
-Fixed with a hard cap (`kMaxWaitMs = 1000.0`) on the event loop's
-computed wait time, applied after every other deadline. A wake that
-finds nothing due does zero redraw/hit-mask/disk work before sleeping
-again, so this does not reintroduce Block 01's fixed render tick or
-regress static-idle CPU — re-measured at ≈0.0% after the fix (see
-docs/PERFORMANCE_BUDGETS.md). Shutdown latency after this fix is
-bounded to about one second, confirmed by reproducing the exact
-previously-hanging scenario (a fully-settled idle run with a matching,
-already-synced persisted state) and observing a clean exit shortly
-after `SIGTERM`.
+Las escrituras son atómicas vía la técnica estándar de
+escribir-a-temp-y-luego-renombrar (`AppStateStore::Save()`): el archivo
+real `state.nvstate` solo se reemplaza mediante un único
+`std::filesystem::rename()` dentro del mismo directorio, nunca se abre
+para escritura directamente, así que una escritura que falla en
+cualquier paso anterior deja el save previo válido completamente
+intacto — verificado directamente en `tests/AppStateStoreTest.cpp` vía
+una técnica portátil de simulación de fallos (ocupar la ruta del
+archivo temporal con un directorio, lo cual falla al abrirse como
+archivo regular de forma idéntica en cada plataforma que este proyecto
+soporta, evitando trucos frágiles basados en `chmod`).
+
+---
+
+### DEC-028 — Fix de capacidad de respuesta ante shutdown del event loop: espera máxima acotada
+**Status:** DECIDIDO · Block 03 (corrección de bug, encontrada vía los
+propios tests automatizados de este bloque) — ver `docs/PERSISTENCE.md`
+§9.
+
+La restricción de "sin QA manual" de este bloque exigía smoke tests no
+interactivos genuinamente confiables, incluyendo dejar que la app se
+asentara del todo en idle estático antes de enviarle `SIGTERM` — un
+escenario que ningún test de un bloque anterior había ejercitado (cada
+medición previa de CPU/comportamiento o bien enviaba la señal poco
+después del arranque, mientras todavía llegaban eventos relacionados
+con el startup, o corría bajo un override de intervalo DEV corto que
+mantenía al loop despertando con frecuencia). Eso expuso una
+característica real y preexistente: un `SIGINT`/`SIGTERM` entregado no
+interrumpe por sí mismo un `SDL_WaitEventTimeout` bloqueante en esta
+plataforma — el loop solo vuelve a chequear `ShutdownRequested()`
+cuando su propia espera retorna naturalmente. Sin nada más programado
+por minutos (quedando solo el deadline de acción pasiva de ~300s como
+límite), una señal de terminación podía en principio tardar ese tanto
+en notarse.
+
+Corregido con un tope duro (`kMaxWaitMs = 1000.0`) sobre el tiempo de
+espera calculado del event loop, aplicado después de cualquier otro
+deadline. Un despertar que no encuentra nada pendiente no hace ningún
+trabajo de redraw/hit-mask/disco antes de volver a dormir, así que esto
+no reintroduce el tick de render fijo de Block 01 ni regresiona el CPU
+en idle estático — re-medido en ≈0.0% después del fix (ver
+docs/PERFORMANCE_BUDGETS.md). La latencia de shutdown después de este
+fix queda acotada a aproximadamente un segundo, confirmado
+reproduciendo exactamente el escenario que antes se colgaba (una
+corrida en idle completamente asentada, con un estado persistido que
+ya coincidía y estaba sincronizado) y observando una salida limpia poco
+después del `SIGTERM`.

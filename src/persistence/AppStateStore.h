@@ -6,44 +6,45 @@
 
 namespace nimvlets::persistence {
 
-// Reads/writes one AppState to a single file inside `directoryPath`,
-// with an atomic-write strategy (write to a temp file, then rename
-// over the real one) so a save interrupted partway (crash, power loss,
-// disk full) can never leave a half-written, corrupt file in place of
-// a previously good one. See docs/PERSISTENCE.md for the exact
-// file-name/path policy.
+// Lee/escribe un AppState en un único archivo dentro de
+// `directoryPath`, con una estrategia de escritura atómica (escribir a
+// un archivo temporal, luego renombrar sobre el real) para que un save
+// interrumpido a mitad de camino (crash, corte de energía, disco
+// lleno) nunca deje un archivo corrupto a medio escribir en lugar de
+// uno previo válido. Ver docs/PERSISTENCE.md para la política exacta
+// de nombre de archivo/ruta.
 //
-// This class assumes `directoryPath` already exists — in production,
-// SDL_GetPrefPath() guarantees this (it creates the directory itself);
-// tests must create their own temporary directory before constructing
-// this class. It never resolves a path itself and never touches
-// anything outside the one file (plus its `.tmp` staging file) inside
-// `directoryPath` — see tests/AppStateStoreTest.cpp, which points it
-// at fresh, isolated temp directories, never the user's real app-data
-// location.
+// Esta clase asume que `directoryPath` ya existe — en producción,
+// SDL_GetPrefPath() garantiza esto (crea el directorio ella misma);
+// los tests deben crear su propio directorio temporal antes de
+// construir esta clase. Nunca resuelve una ruta por sí misma y nunca
+// toca nada fuera del único archivo (más su archivo de staging
+// `.tmp`) dentro de `directoryPath` — ver tests/AppStateStoreTest.cpp,
+// que la apunta a directorios temporales aislados y frescos, nunca a
+// la ubicación real de app-data del usuario.
 class AppStateStore {
  public:
     explicit AppStateStore(std::string directoryPath);
 
-    // Returns a previously saved state, or AppState{} (safe defaults)
-    // if no save exists yet, the file can't be read, or its contents
-    // don't parse (bad magic, truncated, unsupported schema version).
-    // Never throws, never crashes the caller. If `outWarning` is
-    // non-null, it's set to a short, specific, human-readable reason
-    // whenever the result isn't "a valid, current-schema save was
-    // found" (and cleared otherwise) — the caller decides whether/how
-    // to log it.
+    // Retorna un estado previamente guardado, o AppState{} (defaults
+    // seguros) si aún no existe ningún save, el archivo no se puede
+    // leer, o su contenido no parsea (magic inválido, truncado, schema
+    // version no soportada). Nunca lanza excepción, nunca crashea al
+    // llamador. Si `outWarning` no es nulo, se setea a una razón
+    // corta, específica y legible cada vez que el resultado no es "se
+    // encontró un save válido con el schema actual" (y se limpia en
+    // caso contrario) — el llamador decide si/cómo loguearlo.
     AppState Load(std::string* outWarning = nullptr) const;
 
-    // Serializes `state` and writes it atomically: the full contents
-    // are first written to a temp file in the same directory (so the
-    // final rename is on the same filesystem, which is what makes it
-    // atomic), and only renamed into place if that write fully
-    // succeeded. If anything fails — the temp file can't be created or
-    // written, or the rename fails — the previously saved file (if
-    // any) is left completely untouched, and this returns false with
-    // `outError` set to a specific reason. Never throws, never
-    // crashes.
+    // Serializa `state` y lo escribe atómicamente: el contenido
+    // completo se escribe primero a un archivo temporal en el mismo
+    // directorio (así el rename final es en el mismo filesystem, que
+    // es lo que lo hace atómico), y solo se renombra a su lugar si esa
+    // escritura tuvo éxito completo. Si algo falla — el archivo
+    // temporal no se puede crear o escribir, o el rename falla — el
+    // archivo previamente guardado (si existe) queda completamente
+    // intacto, y esto retorna false con `outError` seteado a una razón
+    // específica. Nunca lanza excepción, nunca crashea.
     bool Save(const AppState& state, std::string& outError) const;
 
  private:

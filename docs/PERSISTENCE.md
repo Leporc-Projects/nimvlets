@@ -1,84 +1,88 @@
-# Nimvlets — Local State Persistence (Block 03)
+# Nimvlets — Persistencia local de estado (Block 03)
 
-This describes the small, local-only persistence layer built in Block 03
-on top of Block 02's content/animation runtime. It is not a UI block —
-nothing here adds a Shop, Collection, onboarding, or pet-selection
-screen. See `docs/ANIMATION_RUNTIME.md` for the runtime this plugs
-into, and `docs/DECISION_LOG.md` DEC-025 through DEC-028 for why each
-choice below was made.
+Esto describe la pequeña capa de persistencia, local-only, construida
+en Block 03 sobre el runtime de contenido/animación de Block 02. No es
+un bloque de UI — nada aquí agrega una pantalla de Shop, Collection,
+onboarding, o selección de pet. Ver `docs/ANIMATION_RUNTIME.md` para el
+runtime en el que esto se enchufa, y `docs/DECISION_LOG.md` DEC-025 a
+DEC-028 para por qué se tomó cada decisión de abajo.
 
-## 1. Scope
+## 1. Alcance
 
-Persisted, with real runtime meaning today:
+Persistido, con significado real en el runtime hoy:
 
-- **Click balance** (`AppState::clickBalance`, `uint64`) — the only
-  currency (AGENTS.md §2). Incremented on every valid click; never
-  decremented in this block (no Shop exists yet to spend it).
-- **Active pet id** (`AppState::activePetId`) — kept truthfully in
-  sync with whichever pet actually loaded (`content::PetDefinition::id`).
-  This block implements no pet *selection*: exactly one pack always
-  loads, so the field always reflects that one pet. It exists so a
-  future selection UI has somewhere to read/write from without a
-  schema change.
-- **Active variant id** (`AppState::activeVariantId`) — carried
-  through load/save; nothing in this block writes a non-empty value
-  (no variant selection exists yet — see
-  `content::PetDefinition::variantGroup`, also schema-only).
-- **Last window position** (`AppState::lastWindowPosition`) — updated
-  whenever a drag ends; used to reopen the window where the user left
-  it (see §7).
+- **Click balance** (`AppState::clickBalance`, `uint64`) — la única
+  moneda (AGENTS.md §2). Se incrementa en cada click válido; nunca se
+  decrementa en este bloque (todavía no existe un Shop donde gastarlo).
+- **Active pet id** (`AppState::activePetId`) — se mantiene
+  sincronizado con la verdad: cualquier pet que se haya cargado
+  realmente (`content::PetDefinition::id`). Este bloque no implementa
+  *selección* de pet: siempre carga exactamente un pack, así que el
+  campo siempre refleja ese único pet. Existe para que una futura UI de
+  selección tenga dónde leer/escribir sin un cambio de schema.
+- **Active variant id** (`AppState::activeVariantId`) — se conserva a
+  través de load/save; nada en este bloque escribe un valor no vacío
+  (todavía no existe selección de variante — ver
+  `content::PetDefinition::variantGroup`, también schema-only).
+- **Last window position** (`AppState::lastWindowPosition`) — se
+  actualiza cada vez que termina un drag; se usa para reabrir la
+  ventana donde el usuario la dejó (ver §7).
 
-Not persisted, and not planned for this block (see §9): purchase
-history, unlock state, onboarding/starter-selection state, anything
-Shop/Collection-shaped, provenance/analytics of any kind.
+No persistido, y no planeado para este bloque (ver §9): historial de
+compras, estado de desbloqueo, estado de onboarding/selección de
+starter, cualquier cosa con forma de Shop/Collection, procedencia/
+analítica de cualquier tipo.
 
-Generic by construction: `activePetId`/`activeVariantId` are plain
-strings, not an enum of known Nimvlets — adding a new pet id or variant
-later never requires a change to `src/persistence`.
+Genérico por construcción: `activePetId`/`activeVariantId` son simples
+strings, no un enum de Nimvlets conocidos — agregar un nuevo pet id o
+variante más adelante nunca requiere tocar `src/persistence`.
 
-## 2. Storage location policy
+## 2. Política de ubicación de almacenamiento
 
-Production: `SDL_GetPrefPath("Leporc Projects", "Nimvlets")` — SDL's
-own cross-platform per-user app-data resolver. It creates the
-directory itself if needed and returns:
+Producción: `SDL_GetPrefPath("Leporc Projects", "Nimvlets")` — el
+resolutor multiplataforma propio de SDL para el directorio de app-data
+por usuario. Crea el directorio ella misma si hace falta y retorna:
 
 - macOS: `~/Library/Application Support/Leporc Projects/Nimvlets/`
 - Windows: `%APPDATA%\Leporc Projects\Nimvlets\`
 
-No platform-specific code was needed for this (unlike window
-transparency/click-through) — SDL already fully abstracts it, so
-`src/platform/*` is untouched by this block.
+No hizo falta código específico de plataforma para esto (a diferencia
+de la transparencia/click-through de ventana) — SDL ya lo abstrae por
+completo, así que `src/platform/*` queda intacto en este bloque.
 
-**DEV-only override:** `NIMVLETS_DEV_APPDATA_DIR`, checked before
-`SDL_GetPrefPath()` is ever called. If set to a non-empty path, that
-path is used instead (created if it doesn't exist) — production
-behavior (the unset case) is unchanged. This is what lets manual QA
-and this block's own non-interactive smoke tests exercise the real
-save/load path against an isolated temp directory, never the real
-per-user location — mirrors `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS`'s
-pattern from Block 02 exactly (see `docs/ANIMATION_RUNTIME.md` §8).
+**Override solo-DEV:** `NIMVLETS_DEV_APPDATA_DIR`, verificado antes de
+llamar a `SDL_GetPrefPath()`. Si se setea a una ruta no vacía, esa ruta
+se usa en su lugar (se crea si no existe) — el comportamiento de
+producción (el caso sin setear) queda igual. Esto es lo que permite que
+la QA manual y los smoke tests no interactivos propios de este bloque
+ejerciten el camino real de save/load contra un directorio temporal
+aislado, nunca la ubicación real por usuario — refleja exactamente el
+patrón de `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS` de Block 02 (ver
+`docs/ANIMATION_RUNTIME.md` §8).
 
 ```bash
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nimvlets_dev_state ./build/macos-debug/src/app/nimvlets_spike
 ```
 
-One file inside that directory: `state.nvstate` (plus a transient
-`state.nvstate.tmp` staging file that only exists mid-write — see §4).
+Un archivo dentro de ese directorio: `state.nvstate` (más un archivo de
+staging transitorio `state.nvstate.tmp` que solo existe a mitad de
+escritura — ver §4).
 
-No absolute, machine-specific path is ever hardcoded or committed —
-`SDL_GetPrefPath()`'s result is a runtime value, and the DEV override
-is an environment variable, never a literal path in source.
+Nunca se hardcodea ni se comitea una ruta absoluta específica de una
+máquina — el resultado de `SDL_GetPrefPath()` es un valor de runtime, y
+el override DEV es una variable de entorno, nunca una ruta literal en
+el código fuente.
 
-## 3. File format ("NVSTATE1")
+## 3. Formato de archivo ("NVSTATE1")
 
-Producer/consumer: `persistence::SerializeAppState` /
-`DeserializeAppState` (`src/persistence/AppStateSerializer.cpp`). Pure
-— no file I/O — so it's directly unit-testable with in-memory byte
-buffers (`tests/AppStateSerializerTest.cpp`), the same separation
-`content::PetPackLoader` established in Block 02. All integers
-little-endian (every platform this project targets — x86_64, arm64 —
-is little-endian; no byte-swapping is implemented, matching every
-other on-disk format in this repository).
+Productor/consumidor: `persistence::SerializeAppState` /
+`DeserializeAppState` (`src/persistence/AppStateSerializer.cpp`). Puro
+— sin I/O de archivos — así que es directamente testeable con buffers
+de bytes en memoria (`tests/AppStateSerializerTest.cpp`), la misma
+separación que `content::PetPackLoader` estableció en Block 02. Todos
+los enteros little-endian (cada plataforma que este proyecto soporta —
+x86_64, arm64 — es little-endian; no se implementa byte-swapping,
+igual que todo otro formato en disco de este repositorio).
 
 ```
 magic             : 8 bytes, "NVSTATE1"
@@ -87,188 +91,205 @@ clickBalance      : uint64
 activePetId       : string   (uint32 byte-length + UTF-8 bytes)
 activeVariantId   : string
 hasWindowPosition : uint8   (0/1)
-lastWindowX       : int32   (meaningful only if hasWindowPosition)
+lastWindowX       : int32   (solo tiene sentido si hasWindowPosition)
 lastWindowY       : int32
 ```
 
-**Deterministic:** serializing the same `AppState` twice produces
-byte-identical output — no timestamps, no padding, no map/set
-iteration order anywhere in the format
-(`tests/AppStateSerializerTest.cpp`'s `SerializationIsDeterministic`).
+**Determinista:** serializar el mismo `AppState` dos veces produce una
+salida idéntica byte a byte — sin timestamps, sin padding, sin orden de
+iteración de map/set en ningún lugar del formato
+(`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
-**Versioned, no migration in this block:** `DeserializeAppState`
-rejects any `schemaVersion` that doesn't exactly equal
-`AppState::kCurrentSchemaVersion` (currently 1) — an older *or* newer
-version is treated identically to corrupt data (see §5), never guessed
-at. There is exactly one supported version right now; a future block
-adding migration logic has a clean, obvious seam (`schemaVersion` is
-already read and checked first, before anything else) rather than
-needing to retrofit one.
+**Versionado, sin migración en este bloque:** `DeserializeAppState`
+rechaza cualquier `schemaVersion` que no sea exactamente igual a
+`AppState::kCurrentSchemaVersion` (actualmente 1) — una versión más
+vieja *o* más nueva se trata idénticamente a datos corruptos (ver §5),
+nunca se adivina. Hay exactamente una versión soportada por ahora; un
+bloque futuro que agregue lógica de migración tiene una costura limpia
+y obvia (`schemaVersion` ya se lee y verifica primero, antes que
+cualquier otra cosa) en vez de necesitar improvisar una.
 
-## 4. Atomic write behavior
+## 4. Comportamiento de escritura atómica
 
 `persistence::AppStateStore::Save()` (`src/persistence/AppStateStore.cpp`):
 
-1. Serialize the full `AppState`.
-2. Write it to `state.nvstate.tmp` in the same directory. If this
-   fails at any point (can't open, can't write the full contents), the
-   real `state.nvstate` is never touched — `Save()` returns `false`
-   with a specific `outError` and stops here.
-3. Only if step 2 fully succeeded: `std::filesystem::rename(tempPath,
-   statePath)`. Same-directory rename is atomic on the filesystems
-   this project targets — the real file either has the complete old
-   contents or the complete new contents, never a partial write, even
-   if the process crashes, loses power, or the disk fills up mid-write.
+1. Serializa el `AppState` completo.
+2. Lo escribe a `state.nvstate.tmp` en el mismo directorio. Si esto
+   falla en cualquier punto (no se puede abrir, no se puede escribir el
+   contenido completo), el `state.nvstate` real nunca se toca —
+   `Save()` retorna `false` con un `outError` específico y se detiene
+   aquí.
+3. Solo si el paso 2 tuvo éxito completo: `std::filesystem::rename(tempPath,
+   statePath)`. Un rename dentro del mismo directorio es atómico en
+   los filesystems que este proyecto soporta — el archivo real tiene el
+   contenido viejo completo o el contenido nuevo completo, nunca una
+   escritura parcial, incluso si el proceso crashea, se corta la
+   energía, o el disco se llena a mitad de la escritura.
 
-This is the same reason step 2's failure leaves the *previous* valid
-save completely untouched: the real file is never opened for writing
-directly, only ever replaced in one atomic step at the very end.
-`tests/AppStateStoreTest.cpp`'s `FailedWritePreservesPriorValidSave`
-demonstrates this directly (see §8 for how a write failure is
-simulated portably in tests).
+Esta es la misma razón por la que un fallo en el paso 2 deja el save
+*previo* válido completamente intacto: el archivo real nunca se abre
+para escritura directamente, solo se reemplaza en un único paso atómico
+al final. `FailedWritePreservesPriorValidSave` en
+`tests/AppStateStoreTest.cpp` demuestra esto directamente (ver §8 para
+cómo se simula un fallo de escritura de forma portátil en los tests).
 
-A failed `Save()` is reported (`outError`, logged by `SpikeApp` via
-`SDL_Log`) and never crashes the app — see §6 for what happens to the
-pending change afterward.
+Un `Save()` fallido se reporta (`outError`, logueado por `SpikeApp` vía
+`SDL_Log`) y nunca crashea la app — ver §6 para qué pasa con el cambio
+pendiente después de eso.
 
-## 5. Corruption recovery
+## 5. Recuperación ante corrupción
 
-`AppStateStore::Load()` never throws and always returns a usable
-`AppState`:
+`AppStateStore::Load()` nunca lanza excepción y siempre retorna un
+`AppState` usable:
 
-| Situation | Result |
+| Situación | Resultado |
 |---|---|
-| No `state.nvstate` file yet (first run) | `AppState{}` (safe defaults) |
-| File exists but can't be opened/read | `AppState{}` |
-| File parses but bad magic / truncated / unsupported schema version | `AppState{}` |
-| File parses and schema version matches | the parsed state |
+| Todavía no existe `state.nvstate` (primera ejecución) | `AppState{}` (defaults seguros) |
+| El archivo existe pero no se puede abrir/leer | `AppState{}` |
+| El archivo parsea pero tiene magic inválido / está truncado / schema version no soportada | `AppState{}` |
+| El archivo parsea y el schema version coincide | el estado parseado |
 
-Every "safe defaults" case sets an optional `outWarning` string (e.g.
-*"existing app-state save could not be used (...); using defaults"*)
-so the caller can log *why*, without forcing every call site to handle
-a separate error path — a corrupt or unreadable save is never
-silently indistinguishable from "no save yet" in the log, even though
-both produce the same safe in-memory result.
-`tests/AppStateStoreTest.cpp`'s `LoadRecoversFromCorruptFile` writes
-garbage bytes directly (bypassing `Save()`) to simulate real on-disk
-corruption, not just a synthetic parser input.
+Cada caso de "defaults seguros" setea un string opcional `outWarning`
+(p. ej. *"existing app-state save could not be used (...); using
+defaults"*) para que quien llama pueda loguear *por qué*, sin forzar a
+cada call site a manejar una ruta de error separada — un save corrupto
+o ilegible nunca queda indistinguible en silencio de "todavía no hay
+save" en el log, aunque ambos produzcan el mismo resultado seguro en
+memoria. `LoadRecoversFromCorruptFile` en `tests/AppStateStoreTest.cpp`
+escribe bytes de basura directamente (evitando `Save()`) para simular
+corrupción real en disco, no solo un input sintético para el parser.
 
-## 6. Debounce / write policy
+## 6. Política de debounce / escritura
 
-Clicks can arrive many times per second; writing to disk once per
-click would be wasteful and pointless. `persistence::PersistenceScheduler`
-(`src/persistence/PersistenceScheduler.h`, pure, no file I/O, testable
-with fabricated timestamps exactly like `core::FrameScheduler`):
+Los clicks pueden llegar muchas veces por segundo; escribir a disco una
+vez por click sería un desperdicio sin sentido.
+`persistence::PersistenceScheduler`
+(`src/persistence/PersistenceScheduler.h`, puro, sin I/O de archivos,
+testeable con timestamps fabricados exactamente igual que
+`core::FrameScheduler`):
 
-- The **first** change after a clean/flushed state arms a deadline
-  **2000ms** (`PersistenceScheduler::kDefaultDebounceMs`) in the
-  future — short enough that a crash shortly after the last change
-  loses at most ~2 seconds of progress, long enough that a realistic
-  burst of rapid clicks collapses into one write.
-- Any further change **before** that deadline fires is a no-op for
-  scheduling purposes: it updates the in-memory `AppState` but does
-  **not** arm a new deadline or push the existing one out. This is
-  what makes "10 rapid clicks" cost exactly one disk write, not ten,
-  and also what stops continuous activity from starving persistence
-  indefinitely (a sliding/reset-on-activity debounce could, in
-  principle, never fire under nonstop clicking; a fixed window from
-  the *first* pending change can't).
-- A **failed** flush leaves the state dirty (the pending change is not
-  silently dropped) but reschedules the retry a further `debounceMs`
-  out, rather than retrying on literally the next event-loop wake —
-  bounding retry frequency to at most once per debounce interval even
-  under a persistent failure (e.g. a deleted directory). No exponential
-  backoff, no retry limit — not needed at this scale, and not asked
-  for.
-- **Clean shutdown always flushes** whatever's still dirty,
-  unconditionally, regardless of the debounce deadline
-  (`SpikeApp::Shutdown()` calls `FlushPersistedState()` before tearing
-  down anything else).
+- El **primer** cambio después de un estado limpio/flusheado arma un
+  deadline de **2000ms** (`PersistenceScheduler::kDefaultDebounceMs`)
+  en el futuro — suficientemente corto para que un crash poco después
+  del último cambio pierda a lo sumo ~2 segundos de progreso,
+  suficientemente largo para que una ráfaga realista de clicks rápidos
+  colapse en una escritura.
+- Cualquier cambio posterior **antes** de que ese deadline dispare no
+  hace nada a efectos de scheduling: actualiza el `AppState` en memoria
+  pero **no** arma un nuevo deadline ni empuja el existente. Esto es lo
+  que hace que "10 clicks rápidos" cuesten exactamente una escritura a
+  disco, no diez, y también lo que evita que la actividad continua deje
+  la persistencia sin escribir indefinidamente (un debounce de tipo
+  "deslizante"/reset-en-cada-actividad podría, en principio, no
+  disparar nunca bajo clicks sin parar; una ventana fija desde el
+  *primer* cambio pendiente no puede).
+- Un flush **fallido** deja el estado dirty (el cambio pendiente no se
+  descarta en silencio) pero reprograma el reintento otro `debounceMs`
+  más adelante, en vez de reintentar en el despertar inmediatamente
+  siguiente del event loop — acotando la frecuencia de reintento a como
+  máximo una vez por intervalo de debounce incluso bajo un fallo
+  persistente (p. ej. un directorio eliminado). Sin backoff
+  exponencial, sin límite de reintentos — no hace falta a esta escala,
+  y no se pidió.
+- **El shutdown limpio siempre flushea** lo que quede dirty,
+  incondicionalmente, sin importar el deadline de debounce
+  (`SpikeApp::Shutdown()` llama a `FlushPersistedState()` antes de
+  desmontar cualquier otra cosa).
 
-`PersistenceScheduler::NextFlushDeadlineMs()` folds into
-`SpikeApp::Run()`'s existing `SDL_WaitEventTimeout` deadline
-calculation exactly the way the animation/passive-action deadlines
-already do (see `docs/ANIMATION_RUNTIME.md` §6) — no new polling loop,
-no timer thread; the event loop simply also wakes up when a pending
-flush is due.
+`PersistenceScheduler::NextFlushDeadlineMs()` se integra en el cálculo
+de deadline de `SDL_WaitEventTimeout` que ya existe en
+`SpikeApp::Run()`, exactamente igual que ya lo hacen los deadlines de
+animación/acción pasiva (ver `docs/ANIMATION_RUNTIME.md` §6) — sin loop
+de polling nuevo, sin thread de timer; el event loop simplemente
+también despierta cuando hay un flush pendiente por vencer.
 
-## 7. Runtime integration
+## 7. Integración en el runtime
 
-| Event | Effect |
+| Evento | Efecto |
 |---|---|
-| Startup | Resolve the app-data directory (§2); load existing state or defaults; sync `activePetId` to the pack that actually loaded (marks dirty if it changed); if a window position was saved, open there instead of centered. |
-| Click | `clickCount_` (session-only diagnostic) and `appState_.clickBalance` (persisted) both increment; scheduler marked dirty. Deliberately two separate counters — see `docs/DECISION_LOG.md` DEC-026. |
-| Drag end | `appState_.lastWindowPosition` set to the window's final position; scheduler marked dirty. |
-| Event-loop wake, flush deadline reached | `FlushPersistedState()` — a no-op unless actually dirty. |
-| Clean shutdown | `FlushPersistedState()` unconditionally (ignores the deadline; still a no-op if nothing is dirty). |
+| Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; sincroniza `activePetId` con el pack que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
+| Click | `clickCount_` (diagnóstico solo de sesión) y `appState_.clickBalance` (persistido) se incrementan ambos; se marca el scheduler como dirty. Deliberadamente dos contadores separados — ver `docs/DECISION_LOG.md` DEC-026. |
+| Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |
+| Despertar del event loop, deadline de flush alcanzado | `FlushPersistedState()` — no hace nada salvo que esté realmente dirty. |
+| Shutdown limpio | `FlushPersistedState()` incondicionalmente (ignora el deadline; sigue sin hacer nada si no hay nada dirty). |
 
-**No off-screen/monitor-bounds validation.** A saved window position is
-restored exactly as stored, even if the display configuration changed
-since (a monitor was unplugged, resolution changed). Not attempted in
-this block — see the Block 03 report's limitations.
+**Sin validación de límites de pantalla/monitor.** Una posición de
+ventana guardada se restaura exactamente como se guardó, aunque la
+configuración de pantalla haya cambiado desde entonces (se desconectó
+un monitor, cambió la resolución). No se intenta en este bloque — ver
+las limitaciones del informe de Block 03.
 
-## 8. Testability
+## 8. Testeabilidad
 
-`src/persistence` has no SDL dependency at all, so every piece is
-directly unit-testable without a display:
+`src/persistence` no tiene ninguna dependencia de SDL, así que cada
+pieza es directamente testeable sin display:
 
-- `tests/AppStateSerializerTest.cpp` — pure round-trip/determinism/
-  corruption tests against in-memory byte buffers (10 cases).
-- `tests/AppStateStoreTest.cpp` — real, isolated temp directories
-  (created fresh per test, removed after — never the real per-user
-  location), covering defaults, round-trip, atomicity (no leftover
-  `.tmp` file), corruption recovery, and write-failure handling.
-  Write failures are simulated by pre-creating a *directory* at the
-  exact path `Save()` would use for its temp file — opening a
-  directory for writing as a regular file fails uniformly on every
-  platform this project targets, avoiding fragile, platform-dependent
-  `chmod`-based permission tricks (POSIX and Windows disagree enough
-  on those to make CI flaky).
-- `tests/PersistenceSchedulerTest.cpp` — debounce/coalescing/retry
-  behavior with fabricated timestamps (8 cases).
-- `tests/PersistenceIntegrationTest.cpp` — the same click/drag/flush/
-  shutdown sequence `SpikeApp` actually performs, wired together with
-  real (temp-directory) `AppStateStore` + `PersistenceScheduler`, the
-  same pattern `tests/ClickAccountingTest.cpp` established in Block 02
-  for click/drag classification.
+- `tests/AppStateSerializerTest.cpp` — tests puros de round-trip/
+  determinismo/corrupción contra buffers de bytes en memoria (10
+  casos).
+- `tests/AppStateStoreTest.cpp` — directorios temporales reales y
+  aislados (creados frescos por test, eliminados después — nunca la
+  ubicación real por usuario), cubriendo defaults, round-trip,
+  atomicidad (sin archivo `.tmp` sobrante), recuperación ante
+  corrupción, y manejo de fallos de escritura. Los fallos de escritura
+  se simulan pre-creando un *directorio* exactamente en la ruta que
+  `Save()` usaría para su archivo temporal — abrir un directorio para
+  escritura como si fuera un archivo regular falla de forma uniforme
+  en cada plataforma que este proyecto soporta, evitando trucos
+  frágiles y dependientes de la plataforma basados en permisos de
+  `chmod` (POSIX y Windows difieren lo suficiente en eso como para
+  volverlo inestable en CI).
+- `tests/PersistenceSchedulerTest.cpp` — comportamiento de debounce/
+  coalescencia/reintento con timestamps fabricados (8 casos).
+- `tests/PersistenceIntegrationTest.cpp` — la misma secuencia de
+  click/drag/flush/shutdown que `SpikeApp` realmente ejecuta, conectada
+  con `AppStateStore` + `PersistenceScheduler` reales (de directorio
+  temporal), el mismo patrón que `tests/ClickAccountingTest.cpp`
+  estableció en Block 02 para la clasificación de click/drag.
 
-All four run through the same `ctest` invocation as every other test
-in this repository; none require a display or the real app-data
-directory.
+Los cuatro corren a través de la misma invocación de `ctest` que
+cualquier otro test de este repositorio; ninguno requiere un display ni
+el directorio real de app-data.
 
-## 9. A shutdown-responsiveness bug found and fixed by this block's own testing
+## 9. Un bug de capacidad de respuesta ante shutdown, encontrado y corregido por los propios tests de este bloque
 
-While building this block's required non-interactive smoke tests
-(§6's "no manual QA" constraint), a real, pre-existing latency issue
-surfaced: `SDL_WaitEventTimeout` does not itself get interrupted by a
-delivered `SIGINT`/`SIGTERM` on this platform — the event loop only
-re-checks `ShutdownRequested()` when its *own* wait actually returns
-(a real event, or the requested timeout elapsing). Once a truly static
-idle stretch has nothing else scheduled for minutes (the ~300s
-passive-action deadline being the only one left), a termination signal
-could take up to that long to be noticed — technically present since
-Block 01/02, just never exercised by a test that let the app fully
-settle before signaling it.
+Mientras se construían los smoke tests no interactivos que requiere
+este bloque (la restricción de "sin QA manual" de §6), salió a la luz
+un problema real y preexistente de latencia:
+`SDL_WaitEventTimeout` no se interrumpe por sí misma ante un
+`SIGINT`/`SIGTERM` entregado en esta plataforma — el event loop solo
+vuelve a chequear `ShutdownRequested()` cuando su *propia* espera
+efectivamente retorna (un evento real, o que venza el timeout
+solicitado). Una vez que un tramo de idle verdaderamente estático no
+tiene nada más programado por minutos (quedando solo el deadline de
+acción pasiva de ~300s), una señal de terminación podía tardar hasta
+ese tanto en notarse — presente técnicamente desde Block 01/02, solo
+que nunca ejercitado por un test que dejara a la app asentarse del todo
+antes de enviarle la señal.
 
-Fixed by capping the event loop's maximum wait to 1000ms
-(`src/app/SpikeApp.cpp`'s `kMaxWaitMs`), regardless of how far away the
-real next deadline is. This bounds shutdown latency to about a second
-without reintroducing a render tick: a wake that finds nothing to do
-(`ShutdownRequested()` false, no deadline actually reached) does zero
-redraw/hit-mask/disk work before going back to sleep — confirmed by
-re-measuring static-idle CPU after the fix (still ≈0.0%, see
-`docs/PERFORMANCE_BUDGETS.md`). See `docs/DECISION_LOG.md` DEC-028.
+Corregido acotando la espera máxima del event loop a 1000ms
+(`kMaxWaitMs` en `src/app/SpikeApp.cpp`), sin importar cuán lejos esté
+el próximo deadline real. Esto acota la latencia de shutdown a
+aproximadamente un segundo sin reintroducir un tick de render: un
+despertar que no encuentra nada que hacer (`ShutdownRequested()` en
+false, ningún deadline realmente alcanzado) no hace ningún trabajo de
+redraw/hit-mask/disco antes de volver a dormir — confirmado
+re-midiendo el CPU en idle estático después del fix (sigue en ≈0.0%,
+ver `docs/PERFORMANCE_BUDGETS.md`). Ver `docs/DECISION_LOG.md`
+DEC-028.
 
-## 10. Intentionally unimplemented
+## 10. Intencionalmente no implementado
 
-- **No pet-selection UI or logic.** `activePetId`/`activeVariantId`
-  persist and round-trip, but nothing branches on them to choose which
-  pack loads.
-- **No schema migration.** Exactly one supported `schemaVersion`;
-  anything else is treated as unusable, not upgraded.
-- **No unlock/purchase/economy state.** No Shop exists yet to spend
-  `clickBalance` against.
-- **No window-position bounds/monitor validation** (see §7).
-- **No encryption, no cloud sync, no account.** Purely local,
-  unauthenticated, single-file storage — see AGENTS.md §5 and
-  `docs/PRIVACY_SECURITY.md`.
+- **Sin UI ni lógica de selección de pet.** `activePetId`/
+  `activeVariantId` persisten y hacen round-trip, pero nada se ramifica
+  sobre ellos para elegir qué pack cargar.
+- **Sin migración de schema.** Exactamente un `schemaVersion`
+  soportado; cualquier otro se trata como inutilizable, no se
+  actualiza.
+- **Sin estado de desbloqueo/compra/economía.** Todavía no existe un
+  Shop donde gastar `clickBalance`.
+- **Sin validación de límites de pantalla/monitor para la posición de
+  ventana** (ver §7).
+- **Sin encriptación, sin sincronización en la nube, sin cuenta.**
+  Almacenamiento puramente local, sin autenticación, de un único
+  archivo — ver AGENTS.md §5 y `docs/PRIVACY_SECURITY.md`.

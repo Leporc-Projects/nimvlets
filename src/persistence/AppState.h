@@ -6,9 +6,10 @@
 
 namespace nimvlets::persistence {
 
-// A window's last on-screen position, in the same coordinate space
-// SDL_GetWindowPosition()/SDL_SetWindowPosition() use (int, screen-space
-// logical points) — see src/app/SpikeApp.cpp's drag-end handling.
+// Última posición en pantalla de la ventana, en el mismo espacio de
+// coordenadas que usan SDL_GetWindowPosition()/SDL_SetWindowPosition()
+// (int, puntos lógicos de pantalla) — ver el manejo de fin-de-drag en
+// src/app/SpikeApp.cpp.
 struct WindowPosition {
     int x = 0;
     int y = 0;
@@ -18,49 +19,50 @@ struct WindowPosition {
     }
 };
 
-// The full set of local, on-disk application state Block 03 persists.
-// Pure data — no SDL, no file I/O, no platform code (see
-// AppStateSerializer.h for (de)serialization and AppStateStore.h for
-// the storage policy that reads/writes it). Deliberately minimal: only
-// fields with existing runtime meaning in this block are here — see
-// docs/PERSISTENCE.md for what was deliberately left out and why.
+// El conjunto completo de estado de aplicación local, en disco, que
+// persiste Block 03. Datos puros — sin SDL, sin I/O de archivos, sin
+// código de plataforma (ver AppStateSerializer.h para la
+// (de)serialización y AppStateStore.h para la política de
+// almacenamiento que lo lee/escribe). Deliberadamente mínimo: solo
+// campos con significado real en el runtime de este bloque — ver
+// docs/PERSISTENCE.md para qué se dejó fuera a propósito y por qué.
 //
-// Generic by construction: activePetId/activeVariantId are plain
-// strings, not an enum of known Nimvlets — adding a new pet id or
-// variant later never requires a change to this struct, to
-// AppStateSerializer, or to AppStateStore.
+// Genérico por construcción: activePetId/activeVariantId son simples
+// strings, no un enum de Nimvlets conocidos — agregar un nuevo pet id
+// o variante más adelante nunca requiere tocar este struct, ni
+// AppStateSerializer, ni AppStateStore.
 struct AppState {
-    // Bumped only when this struct's on-disk shape changes in a way
-    // that isn't backward-compatible. See AppStateSerializer.cpp for
-    // how a mismatch is handled (safe defaults, never a crash, no
-    // migration logic in this block).
+    // Solo se incrementa cuando la forma en disco de este struct
+    // cambia de manera no retrocompatible. Ver AppStateSerializer.cpp
+    // para cómo se maneja un desajuste (defaults seguros, nunca un
+    // crash, sin lógica de migración en este bloque).
     static constexpr std::uint32_t kCurrentSchemaVersion = 1;
 
     std::uint32_t schemaVersion = kCurrentSchemaVersion;
 
-    // The only currency — see AGENTS.md §2. Starts at 0; only ever
-    // incremented by a real click. uint64 so it never realistically
-    // overflows.
+    // La única moneda — ver AGENTS.md §2. Empieza en 0; solo se
+    // incrementa por un click real. uint64 para que nunca desborde de
+    // forma realista.
     std::uint64_t clickBalance = 0;
 
-    // Which pet is currently active. Empty string = no save yet /
-    // unset. This block implements no pet *selection* — see
-    // docs/PERSISTENCE.md — it only keeps this field truthfully in
-    // sync with whichever pet the runtime actually loaded.
+    // Qué pet está activo actualmente. String vacío = sin save aún /
+    // sin definir. Este bloque no implementa *selección* de pet — ver
+    // docs/PERSISTENCE.md — solo mantiene este campo sincronizado con
+    // la verdad: cualquier pet que el runtime haya cargado realmente.
     std::string activePetId;
 
-    // Which variant of activePetId is active, if that pet has variants
-    // (see content::PetDefinition::variantGroup). Empty string = no
-    // variant / not applicable. Nothing in this block writes a
-    // non-empty value here (no variant selection exists yet) — the
-    // field is carried through load/save so a future block can
-    // populate it without a schema change.
+    // Qué variante de activePetId está activa, si ese pet tiene
+    // variantes (ver content::PetDefinition::variantGroup). String
+    // vacío = sin variante / no aplica. Nada en este bloque escribe un
+    // valor no vacío aquí (todavía no existe selección de variante) —
+    // el campo se conserva a través de load/save para que un bloque
+    // futuro pueda poblarlo sin un cambio de schema.
     std::string activeVariantId;
 
-    // The window's position when it was last moved by the user, so the
-    // app can reopen where they left it. std::nullopt = no save yet /
-    // never dragged (falls back to the existing centered-on-launch
-    // default).
+    // Posición de la ventana la última vez que el usuario la movió,
+    // para que la app pueda reabrir donde la dejaron. std::nullopt =
+    // sin save aún / nunca se arrastró (usa el default existente de
+    // centrado al iniciar).
     std::optional<WindowPosition> lastWindowPosition;
 
     friend bool operator==(const AppState& a, const AppState& b) {

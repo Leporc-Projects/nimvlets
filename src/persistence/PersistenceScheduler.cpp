@@ -6,7 +6,7 @@ PersistenceScheduler::PersistenceScheduler(double debounceMs) : debounceMs_(debo
 
 void PersistenceScheduler::MarkDirty(double nowMs) {
     if (dirty_) {
-        return;  // a flush is already scheduled; let it cover this change too
+        return;  // ya hay un flush programado; que cubra también este cambio
     }
     dirty_ = true;
     deadlineMs_ = nowMs + debounceMs_;

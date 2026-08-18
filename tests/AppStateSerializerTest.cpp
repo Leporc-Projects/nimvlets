@@ -17,11 +17,12 @@ namespace nimvlets::tests {
 
 namespace {
 
-// Hand-builds "NVSTATE1" byte buffers matching the exact format (see
-// src/persistence/AppStateSerializer.cpp and docs/PERSISTENCE.md), the
-// same technique tests/PetPackLoaderTest.cpp uses for "NVPACK1" — lets
-// the parser be exercised directly against synthetic valid *and*
-// malformed data with zero filesystem dependency.
+// Construye a mano buffers de bytes "NVSTATE1" que calzan con el
+// formato exacto (ver src/persistence/AppStateSerializer.cpp y
+// docs/PERSISTENCE.md), la misma técnica que usa
+// tests/PetPackLoaderTest.cpp para "NVPACK1" — permite ejercitar el
+// parser directamente contra datos sintéticos válidos *y* malformados,
+// sin ninguna dependencia del filesystem.
 
 void AppendBytes(std::vector<std::uint8_t>& buf, const void* data, std::size_t n) {
     const auto* bytes = static_cast<const std::uint8_t*>(data);
@@ -54,10 +55,10 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
-// A valid, fully-formed buffer with the given fields — mirrors exactly
-// what SerializeAppState() itself would produce for an AppState with
-// these values, but built independently so the test doesn't just
-// check the serializer against itself.
+// Un buffer válido y completo con los campos dados — refleja
+// exactamente lo que SerializeAppState() produciría para un AppState
+// con estos valores, pero construido de forma independiente para que
+// el test no termine verificando el serializador contra sí mismo.
 std::vector<std::uint8_t> BuildValidBuffer(
     std::uint32_t schemaVersion,
     std::uint64_t clickBalance,
@@ -79,7 +80,7 @@ std::vector<std::uint8_t> BuildValidBuffer(
 }
 
 bool TestDefaultAppStateRoundTrips() {
-    const AppState original;  // all defaults: version=current, balance=0, empty ids, no position
+    const AppState original;  // todo default: version=actual, balance=0, ids vacíos, sin posición
     const std::vector<std::uint8_t> bytes = SerializeAppState(original);
 
     AppState decoded;
@@ -147,7 +148,7 @@ bool TestLargeClickBalanceRoundTrips() {
 
 bool TestBadMagicIsRejected() {
     std::vector<std::uint8_t> buf = BuildValidBuffer(AppState::kCurrentSchemaVersion, 5, "p", "", false, 0, 0);
-    buf[0] = 'X';  // corrupt the magic
+    buf[0] = 'X';  // corrompe el magic
 
     AppState decoded;
     std::string error;
@@ -167,7 +168,7 @@ bool TestEmptyBufferIsRejected() {
 
 bool TestTruncatedHeaderIsRejected() {
     std::vector<std::uint8_t> buf = BuildValidBuffer(AppState::kCurrentSchemaVersion, 5, "p", "", false, 0, 0);
-    buf.resize(10);  // cuts off partway through schemaVersion/clickBalance
+    buf.resize(10);  // corta a mitad de camino de schemaVersion/clickBalance
 
     AppState decoded;
     std::string error;
@@ -178,11 +179,11 @@ bool TestTruncatedHeaderIsRejected() {
 
 bool TestTruncatedMidStringIsRejected() {
     std::vector<std::uint8_t> buf = BuildValidBuffer(AppState::kCurrentSchemaVersion, 5, "bunny_dev", "", false, 0, 0);
-    // Truncate a few bytes into the "bunny_dev" string's declared
-    // 9-byte payload — the length prefix says 9 bytes follow, but
-    // fewer are actually present.
+    // Trunca unos pocos bytes dentro del payload declarado de 9 bytes
+    // del string "bunny_dev" — el prefijo de longitud dice que siguen
+    // 9 bytes, pero en realidad hay menos.
     const std::size_t magicHeaderAndBalanceSize = 8 + 4 + 8;  // magic + schemaVersion + clickBalance
-    buf.resize(magicHeaderAndBalanceSize + 4 /*string length*/ + 3 /*only 3 of 9 chars*/);
+    buf.resize(magicHeaderAndBalanceSize + 4 /*longitud del string*/ + 3 /*solo 3 de 9 chars*/);
 
     AppState decoded;
     std::string error;

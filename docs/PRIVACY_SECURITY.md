@@ -70,26 +70,29 @@ concrete yes/no confirmation (Accessibility / Input Monitoring / Screen
 Recording / admin-root / global hooks / network — all "no") as actually
 observed for this block's spike executable.
 
-## E. Local state persistence (Block 03)
+## E. Persistencia local de estado (Block 03)
 
-Block 03 adds exactly one local, unauthenticated, per-user file — see
-`docs/PERSISTENCE.md` for the full design. Relevant to this document
-specifically:
+Block 03 agrega exactamente un archivo local, sin autenticación, por
+usuario — ver `docs/PERSISTENCE.md` para el diseño completo. Relevante
+para este documento específicamente:
 
-- **No account, no cloud, no network** — the file is written and read
-  by ordinary local filesystem calls (`std::filesystem`, `<fstream>`)
-  only; nothing in `src/persistence` opens a socket or makes a network
-  call (grep-able: no `socket(`, `curl`, `http(s)://`, `SDL_net`, or
-  similar anywhere in `src/`).
-- **No telemetry, no analytics, no provenance tracking** — the file
-  contains only click balance, active pet/variant id, and last window
-  position (AGENTS.md §2's currency and this block's own scope; see
-  `docs/PERSISTENCE.md` §1 for exactly what is and isn't stored).
-- **Location is the OS's own standard per-user app-data directory**
-  (`SDL_GetPrefPath()`), not a hidden or unusual path — the same kind
-  of location any conventional native desktop app uses for local
-  preferences/save data.
-- **No absolute, machine-specific path is ever hardcoded or committed**
-  — the real path is a runtime value from `SDL_GetPrefPath()`; the
-  `NIMVLETS_DEV_APPDATA_DIR` override used for testing is an
-  environment variable, never a literal path in source.
+- **Sin cuenta, sin nube, sin red** — el archivo se escribe y lee solo
+  mediante llamadas ordinarias de filesystem local (`std::filesystem`,
+  `<fstream>`); nada en `src/persistence` abre un socket ni hace una
+  llamada de red (verificable por grep: sin `socket(`, `curl`,
+  `http(s)://`, `SDL_net`, ni similares en ningún lugar de `src/`).
+- **Sin telemetría, sin analítica, sin seguimiento de procedencia** —
+  el archivo contiene solo click balance, id de pet/variante activos, y
+  última posición de ventana (la moneda de AGENTS.md §2 y el alcance
+  propio de este bloque; ver `docs/PERSISTENCE.md` §1 para exactamente
+  qué se guarda y qué no).
+- **La ubicación es el directorio estándar del propio sistema operativo
+  para app-data por usuario** (`SDL_GetPrefPath()`), no una ruta oculta
+  ni inusual — el mismo tipo de ubicación que usa cualquier app de
+  escritorio nativa convencional para preferencias/datos guardados
+  locales.
+- **Nunca se hardcodea ni se comitea una ruta absoluta específica de
+  una máquina** — la ruta real es un valor de runtime que viene de
+  `SDL_GetPrefPath()`; el override `NIMVLETS_DEV_APPDATA_DIR` usado
+  para testing es una variable de entorno, nunca una ruta literal en el
+  código fuente.

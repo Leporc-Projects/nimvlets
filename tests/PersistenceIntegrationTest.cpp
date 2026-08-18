@@ -6,14 +6,15 @@
 #include <filesystem>
 #include <string>
 
-// Integration test: exercises persistence::AppState, AppStateStore, and
-// PersistenceScheduler wired together exactly the way src/app/SpikeApp
-// does (click -> increment + mark dirty; drag end -> update position +
-// mark dirty; the event loop's deadline check -> flush only if dirty;
-// clean shutdown -> flush regardless of the deadline). All three pieces
-// are already pure/file-scoped-only, so this needs no SDL and no
-// mocking — only a real, isolated temp directory (never the user's
-// real app-data location).
+// Test de integración: ejercita persistence::AppState, AppStateStore y
+// PersistenceScheduler conectados exactamente igual que
+// src/app/SpikeApp (click -> incrementar + marcar dirty; fin de drag
+// -> actualizar posición + marcar dirty; el chequeo de deadline del
+// event loop -> flush solo si está dirty; shutdown limpio -> flush sin
+// importar el deadline). Las tres piezas ya son puras/de alcance de
+// archivo únicamente, así que esto no necesita SDL ni mocking — solo
+// un directorio temporal real y aislado (nunca la ubicación real de
+// app-data del usuario).
 
 using nimvlets::persistence::AppState;
 using nimvlets::persistence::AppStateStore;
@@ -23,9 +24,10 @@ namespace nimvlets::tests {
 
 namespace {
 
-// Same small RAII temp-directory helper as tests/AppStateStoreTest.cpp
-// (kept file-local rather than shared, consistent with this
-// repository's other single-use test helpers).
+// El mismo pequeño helper RAII de directorio temporal que
+// tests/AppStateStoreTest.cpp (se mantiene local al archivo en vez de
+// compartido, consistente con los demás helpers de test de uso único
+// de este repositorio).
 class TempTestDirectory {
  public:
     TempTestDirectory() {
@@ -49,8 +51,8 @@ class TempTestDirectory {
     std::filesystem::path path_;
 };
 
-// Mirrors SpikeApp::FlushPersistedState(): a no-op unless the
-// scheduler is actually dirty.
+// Refleja SpikeApp::FlushPersistedState(): no hace nada salvo que el
+// scheduler esté realmente dirty.
 void FlushIfDirty(const AppStateStore& store, AppState& state, PersistenceScheduler& scheduler, double nowMs) {
     if (!scheduler.IsDirty()) {
         return;
@@ -69,7 +71,7 @@ bool TestClickMarksDirtyButDoesNotWriteImmediately() {
     AppState state;
     PersistenceScheduler scheduler(2000.0);
 
-    // Mirrors SpikeApp's MOUSE_BUTTON_UP click branch.
+    // Refleja la rama de click de MOUSE_BUTTON_UP en SpikeApp.
     ++state.clickBalance;
     scheduler.MarkDirty(0.0);
 
@@ -84,24 +86,25 @@ bool TestRapidClicksCoalesceIntoOneWriteAtDeadline() {
     AppState state;
     PersistenceScheduler scheduler(2000.0);
 
-    // Five rapid clicks, all well before the 2000ms debounce deadline.
+    // Cinco clicks rápidos, todos bastante antes del deadline de
+    // debounce de 2000ms.
     for (int i = 0; i < 5; ++i) {
         ++state.clickBalance;
         scheduler.MarkDirty(static_cast<double>(i) * 10.0);  // t=0,10,20,30,40
     }
     NIMVLETS_CHECK(state.clickBalance == 5);
-    NIMVLETS_CHECK(*scheduler.NextFlushDeadlineMs() == 2000.0);  // armed by the *first* click only
+    NIMVLETS_CHECK(*scheduler.NextFlushDeadlineMs() == 2000.0);  // armado solo por el *primer* click
 
-    // Nothing on disk yet — the event loop hasn't reached the deadline.
+    // Nada en disco todavía — el event loop no llegó al deadline.
     NIMVLETS_CHECK(!std::filesystem::exists(std::filesystem::path(dir.path()) / "state.nvstate"));
 
-    // The event loop wakes at (or after) the deadline and flushes once.
+    // El event loop despierta en (o después de) el deadline y flushea una vez.
     FlushIfDirty(store, state, scheduler, 2000.0);
     NIMVLETS_CHECK(!scheduler.IsDirty());
 
     std::string warning;
     const AppState loaded = store.Load(&warning);
-    NIMVLETS_CHECK(loaded.clickBalance == 5);  // all five coalesced into this one write
+    NIMVLETS_CHECK(loaded.clickBalance == 5);  // los cinco se coalescieron en esta única escritura
     return true;
 }
 
@@ -111,7 +114,7 @@ bool TestDragEndUpdatesWindowPositionAndMarksDirty() {
     AppState state;
     PersistenceScheduler scheduler(2000.0);
 
-    // Mirrors SpikeApp's MOUSE_BUTTON_UP drag branch.
+    // Refleja la rama de drag de MOUSE_BUTTON_UP en SpikeApp.
     state.lastWindowPosition = nimvlets::persistence::WindowPosition{321, 654};
     scheduler.MarkDirty(0.0);
 
@@ -134,9 +137,9 @@ bool TestCleanShutdownFlushesRegardlessOfDeadline() {
     ++state.clickBalance;
     scheduler.MarkDirty(0.0);  // deadline = 2000.0
 
-    // "Clean shutdown" happens almost immediately, long before the
-    // debounce deadline — it must still flush (see
-    // src/app/SpikeApp.cpp's Shutdown()).
+    // El "shutdown limpio" ocurre casi de inmediato, mucho antes del
+    // deadline de debounce — igual debe flushear (ver Shutdown() en
+    // src/app/SpikeApp.cpp).
     FlushIfDirty(store, state, scheduler, 5.0);
     NIMVLETS_CHECK(!scheduler.IsDirty());
 
@@ -154,14 +157,14 @@ bool TestFailedFlushKeepsPendingChangeForNextAttempt() {
     ++state.clickBalance;
     scheduler.MarkDirty(0.0);
 
-    // Force this attempt to fail (see AppStateStoreTest.cpp for why
-    // this technique is portable across platforms).
+    // Fuerza a que este intento falle (ver AppStateStoreTest.cpp para
+    // por qué esta técnica es portátil entre plataformas).
     std::filesystem::create_directories(std::filesystem::path(dir.path()) / "state.nvstate.tmp");
     FlushIfDirty(store, state, scheduler, 2000.0);
-    NIMVLETS_CHECK(scheduler.IsDirty());  // not lost — still pending
+    NIMVLETS_CHECK(scheduler.IsDirty());  // no se perdió — sigue pendiente
     NIMVLETS_CHECK(!std::filesystem::exists(std::filesystem::path(dir.path()) / "state.nvstate"));
 
-    // Clear the obstruction and let the (rescheduled) retry succeed.
+    // Quita el obstáculo y deja que el reintento (reprogramado) tenga éxito.
     std::filesystem::remove_all(std::filesystem::path(dir.path()) / "state.nvstate.tmp");
     const double retryDeadline = *scheduler.NextFlushDeadlineMs();
     FlushIfDirty(store, state, scheduler, retryDeadline);

@@ -15,10 +15,11 @@
 
 namespace nimvlets::app {
 
-// Owns the SDL window/renderer lifecycle and the main event loop for the
-// small, data-driven content+animation+persistence runtime built across
-// Block 01 (platform spike), Block 02 (content/animation), and Block 03
-// (local state persistence — see docs/PERSISTENCE.md).
+// Dueña del ciclo de vida de ventana/renderer de SDL y del event loop
+// principal del pequeño runtime de contenido+animación+persistencia,
+// data-driven, construido a través de Block 01 (spike de plataforma),
+// Block 02 (contenido/animación) y Block 03 (persistencia local de
+// estado — ver docs/PERSISTENCE.md).
 //
 // This is still explicitly a foundation/spike executable, not the
 // product — see docs/PLATFORM_SPIKE.md, docs/ANIMATION_RUNTIME.md, and
@@ -83,14 +84,15 @@ private:
     // docs/ANIMATION_RUNTIME.md, "DEV passive-interval override".
     double ComputeEffectivePassiveIntervalSeconds() const;
 
-    // Writes appState_ via appStateStore_ if — and only if —
-    // persistenceScheduler_ is currently dirty; a no-op otherwise, and
-    // a no-op if appStateStore_ was never initialized (see Init()'s
-    // doc comment on SDL_GetPrefPath() failure). Called both from the
-    // event loop when persistenceScheduler_'s deadline is reached and
-    // unconditionally from Shutdown() (clean shutdown always flushes
-    // whatever's still dirty, regardless of the debounce deadline —
-    // see docs/PERSISTENCE.md).
+    // Escribe appState_ vía appStateStore_ si — y solo si —
+    // persistenceScheduler_ está dirty en ese momento; no hace nada en
+    // caso contrario, y no hace nada si appStateStore_ nunca se
+    // inicializó (ver el comentario de Init() sobre el fallo de
+    // SDL_GetPrefPath()). Se llama tanto desde el event loop, cuando se
+    // alcanza el deadline de persistenceScheduler_, como
+    // incondicionalmente desde Shutdown() (el shutdown limpio siempre
+    // flushea lo que quede dirty, sin importar el deadline de
+    // debounce — ver docs/PERSISTENCE.md).
     void FlushPersistedState();
 
     SDL_Window* window_ = nullptr;
@@ -139,24 +141,27 @@ private:
     double nextPassiveDeadlineMs_ = 0.0;
     std::size_t nextPassiveActionIndex_ = 0;
 
-    // --- Block 03: local persistence (see docs/PERSISTENCE.md) ---
-    // Loaded once in Init() (or left at safe defaults if no save
-    // exists yet, or the save can't be read) and mutated as the app
-    // runs; never re-read from disk until the *next* process start.
+    // --- Block 03: persistencia local (ver docs/PERSISTENCE.md) ---
+    // Se carga una vez en Init() (o queda en defaults seguros si aún
+    // no existe ningún save, o el save no se puede leer) y se muta
+    // mientras la app corre; nunca se relee desde disco hasta el
+    // *siguiente* arranque del proceso.
     persistence::AppState appState_;
 
-    // Constructed in Init() once the per-user app-data directory is
-    // resolved via SDL_GetPrefPath(). std::nullopt only if that
-    // resolution fails (rare — e.g. an unwritable home directory); in
-    // that case the app runs completely normally, it just doesn't
-    // load or save anything this session — see Init()'s doc comment.
-    // std::optional rather than a plain member for the same reason as
-    // animController_ above: no path is known until Init() runs.
+    // Se construye en Init() una vez que se resuelve el directorio de
+    // app-data por usuario vía SDL_GetPrefPath(). std::nullopt solo si
+    // esa resolución falla (raro — p. ej. un home directory sin
+    // permisos de escritura); en ese caso la app corre completamente
+    // normal, simplemente no carga ni guarda nada en esta sesión — ver
+    // el comentario de Init(). std::optional en vez de un miembro
+    // plano por la misma razón que animController_ arriba: no se
+    // conoce ninguna ruta hasta que Init() corre.
     std::optional<persistence::AppStateStore> appStateStore_;
 
-    // Debounces disk writes so rapid clicks coalesce into one write
-    // instead of one per click — see docs/PERSISTENCE.md and
-    // FlushPersistedState()'s doc comment.
+    // Aplica debounce a las escrituras a disco para que los clicks
+    // rápidos se coalescan en una sola escritura en vez de una por
+    // click — ver docs/PERSISTENCE.md y el comentario de
+    // FlushPersistedState().
     persistence::PersistenceScheduler persistenceScheduler_;
 
     // True once Init() has successfully handed hit-testing to the

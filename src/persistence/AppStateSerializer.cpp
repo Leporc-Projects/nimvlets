@@ -7,7 +7,7 @@ namespace nimvlets::persistence {
 
 namespace {
 
-// "NVSTATE1", exactly 8 bytes — see docs/PERSISTENCE.md.
+// "NVSTATE1", exactamente 8 bytes — ver docs/PERSISTENCE.md.
 constexpr char kMagic[8] = {'N', 'V', 'S', 'T', 'A', 'T', 'E', '1'};
 
 void AppendUint8(std::vector<std::uint8_t>& out, std::uint8_t v) {
@@ -37,12 +37,13 @@ void AppendString(std::vector<std::uint8_t>& out, const std::string& s) {
     out.insert(out.end(), s.begin(), s.end());
 }
 
-// Bounds-checked cursor, same "fail on first error, remember only that
-// one" discipline as content::PetPackLoader's ByteReader (see
-// src/content/PetPackLoader.cpp) — integers are read via a raw memcpy
-// and are therefore little-endian on the reading platform, matching
-// the Append* functions above and every other on-disk format in this
-// repository (x86_64/arm64 only — see docs/ANIMATION_RUNTIME.md).
+// Cursor con verificación de límites, misma disciplina de "fallar en
+// el primer error, recordar solo ese" que ByteReader de
+// content::PetPackLoader (ver src/content/PetPackLoader.cpp) — los
+// enteros se leen vía memcpy crudo y por lo tanto son little-endian en
+// la plataforma que lee, igual que las funciones Append* de arriba y
+// todo otro formato en disco de este repositorio (solo x86_64/arm64 —
+// ver docs/ANIMATION_RUNTIME.md).
 class ByteReader {
  public:
     ByteReader(const std::uint8_t* data, std::size_t size) : data_(data), size_(size) {}
@@ -80,7 +81,7 @@ class ByteReader {
     }
 
     void Fail(const std::string& message) {
-        if (ok_) {  // keep only the first failure — later ones are usually noise from it
+        if (ok_) {  // conserva solo el primer fallo — los siguientes suelen ser ruido derivado de ese
             ok_ = false;
             error_ = message;
         }
