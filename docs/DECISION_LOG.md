@@ -337,3 +337,104 @@ an official SDL hint documented for exactly this case. Confirmed fixed
 objectively: the frontmost app was unchanged (`Claude`, the owner's
 active app) immediately before and immediately after launching the
 spike.
+
+---
+
+### DEC-021 — Deadline-driven scheduler replaces the fixed ~12fps render tick
+**Status:** DECIDIDO · Block 02 — see `docs/ANIMATION_RUNTIME.md` §6.
+
+Block 01's spike redrew unconditionally on a fixed `core::FrameScheduler`
+tick (~12fps) whether or not anything on screen was actually changing —
+acceptable for a two-circle placeholder, but not something Block 02
+could keep once "static idle that can truly settle" became a
+requirement. `content::AnimationController::NextFrameDeadlineMs()`
+returns `std::nullopt` whenever the currently playing animation is
+`PlaybackKind::kStatic`, which `SpikeApp::Run()` uses directly: the
+event loop's `SDL_WaitEventTimeout` bound is computed each wake from
+`min(passive-action deadline, animation frame deadline if any,
+Windows-fallback hover-poll deadline if applicable)` — with no
+animation deadline and the passive deadline ~300s out by default, a
+truly idle pet can block for minutes at a stretch. A frame is redrawn,
+and the click-through hit-mask rebuilt, only when something that
+affects the picture actually happened (a frame advance, a
+click/passive trigger, or an `SDL_EVENT_WINDOW_EXPOSED` repaint
+request) — never on a fixed cadence. `core::FrameScheduler` itself is
+unchanged and still backs the Windows poll-driven click-through
+fallback's own (independent, ~60Hz) schedule; it just no longer drives
+rendering.
+
+**Measured result:** static-idle CPU dropped from Block 01's Bunny
+baseline (≈2% average) to ≈0.0% average (Release, native arm64, same
+`ps`-based method) — see `docs/ANIMATION_RUNTIME.md` §6 and
+`docs/PERFORMANCE_BUDGETS.md` for the full numbers and methodology.
+
+---
+
+### DEC-022 — "NVPACK1" binary pack format + Python compiler pipeline
+**Status:** DECIDIDO · Block 02 — see `docs/ANIMATION_RUNTIME.md` §§4–5.
+
+A data-driven runtime needs *some* on-disk format for
+`content::PetDefinition`, and the block brief explicitly required no
+runtime PNG/JSON dependency in the C++ binary. Chose a small custom
+binary format (magic + length-prefixed strings + fixed-width numeric
+fields + raw RGBA8 frame data, little-endian) compiled offline by
+`tools/compile_pet_pack.py` from a JSON manifest + source PNGs, and
+parsed at runtime by `content::PetPackLoader` — pure in-memory buffer
+parsing, no file I/O in the core logic, so `tests/PetPackLoaderTest.cpp`
+exercises every failure mode (bad magic, truncation, mismatched frame
+dimensions, zero-frame animations, invalid playback-kind bytes, invalid
+canvas size) with small hand-built byte buffers and zero filesystem/CWD
+dependency — the same lesson Block 01's untested `DevSprite` file-load
+path motivated fixing here. `tools/prep_dev_sprite.py`'s existing PNG
+decoder is reused (not reimplemented) by the compiler, and a new PNG
+*encoder* was added to the same module so
+`tools/generate_bunny_dev_pack.py` can materialize its derived frames as
+real PNG files and run them through the same compiler path any future
+real content would use — no shortcut taken. This format and pipeline
+remain development tooling, not the production content pipeline
+`docs/PET_CONTENT_SPEC.md` describes.
+
+---
+
+### DEC-023 — Fail-loudly pet loading replaces the analytic-shape fallback; `BlobRenderer`/`DevSprite` retired
+**Status:** DECIDIDO · Block 02 — see `docs/ANIMATION_RUNTIME.md` §9.
+
+Block 01's `SpikeApp` fell back to the hardcoded analytic placeholder
+(`core::BlobSilhouette` via `graphics::BlobRenderer`) if the Bunny QA
+fixture couldn't load. Once the runtime became genuinely data-driven,
+keeping that fallback would have reintroduced exactly the kind of
+hardcoded-shape special-casing the block's content model exists to
+eliminate — and silently swapping in different content on a load
+failure is the opposite of "fail loudly," the same principle the asset
+pipeline itself already follows (DEC-022). `SpikeApp::Init()` now loads
+its one pet pack before creating any window and, on failure, logs a
+specific error and exits non-zero — no window, no silent substitute.
+`src/graphics/BlobRenderer.{h,cpp}` and `src/graphics/DevSprite.{h,cpp}`
+(and the superseded `assets/dev/bunny.rgba` fixture, which nothing
+loads anymore) were removed as dead code now that nothing references
+them. `core::BlobSilhouette` itself (`src/core/Silhouette.h/.cpp`) is
+**kept**: it's a pure, tested geometry utility
+(`tests/SilhouetteTest.cpp` still exercises it directly) with zero
+knowledge of rendering or SDL — not "pet-specific C++ in the engine,"
+just an unused-by-the-app-now, still-valid pure-math type.
+`graphics::FrameTexture` (`AttachFrameTexture`/`ReleaseFrameTexture`)
+replaces `DevSprite`'s texture-creation role, generalized from one
+hardcoded fixture to any `content::FrameDefinition`.
+
+---
+
+### DEC-024 — DEV-only passive-interval override, production default untouched
+**Status:** DECIDIDO · Block 02 — see `docs/ANIMATION_RUNTIME.md` §8.
+
+Manual QA of the sparse passive action can't reasonably wait a real
+~300 seconds per attempt, but the block brief was explicit that the
+production/default interval must not change merely to make QA
+convenient. `SpikeApp::ComputeEffectivePassiveIntervalSeconds()` reads
+`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS` once at startup — a valid
+positive value overrides *this run's* scheduling only and is logged
+alongside the pack's real default for contrast; unset or invalid falls
+back to `pet.passiveIntervalSeconds` untouched.
+`PetDefinition::passiveIntervalSeconds` (the value compiled into the
+pack, 300.0 for the Bunny DEV pack) is never mutated by this mechanism —
+there is exactly one place production behavior is defined, and the
+override reads around it rather than through it.

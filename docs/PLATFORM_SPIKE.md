@@ -9,6 +9,16 @@ upgraded to PASS without real evidence; where a claim rests on an
 earlier, since-superseded belief, that's said explicitly rather than
 quietly overwritten.
 
+**Scope note (Block 02):** this document is Block 01's QA record and is
+left as-is below — it remains an accurate account of what was tested
+and found *then*. The underlying window/transparency/click-through
+mechanism it describes (§5) is unchanged in Block 02. One number is
+superseded: row 13's "render tick running the whole time" no longer
+describes the running app — Block 02 replaced the fixed render tick
+with a deadline-driven scheduler that lets static idle stop rendering
+entirely; see `docs/ANIMATION_RUNTIME.md` §6 and
+`docs/PERFORMANCE_BUDGETS.md` for the current numbers.
+
 ## 1. What was evaluated
 
 `SDL_SetWindowShape()` was evaluated first, as the block brief

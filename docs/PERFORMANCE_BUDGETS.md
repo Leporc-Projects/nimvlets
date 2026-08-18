@@ -38,3 +38,28 @@ numbers (RSS, idle CPU, startup, binary size) and the exact method used
 to obtain each one, plus any caveats (e.g. measured on Apple Silicon
 only — no Intel Mac or Windows machine was available for a real
 hardware run in this block; see `docs/PLATFORM_SPIKE.md`).
+
+## Block 02's actual measurements
+
+Same method as Block 01 (`ps -o rss,%cpu,time`, 3-second intervals over
+a 27–30s window, Release build, native arm64, no `sudo`). See
+`docs/ANIMATION_RUNTIME.md` §6 for the full write-up of *why* these
+numbers changed (the deadline-driven scheduler replacing Block 01's
+fixed ~12fps tick — DEC-021).
+
+| Scenario | CPU (average, steady state) | RSS |
+|---|---|---|
+| Block 01, Bunny fixture, fixed ~12fps tick (baseline) | ≈2% | ≈72 MB |
+| Block 02, static idle (production default: no passive action due, no interaction) | **≈0.0%** | ≈73 MB |
+| Block 02, passive action forced every ~2s (`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=2` — an artificial stress scenario, ~150x more frequent than the real ~300s default) | <1% (peak 1.0%, mostly 0.0–0.5%) | ≈74 MB |
+
+The "CPU, idle with animation running" budget row above (< 1% average)
+is now met with considerable margin at true static idle (≈0.0%, not
+just under budget), and even the artificial worst-case passive-action
+stress scenario stays under the 1% target. Click-reaction CPU was not
+measured as a separate scenario in this block (it shares the exact same
+render/hit-mask-update code path as passive actions — see
+`docs/ANIMATION_RUNTIME.md` §3 — so the passive-action stress number
+above is a reasonable proxy, not a claim of an identically-measured
+data point). RSS remains well within the < 100 MB budget across all
+three scenarios.
