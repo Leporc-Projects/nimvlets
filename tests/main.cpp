@@ -6,6 +6,7 @@
 #include "ClickAccountingTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
+#include "LinuxBackendPolicyTest.h"
 #include "PersistenceIntegrationTest.h"
 #include "PersistenceSchedulerTest.h"
 #include "PetCatalogLoaderTest.h"
@@ -33,6 +34,7 @@ int main() {
     nimvlets::tests::RegisterPetCatalogLoaderTests(runner);
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
+    nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
 
     return runner.RunAll();
 }

@@ -37,6 +37,8 @@ add_executable(nimvlets_tests
   ActivePetResolutionTest.cpp
   PetSwitchingTest.h
   PetSwitchingTest.cpp
+  LinuxBackendPolicyTest.h
+  LinuxBackendPolicyTest.cpp
   main.cpp
 )
 
@@ -44,7 +46,11 @@ target_include_directories(nimvlets_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAK
 # nimvlets_core and nimvlets_content reach this target transitively via
 # nimvlets_catalog's PUBLIC link — linking them again here just
 # produces a harmless-but-noisy "duplicate library" warning (same
-# lesson as Block 01's src/app/CMakeLists.txt).
-target_link_libraries(nimvlets_tests PRIVATE nimvlets_persistence nimvlets_catalog nimvlets_warnings)
+# lesson as Block 01's src/app/CMakeLists.txt). nimvlets_platform_policy
+# es pura (sin SDL) y se compila en cualquier OS — ver
+# src/platform/CMakeLists.txt y src/platform/LinuxBackendPolicy.h — así
+# que LinuxBackendPolicyTest.cpp corre en cualquier host, incluido uno
+# sin Linux real.
+target_link_libraries(nimvlets_tests PRIVATE nimvlets_persistence nimvlets_catalog nimvlets_platform_policy nimvlets_warnings)
 
 add_test(NAME nimvlets_unit_tests COMMAND nimvlets_tests)
