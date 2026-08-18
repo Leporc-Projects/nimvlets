@@ -63,3 +63,26 @@ render/hit-mask-update code path as passive actions — see
 above is a reasonable proxy, not a claim of an identically-measured
 data point). RSS remains well within the < 100 MB budget across all
 three scenarios.
+
+## Block 03's actual measurements
+
+Persistence (`src/persistence`) adds a debounced disk write and, per
+`docs/PERSISTENCE.md` §9, a capped 1-second maximum event-loop wait
+(fixing a shutdown-latency bug that block's own testing found — see
+`docs/DECISION_LOG.md` DEC-028). Re-measured with the same method as
+Block 02, Release, native arm64, persistence active
+(`NIMVLETS_DEV_APPDATA_DIR` pointed at an isolated temp directory):
+
+| Scenario | CPU (average, steady state) | RSS |
+|---|---|---|
+| Block 03, static idle, persistence active, no pending writes | **≈0.0%** | ≈73–74 MB |
+
+Unchanged from Block 02 within measurement noise — the 1-second wait
+cap and the (idle, non-dirty) persistence scheduler add a wake that
+does no work the overwhelming majority of the time, not a busy-wait or
+periodic render tick. A single debounced write (a few dozen bytes,
+atomically renamed) is not large enough to register on a 3-second-
+interval `ps` sample; no dedicated per-write CPU/latency measurement
+was made in this block, since none of the block's requirements called
+for one and the mechanism (one small buffered write + one rename) has
+no realistic path to being a measurable cost at this scale.

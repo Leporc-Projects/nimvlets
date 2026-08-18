@@ -58,9 +58,10 @@ Nimvlets does not, and this block does not add anything that:
 - sends telemetry of any kind;
 - downloads assets at runtime;
 - requires an account or a subscription;
-- writes data outside ordinary development paths (build output, the
-  process's own working directory) beyond what SDL/AppKit/Win32
-  themselves touch to run a window.
+- writes data anywhere beyond: build output, the process's own working
+  directory (what SDL/AppKit/Win32 themselves touch to run a window),
+  and — since Block 03 — exactly one local, per-user app-data file
+  (see §E). No other location is ever written to.
 
 ## D. Block 01 self-check
 
@@ -68,3 +69,27 @@ See the Block 01 report's "Privacy / Permissions" section for the
 concrete yes/no confirmation (Accessibility / Input Monitoring / Screen
 Recording / admin-root / global hooks / network — all "no") as actually
 observed for this block's spike executable.
+
+## E. Local state persistence (Block 03)
+
+Block 03 adds exactly one local, unauthenticated, per-user file — see
+`docs/PERSISTENCE.md` for the full design. Relevant to this document
+specifically:
+
+- **No account, no cloud, no network** — the file is written and read
+  by ordinary local filesystem calls (`std::filesystem`, `<fstream>`)
+  only; nothing in `src/persistence` opens a socket or makes a network
+  call (grep-able: no `socket(`, `curl`, `http(s)://`, `SDL_net`, or
+  similar anywhere in `src/`).
+- **No telemetry, no analytics, no provenance tracking** — the file
+  contains only click balance, active pet/variant id, and last window
+  position (AGENTS.md §2's currency and this block's own scope; see
+  `docs/PERSISTENCE.md` §1 for exactly what is and isn't stored).
+- **Location is the OS's own standard per-user app-data directory**
+  (`SDL_GetPrefPath()`), not a hidden or unusual path — the same kind
+  of location any conventional native desktop app uses for local
+  preferences/save data.
+- **No absolute, machine-specific path is ever hardcoded or committed**
+  — the real path is a runtime value from `SDL_GetPrefPath()`; the
+  `NIMVLETS_DEV_APPDATA_DIR` override used for testing is an
+  environment variable, never a literal path in source.
