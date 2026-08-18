@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
 """Dev-only asset prep: converts a source RGBA PNG into the tiny
-uncompressed `.rgba` fixture format the spike executable loads at
-runtime, so the C++ side never needs a PNG decoder or an SDL_image
-dependency (see AGENTS.md §10 and docs/DECISION_LOG.md).
+uncompressed `.rgba` fixture format Block 01's spike loaded directly at
+runtime (see AGENTS.md §10 and docs/DECISION_LOG.md). That format and
+the `graphics::DevSprite` loader that read it have since been retired
+(Block 02, see docs/DECISION_LOG.md DEC-023) — nothing in the runtime
+loads `.rgba` anymore. `write_raw_rgba()`/`main()` below are kept as a
+small, harmless historical utility, not because anything depends on
+them now.
 
-This is a one-time, offline prep step for temporary QA/dev fixtures —
-not a runtime tool, not part of any content pipeline (see
-docs/PET_CONTENT_SPEC.md: Block 01 does not implement one). Re-run it
-by hand if the source PNG changes.
+This module's real ongoing role is the shared, dependency-free PNG
+read/write module reused by
+Block 02's asset pipeline: `read_png_rgba()` is imported by
+tools/compile_pet_pack.py (per AGENTS.md §10, "reuse, don't rewrite
+working PNG tooling"), and `write_png_rgba()` is used by
+tools/generate_bunny_dev_pack.py to materialize its deterministically
+derived frames as real PNG files, so the pipeline documented in
+docs/ANIMATION_RUNTIME.md is exercised with genuine PNG input end to
+end, not an in-memory shortcut.
+
+This file's own CLI entry point (`main()`, below) is a one-time,
+offline prep step for temporary QA/dev fixtures — not a runtime tool,
+not part of any content pipeline (see docs/PET_CONTENT_SPEC.md, still
+unimplemented). Re-run it by hand if a source PNG changes.
 
 Output format (all little-endian, no compression):
     magic:  4 bytes, ASCII "NVR1"
@@ -103,6 +117,37 @@ def write_raw_rgba(path: str, width: int, height: int, pixels: bytes) -> None:
         f.write(b"NVR1")
         f.write(struct.pack("<II", width, height))
         f.write(pixels)
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+
+
+def write_png_rgba(path: str, width: int, height: int, pixels: bytes) -> None:
+    """Encodes raw RGBA8 bytes (row-major, top-to-bottom, straight
+    alpha — the same layout read_png_rgba() produces) as a standard,
+    minimal 8-bit RGBA PNG: filter type "None" on every scanline (no
+    attempt at optimal compression — these are small, deterministic dev
+    fixtures, not production art) and a single IDAT chunk. Any standard
+    PNG reader, and this module's own read_png_rgba(), can read the
+    result back byte-for-byte.
+    """
+    if len(pixels) != width * height * 4:
+        raise ValueError(f"write_png_rgba: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8")
+
+    stride = width * 4
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # filter type 0 ("None") for every scanline
+        raw += pixels[y * stride : (y + 1) * stride]
+    compressed = zlib.compress(bytes(raw), 9)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(_png_chunk(b"IHDR", ihdr))
+        f.write(_png_chunk(b"IDAT", compressed))
+        f.write(_png_chunk(b"IEND", b""))
 
 
 def main() -> int:

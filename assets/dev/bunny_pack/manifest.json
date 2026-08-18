@@ -1,0 +1,64 @@
+{
+  "id": "bunny_dev",
+  "display_name": "Bunny (dev fixture)",
+  "variant_group": "",
+  "canvas_width": 160,
+  "canvas_height": 160,
+  "alpha_hit_threshold": 128,
+  "passive_interval_seconds": 300.0,
+  "content_version": "block02-dev-1",
+  "idle": {
+    "id": "idle",
+    "kind": "static",
+    "fps": 0,
+    "returns_to_idle": true,
+    "frames": [
+      {
+        "source": "frames/idle_00.png",
+        "duration_ms": 0
+      }
+    ]
+  },
+  "click_reaction": {
+    "id": "click_reaction",
+    "kind": "one_shot",
+    "fps": 0,
+    "returns_to_idle": true,
+    "frames": [
+      {
+        "source": "frames/click_squash.png",
+        "duration_ms": 90
+      },
+      {
+        "source": "frames/click_stretch.png",
+        "duration_ms": 90
+      },
+      {
+        "source": "frames/click_settle.png",
+        "duration_ms": 90
+      }
+    ]
+  },
+  "passive_actions": [
+    {
+      "id": "passive_wiggle",
+      "kind": "one_shot",
+      "fps": 0,
+      "returns_to_idle": true,
+      "frames": [
+        {
+          "source": "frames/passive_lean_left.png",
+          "duration_ms": 160
+        },
+        {
+          "source": "frames/passive_lean_right.png",
+          "duration_ms": 160
+        },
+        {
+          "source": "frames/passive_settle.png",
+          "duration_ms": 160
+        }
+      ]
+    }
+  ]
+}
