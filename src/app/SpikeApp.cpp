@@ -313,7 +313,25 @@ bool SpikeApp::Init() {
     // límites de pantalla/monitor (ver las "limitaciones" del informe
     // de Block 03).
     if (appState_.lastWindowPosition.has_value()) {
-        SDL_SetWindowPosition(window_, appState_.lastWindowPosition->x, appState_.lastWindowPosition->y);
+        // No se chequeaba el valor de retorno hasta Block 04.1 -- en
+        // macOS/Windows/Linux-X11 este llamado siempre reposiciona de
+        // verdad. En Linux/Wayland, SDL_SetWindowPosition() sobre una
+        // toplevel normal retorna false (el protocolo xdg-shell no
+        // tiene ningún mecanismo para que un cliente pida una posición
+        // absoluta -- ver docs/LINUX_PLATFORM.md) -- ni crashea ni
+        // hace nada, así que sin este chequeo el fallo quedaba
+        // silenciado por completo. appState_.lastWindowPosition NO se
+        // toca en ningún caso: la coordenada guardada se preserva tal
+        // cual en el estado persistido (block brief §3) para la
+        // próxima vez que corra en una plataforma/backend donde sí
+        // funcione, incluso si esta ejecución no pudo aplicarla.
+        if (!SDL_SetWindowPosition(window_, appState_.lastWindowPosition->x, appState_.lastWindowPosition->y)) {
+            SDL_Log(
+                "nimvlets: could not restore saved window position (%d, %d): %s -- this window system "
+                "does not support positioning a normal window here; the saved position is kept in the "
+                "state file for a session/platform where it does work",
+                appState_.lastWindowPosition->x, appState_.lastWindowPosition->y, SDL_GetError());
+        }
     } else {
         SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
@@ -356,9 +374,19 @@ bool SpikeApp::Init() {
     // (called just below, and on every later frame change) branches on
     // this flag.
     usingNativeShapeHitTest_ = platform::NativeShapeHitTestIsRenderSafe();
+    // Ver el comentario de usingPollDrivenClickThrough_ en SpikeApp.h:
+    // agregado en Block 04.1 porque, a diferencia de Windows, en
+    // Linux/Wayland ni el shape nativo NI el polling logran nada -- sin
+    // este chequeo extra el event loop arrancaría un wakeup de ~60Hz
+    // para siempre sin ningún efecto real.
+    usingPollDrivenClickThrough_ = !usingNativeShapeHitTest_ && platform::ClickThroughPollingIsMeaningful();
     SDL_Log(
         "nimvlets: click-through mechanism = %s",
-        usingNativeShapeHitTest_ ? "native SDL_SetWindowShape (event-driven, no polling)" : "poll-driven fallback");
+        usingNativeShapeHitTest_
+            ? "native SDL_SetWindowShape (event-driven, no polling)"
+            : (usingPollDrivenClickThrough_
+                   ? "poll-driven fallback"
+                   : "none available (see docs/LINUX_PLATFORM.md) -- relying on IsPointInteractive() app-side gating only"));
 
     // Establish the initial frame + hit-test region before entering the
     // wait loop, mirroring Block 01's precedent of an immediate first
@@ -782,9 +810,12 @@ int SpikeApp::Run() {
         // AnimationController::NextFrameDeadlineMs()), el deadline de
         // flush de persistencia pendiente (nullopt salvo que algo esté
         // realmente dirty — ver persistence::PersistenceScheduler y
-        // docs/PERSISTENCE.md), y el schedule de poll de hover
-        // (fallback de Windows) — y después se acota a kMaxWaitMs más
-        // abajo, únicamente por capacidad de respuesta ante señales de
+        // docs/PERSISTENCE.md), y el schedule de poll de hover cuando
+        // usingPollDrivenClickThrough_ es true (Windows; ver su
+        // comentario en SpikeApp.h para por qué Linux/Wayland
+        // deliberadamente NO entra acá) — y después se acota a
+        // kMaxWaitMs más abajo, únicamente por capacidad de respuesta
+        // ante señales de
         // shutdown (ver su propio comentario). Un idle verdaderamente
         // estático sin nada pendiente que guardar sigue sin hacer
         // ningún trabajo de redraw/hit-mask/disco entre despertares:
@@ -807,7 +838,7 @@ int SpikeApp::Run() {
         if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs()) {
             waitMs = std::min(waitMs, *flushDeadline - nowMs);
         }
-        if (!usingNativeShapeHitTest_) {
+        if (usingPollDrivenClickThrough_) {
             waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
         }
         if (waitMs < 0.0) {
@@ -905,7 +936,7 @@ int SpikeApp::Run() {
             needsRedraw_ = false;
         }
 
-        if (!usingNativeShapeHitTest_ && afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
+        if (usingPollDrivenClickThrough_ && afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
             PollHover();
         }
     }

@@ -212,10 +212,27 @@ private:
     // click-through on every real mouse event, with zero polling.
     bool usingNativeShapeHitTest_ = false;
 
+    // True once Init() has determined that the poll-driven fallback
+    // below is actually worth running — i.e. usingNativeShapeHitTest_
+    // is false AND platform::ClickThroughPollingIsMeaningful() says a
+    // poll-triggered SetWindowClickThrough() call could really change
+    // OS-level input delivery here. Added in Block 04.1: on Windows
+    // this always matches !usingNativeShapeHitTest_ (unchanged
+    // behavior — the poll fallback genuinely works there), but on
+    // Linux/Wayland neither the native shape path nor the poll
+    // fallback can do anything (see
+    // src/platform/linux/TransparentWindowSupport.cpp and
+    // docs/LINUX_PLATFORM.md), so this stays false there and the event
+    // loop never starts the ~60Hz wakeup loop at all — running it
+    // anyway, knowing in advance it could never change anything, would
+    // be exactly the permanent polling loop AGENTS.md §2 forbids.
+    bool usingPollDrivenClickThrough_ = false;
+
     // --- poll-driven click-through FALLBACK, used only when
-    // usingNativeShapeHitTest_ is false (currently: Windows; see
+    // usingPollDrivenClickThrough_ is true (currently: Windows, and
+    // X11 in practice never reaches here either — see
     // platform::NativeShapeHitTestIsRenderSafe()'s doc comment for why
-    // macOS doesn't need this anymore). Unchanged in spirit from
+    // macOS/Linux-X11 don't need this). Unchanged in spirit from
     // Block 01 — still a bounded SDL_WaitEventTimeout wakeup at ~60 Hz,
     // never a busy-wait, still a cursor-*position* poll
     // (SDL_GetGlobalMouseState), not a global input hook. See
