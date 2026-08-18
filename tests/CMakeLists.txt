@@ -21,6 +21,14 @@ add_executable(nimvlets_tests
   PetPackLoaderTest.cpp
   ClickAccountingTest.h
   ClickAccountingTest.cpp
+  AppStateSerializerTest.h
+  AppStateSerializerTest.cpp
+  AppStateStoreTest.h
+  AppStateStoreTest.cpp
+  PersistenceSchedulerTest.h
+  PersistenceSchedulerTest.cpp
+  PersistenceIntegrationTest.h
+  PersistenceIntegrationTest.cpp
   main.cpp
 )
 
@@ -28,6 +36,6 @@ target_include_directories(nimvlets_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAK
 # nimvlets_core reaches this target transitively via nimvlets_content's
 # PUBLIC link — linking it again here just produces a harmless-but-noisy
 # "duplicate library" warning (same lesson as Block 01's src/app/CMakeLists.txt).
-target_link_libraries(nimvlets_tests PRIVATE nimvlets_content nimvlets_warnings)
+target_link_libraries(nimvlets_tests PRIVATE nimvlets_content nimvlets_persistence nimvlets_warnings)
 
 add_test(NAME nimvlets_unit_tests COMMAND nimvlets_tests)
