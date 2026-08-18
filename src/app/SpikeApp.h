@@ -1,5 +1,8 @@
 #pragma once
 
+#include "catalog/ActivePetResolution.h"
+#include "catalog/PetCatalog.h"
+#include "catalog/PetIdentity.h"
 #include "content/AnimationController.h"
 #include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
@@ -16,22 +19,24 @@
 namespace nimvlets::app {
 
 // Dueña del ciclo de vida de ventana/renderer de SDL y del event loop
-// principal del pequeño runtime de contenido+animación+persistencia,
-// data-driven, construido a través de Block 01 (spike de plataforma),
-// Block 02 (contenido/animación) y Block 03 (persistencia local de
-// estado — ver docs/PERSISTENCE.md).
+// principal del pequeño runtime de contenido+animación+persistencia+
+// catálogo, data-driven, construido a través de Block 01 (spike de
+// plataforma), Block 02 (contenido/animación), Block 03 (persistencia
+// local de estado — ver docs/PERSISTENCE.md) y Block 04 (catálogo de
+// pets + switching en runtime — ver docs/CATALOG.md).
 //
 // This is still explicitly a foundation/spike executable, not the
 // product — see docs/PLATFORM_SPIKE.md, docs/ANIMATION_RUNTIME.md, and
 // the block briefs' NON-SCOPE lists for what it deliberately does not do
-// (Shop, Collection, onboarding, pet-selection UI, audio, global click
+// (Shop, Collection, onboarding, pet-selector UI, audio, global click
 // mode, final content for all 8 Nimvlets, ...).
 //
-// The one pet this runtime shows is entirely data (a compiled
-// content::PetDefinition loaded from a ".nvpack" file at startup, see
-// Init()) — this class contains no pet-specific branches, no hardcoded
-// shapes, and no knowledge of "Bunny" beyond the path it happens to load
-// in this block. Swapping which pack loads swaps the pet.
+// El pet activo es enteramente datos: cuál pack cargar se resuelve
+// contra catalog_ (ver Init() y TrySwitchActivePet()) — esta clase no
+// contiene ninguna rama específica de un pet, ninguna forma
+// hardcodeada, y ningún conocimiento de "Bunny" más allá de ser la
+// única entrada real del catálogo de dev de este bloque. Agregar un
+// pet nuevo al catálogo nunca requiere tocar este archivo.
 class SpikeApp {
 public:
     // Runs until the window is closed. Returns a process exit code (0 on
@@ -95,16 +100,51 @@ private:
     // debounce — ver docs/PERSISTENCE.md).
     void FlushPersistedState();
 
+    // La API de switching en runtime reutilizable (block brief §4):
+    // intenta cargar el pack de `target` según catalog_. Si `target` no
+    // está en el catálogo, o su pack no carga, retorna false, deja un
+    // log claro, y NO toca pet_/animController_/appState_ en absoluto —
+    // el pet activo anterior sigue completamente usable. Si carga con
+    // éxito: suelta las texturas del pet anterior, reemplaza pet_,
+    // reatacha texturas del nuevo, reconstruye animController_ (que
+    // arranca en Idle del pet nuevo — exactamente lo requerido),
+    // actualiza appState_.activePetId/activeVariantId, marca
+    // persistenceScheduler_ dirty, y pide un redraw. Ver
+    // docs/CATALOG.md.
+    bool TrySwitchActivePet(const catalog::PetIdentity& target);
+
+    // Mecanismo solo-DEV para smoke-testear el switching de forma no
+    // interactiva contra el binario real (block brief §4: "no debe
+    // convertirse en comportamiento de producto"). Si
+    // NIMVLETS_DEV_SWITCH_TEST_COUNT es un entero positivo válido,
+    // ejecuta esa cantidad de llamadas a TrySwitchActivePet() -- una
+    // detrás de otra, cicladas por catalog_.Entries() -- inmediatamente
+    // después de que Init() termina y antes de entrar al loop
+    // principal, logueando cada resultado. Sin la variable de entorno,
+    // esto es un no-op total: cero cambio de comportamiento en
+    // producción. Ver docs/CATALOG.md.
+    void RunDevSwitchSmokeTestIfRequested();
+
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 
-    // The one active pet's data-driven content — loaded once in Init()
-    // from assets/dev/bunny_pack.nvpack (see kPetPackPath in
-    // SpikeApp.cpp) via content::LoadPetPackFromFile(). Declared before
-    // animController_ so it exists (default-constructed, if not yet
-    // loaded) at the point animController_'s member-initializer binds a
-    // reference to it — see animController_'s doc comment for why that
-    // ordering matters and why it's still safe.
+    // --- Block 04: catálogo de pets (ver docs/CATALOG.md) ---
+    // Cargado una única vez en Init() desde kCatalogPath (ver
+    // SpikeApp.cpp) vía catalog::LoadCatalogFromFile(). Puro metadato
+    // -- nunca carga por adelantado los packs de otras entradas; el
+    // único pack efectivamente en memoria en todo momento es el de
+    // pet_ (ver TrySwitchActivePet()).
+    catalog::PetCatalog catalog_;
+
+    // El pet activo actual, con todo su contenido data-driven --
+    // reemplazado por completo en cada switch exitoso (ver
+    // TrySwitchActivePet()), nunca mutado incrementalmente. Declarado
+    // antes de animController_ para que exista (default-construido, si
+    // aún no se cargó nada) en el momento en que el member-initializer
+    // de animController_ le enlaza una referencia -- ver el comentario
+    // de animController_ para por qué ese orden importa y por qué
+    // sigue siendo seguro incluso después de reemplazar pet_ en un
+    // switch (ver TrySwitchActivePet()).
     content::PetDefinition pet_;
 
     // Constructed only after pet_ is successfully loaded (Init() calls

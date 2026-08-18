@@ -1,6 +1,6 @@
 #include "app/SpikeApp.h"
 
-#include "content/PetPackLoader.h"
+#include "catalog/PetCatalogLoader.h"
 #include "graphics/FrameTexture.h"
 #include "platform/TransparentWindowSupport.h"
 
@@ -15,17 +15,22 @@ namespace nimvlets::app {
 
 namespace {
 
-// Where the one pet this runtime shows is loaded from. A relative path,
-// resolved from the process's current working directory (matching
-// Block 01's asset-loading precedent) — see docs/ANIMATION_RUNTIME.md,
-// "running the spike", for the "run from the repo root" requirement this
-// implies. Deliberately the *only* pet-specific string literal in this
-// entire file: swapping it swaps the pet, with zero other code changes.
-constexpr const char* kPetPackPath = "assets/dev/bunny_pack.nvpack";
+// De dónde se carga el catálogo de pets. Ruta relativa, resuelta desde
+// el directorio de trabajo del proceso (mismo precedente que
+// kPetPackPath tenía en Block 02/03) — ver docs/CATALOG.md. El único
+// string específico de un pet en todo este archivo ya no es
+// "bunny_dev" ni ninguna ruta de pack: es esta única ruta de catálogo
+// -- qué pack termina cargándose lo decide por completo el contenido
+// del catálogo, nunca este código.
+constexpr const char* kCatalogPath = "assets/dev/pet_catalog.nvcat";
 
 // Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS — see
 // SpikeApp::ComputeEffectivePassiveIntervalSeconds()'s doc comment.
 constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS";
+
+// Lee NIMVLETS_DEV_SWITCH_TEST_COUNT — ver el comentario de
+// SpikeApp::RunDevSwitchSmokeTestIfRequested().
+constexpr const char* kDevSwitchTestCountEnvVar = "NIMVLETS_DEV_SWITCH_TEST_COUNT";
 
 // Identifica el directorio de app-data por usuario que resuelve
 // SDL_GetPrefPath() (ver docs/PERSISTENCE.md, "política de ubicación
@@ -178,26 +183,25 @@ bool SpikeApp::Init() {
         return false;
     }
 
-    // Load the one pet this runtime shows *before* creating any window —
-    // fail loudly and exit non-zero if it can't be loaded, rather than
-    // falling back to a hardcoded analytic shape. A data-driven runtime
-    // with no content to show is a real problem to surface, not paper
-    // over — matching the asset pipeline's own "fail loudly" contract
-    // (tools/compile_pet_pack.py) applied consistently at the app level.
-    // See docs/ANIMATION_RUNTIME.md and docs/DECISION_LOG.md.
-    std::string loadError;
-    if (!content::LoadPetPackFromFile(kPetPackPath, pet_, loadError)) {
-        SDL_Log("nimvlets: FATAL: could not load pet pack '%s': %s", kPetPackPath, loadError.c_str());
-        SDL_Log("nimvlets: (run from the repository root, or regenerate it: python3 tools/generate_bunny_dev_pack.py)");
+    // Carga el catálogo *antes* que nada más — fail loud y sale con
+    // código no-cero si no carga, igual que el pack de un pet
+    // individual en Block 02/03: sin catálogo no hay forma de saber
+    // qué pet mostrar en absoluto. Ver docs/CATALOG.md y
+    // docs/DECISION_LOG.md.
+    std::string catalogError;
+    if (!catalog::LoadCatalogFromFile(kCatalogPath, catalog_, catalogError)) {
+        SDL_Log("nimvlets: FATAL: could not load pet catalog '%s': %s", kCatalogPath, catalogError.c_str());
+        SDL_Log("nimvlets: (run from the repository root, or regenerate it: python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat)");
         return false;
     }
 
     // Resuelve el directorio de app-data por usuario y carga cualquier
-    // save existente (ver docs/PERSISTENCE.md). A diferencia del pet
-    // pack de arriba, un fallo aquí NO es fatal: la persistencia no es
-    // necesaria para que la app sea visual/interactivamente funcional,
-    // así que esto solo deshabilita load/save para la sesión en vez de
-    // abortar el arranque.
+    // save existente (ver docs/PERSISTENCE.md) *antes* de resolver cuál
+    // pet mostrar -- hace falta appState_.activePetId/activeVariantId
+    // para eso. A diferencia del catálogo de arriba, un fallo aquí NO
+    // es fatal: la persistencia no es necesaria para que la app sea
+    // visual/interactivamente funcional, así que esto solo deshabilita
+    // load/save para la sesión en vez de abortar el arranque.
     std::string appDataDir;
     if (const char* devDir = std::getenv(kDevAppDataDirEnvVar); devDir != nullptr && devDir[0] != '\0') {
         std::error_code ec;
@@ -236,17 +240,51 @@ bool SpikeApp::Init() {
         }
     }
 
-    // Mantiene el activePetId persistido sincronizado con la verdad:
-    // cualquier pet que se haya cargado realmente. Este bloque no
-    // implementa lógica de selección — siempre carga exactamente un
-    // pack, incondicionalmente — así que ambos son siempre el mismo
-    // pet; aun así el campo debería reflejar la realidad (un valor
-    // real y con sentido que la UI de selección de un bloque futuro
-    // pueda leer) en vez de quedar obsoleto o vacío. Ver
-    // docs/PERSISTENCE.md.
-    if (appState_.activePetId != pet_.id) {
-        appState_.activePetId = pet_.id;
+    // Resuelve la selección persistida contra el catálogo (block brief
+    // §3): calza exactamente, o cae al default. Luego intenta cargar
+    // ESE pack; si falla (p. ej. el pet guardado ya no existe en disco,
+    // aunque siga listado en el catálogo) y no era ya el default,
+    // reintenta una vez con el default -- nunca debe crashear solo
+    // porque un pet guardado dejó de estar disponible. Si ambos
+    // intentos fallan, recién ahí es un fallo de arranque genuino, sin
+    // más fallback posible.
+    const catalog::PetIdentity persistedIdentity{appState_.activePetId, appState_.activeVariantId};
+    const catalog::ResolvedSelection resolved = catalog::ResolveActiveSelection(catalog_, persistedIdentity);
+
+    content::PetDefinition loadedPet;
+    std::string packError;
+    const catalog::CatalogEntry* loadedEntry = resolved.entry;
+    bool usedFallback = resolved.usedFallback;
+    if (!catalog::LoadPetForIdentity(catalog_, loadedEntry->identity, loadedPet, packError)) {
+        SDL_Log("nimvlets: pack for '%s' failed to load (%s)", loadedEntry->identity.petId.c_str(), packError.c_str());
+        if (loadedEntry != &catalog_.Default()) {
+            SDL_Log("nimvlets: falling back to catalog default");
+            loadedEntry = &catalog_.Default();
+            usedFallback = true;
+            if (!catalog::LoadPetForIdentity(catalog_, loadedEntry->identity, loadedPet, packError)) {
+                SDL_Log("nimvlets: FATAL: catalog default pack also failed to load: %s", packError.c_str());
+                return false;
+            }
+        } else {
+            SDL_Log("nimvlets: FATAL: catalog default pack failed to load; no further fallback possible");
+            return false;
+        }
+    }
+    pet_ = std::move(loadedPet);
+
+    // Repara la selección persistida en memoria si terminamos usando
+    // algo distinto de lo guardado (primera ejecución, id desconocido,
+    // o el pack guardado ya no cargaba) y la marca dirty para que se
+    // guarde -- ver docs/CATALOG.md y docs/PERSISTENCE.md.
+    if (usedFallback) {
+        appState_.activePetId = loadedEntry->identity.petId;
+        appState_.activeVariantId = loadedEntry->identity.variantId;
         persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+        SDL_Log(
+            "nimvlets: persisted pet selection repaired to '%s'%s%s",
+            loadedEntry->identity.petId.c_str(),
+            loadedEntry->identity.variantId.empty() ? "" : "/",
+            loadedEntry->identity.variantId.c_str());
     }
 
     const SDL_WindowFlags flags =
@@ -376,6 +414,76 @@ void SpikeApp::FlushPersistedState() {
         SDL_Log("nimvlets: failed to save app state: %s", error.c_str());
         persistenceScheduler_.OnFlushFailed(static_cast<double>(SDL_GetTicks()));
     }
+}
+
+bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
+    content::PetDefinition newPet;
+    std::string error;
+    if (!catalog::LoadPetForIdentity(catalog_, target, newPet, error)) {
+        SDL_Log(
+            "nimvlets: switch to '%s'%s%s failed: %s (current pet unchanged)",
+            target.petId.c_str(), target.variantId.empty() ? "" : "/", target.variantId.c_str(), error.c_str());
+        return false;  // pet_ / animController_ / appState_ intactos -- el pet activo anterior sigue usable
+    }
+
+    // Suelta las texturas del pet ANTERIOR antes de reemplazar pet_ --
+    // ver docs/CATALOG.md, "recursos". animController_.reset() antes de
+    // reasignar pet_ evita que su puntero interno a la animación activa
+    // quede colgando si el tamaño de pet_.passiveActions cambia entre
+    // el pet viejo y el nuevo (un vector puede reubicar su buffer al
+    // reasignarse) -- nunca existe un AnimationController vivo mientras
+    // el contenido de pet_ está siendo reemplazado.
+    ReleaseAllTextures();
+    animController_.reset();
+    pet_ = std::move(newPet);
+    AttachAllTextures();
+    animController_.emplace(pet_);  // arranca en Idle del pet nuevo -- justo lo requerido
+
+    // El tamaño lógico del canvas puede diferir entre pets -- se
+    // reaplican ambas llamadas incondicionalmente tras cada switch
+    // (baratas, sin costo real cuando el tamaño no cambió) en vez de
+    // rastrear si de verdad cambió.
+    SDL_SetWindowSize(window_, pet_.canvasWidth, pet_.canvasHeight);
+    SDL_SetRenderLogicalPresentation(renderer_, pet_.canvasWidth, pet_.canvasHeight, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+
+    appState_.activePetId = target.petId;
+    appState_.activeVariantId = target.variantId;
+    persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    needsRedraw_ = true;  // el loop principal se encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima vuelta
+
+    SDL_Log(
+        "nimvlets: switched active pet to '%s'%s%s ('%s')",
+        pet_.id.c_str(), pet_.variantGroup.empty() ? "" : "/", pet_.variantGroup.c_str(), pet_.displayName.c_str());
+    return true;
+}
+
+void SpikeApp::RunDevSwitchSmokeTestIfRequested() {
+    const char* countEnv = std::getenv(kDevSwitchTestCountEnvVar);
+    if (countEnv == nullptr || countEnv[0] == '\0') {
+        return;  // sin la variable de entorno, esto es un no-op total
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(countEnv, &end, 10);
+    if (end == countEnv || parsed <= 0) {
+        SDL_Log("nimvlets: %s='%s' is not a valid positive integer; ignoring", kDevSwitchTestCountEnvVar, countEnv);
+        return;
+    }
+    const auto count = static_cast<std::size_t>(parsed);
+
+    SDL_Log(
+        "nimvlets: DEV switch smoke test active — %s=%zu (%zu catalog entr%s available)",
+        kDevSwitchTestCountEnvVar, count, catalog_.Entries().size(), catalog_.Entries().size() == 1 ? "y" : "ies");
+
+    std::size_t successCount = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const catalog::CatalogEntry& target = catalog_.Entries()[i % catalog_.Entries().size()];
+        if (TrySwitchActivePet(target.identity)) {
+            ++successCount;
+        }
+    }
+
+    SDL_Log("nimvlets: DEV switch smoke test complete — %zu/%zu switches succeeded", successCount, count);
 }
 
 void SpikeApp::Shutdown() {
@@ -655,6 +763,11 @@ int SpikeApp::Run() {
         Shutdown();
         return 1;
     }
+
+    // No-op salvo que NIMVLETS_DEV_SWITCH_TEST_COUNT esté seteada — ver
+    // el comentario del método. Corre una sola vez, sincrónicamente,
+    // antes de entrar al loop principal (no agrega ningún polling).
+    RunDevSwitchSmokeTestIfRequested();
 
     bool running = true;
 
