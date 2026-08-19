@@ -851,7 +851,12 @@ pasivas futuras. Documentado explícitamente como placeholder, no como
 contenido terminado.
 
 ### DEC-041 — fps del idle loop de Nidir: 6.0, elegido por medición real, no por el export
-**Status:** DECIDIDO · Block 04.2 — ver `docs/PERFORMANCE_BUDGETS.md`, "Mediciones reales de Block 04.2".
+**Status:** SUPERSEDED por DEC-044 — Block 04.2, segunda pasada. `idle`
+dejó de ser un loop continuo (ver DEC-044), así que "fps de CPU más
+bajo" dejó de ser la pregunta relevante: el fps ahora se deriva de la
+configuración real de export de Ludo.ai, no de una medición de costo.
+
+<details><summary>Texto original (para contexto histórico)</summary>
 
 El export de Ludo.ai no trae ninguna cadencia de reproducción
 indicada. Se midió contra el binario Release real antes de fijar un
@@ -864,8 +869,16 @@ objetivo de ~1% que `docs/PERFORMANCE_BUDGETS.md` documenta para Bunny
 -- documentado como una limitación real, no ocultado (ver "Bugs/debt/
 limitations" del informe final de este bloque).
 
+</details>
+
 ### DEC-042 — Canvas de Nidir a resolución nativa (513×525), sin reescalar
-**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §7.
+**Status:** SUPERSEDED por DEC-045 — Block 04.2, segunda pasada. La
+tensión con el invariante "ventana pequeña" que esta entrada dejaba
+abierta resultó ser un problema real reportado por el owner ("Nidir
+currently appears much larger on screen than Bunny"); DEC-045 la
+resuelve con una política de canvas lógico genérica.
+
+<details><summary>Texto original (para contexto histórico)</summary>
 
 A diferencia de Bunny (reescalado a 160×160 como fixture de dev), el
 canvas de Nidir usa exactamente la resolución nativa de los frames
@@ -879,6 +892,8 @@ una tensión real con el invariante de producto "ventana pequeña"
 (AGENTS.md §2), y con el costo de CPU medido en DEC-041. Queda como
 una decisión pendiente para un futuro bloque/el owner, no resuelta acá.
 
+</details>
+
 ### DEC-043 — `~/Downloads/Nidir.png` usado como `master.png`
 **Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §7.
 
@@ -891,3 +906,110 @@ desde Block 02) -- evidencia suficiente para una inferencia razonable,
 no una adivinanza. El brief solo pedía STOP ante folders faltantes/
 ambiguos entre los dos requeridos explícitamente, y ninguno de esos dos
 lo estaba.
+
+---
+
+### DEC-044 — Semántica corregida de Nidir: base estática + idle periódico one-shot vía el scheduler existente
+**Status:** DECIDIDO · Block 04.2, segunda pasada — ver
+`docs/NIDIR_CONTENT.md` §5.1. **Supersede DEC-041.**
+
+La primera pasada modeló toda la secuencia de 25 frames de "respiración"
+de Nidir como su `idle`, con `PlaybackKind::kLoop` -- reproducción
+continua para siempre, exactamente el patrón que Block 02 eliminó de
+Bunny (ver DEC-021) y que el owner señaló explícitamente como
+incorrecto para el producto real: "Nidir's idle MUST NOT loop
+continuously." El modelo correcto, ya probado por Bunny desde Block 02,
+no necesitó ningún cambio de arquitectura -- solo una reasignación de
+contenido:
+
+- `idle` pasa a ser un solo frame, `PlaybackKind::kStatic` (la pose
+  base/maestra) -- `NextFrameDeadlineMs()` vuelve a devolver
+  `std::nullopt` para siempre en reposo, igual que Bunny.
+- La secuencia completa de 25 frames se reasigna a
+  `passiveActions[0]`, `PlaybackKind::kOneShot` -- disparada de forma
+  esporádica por el scheduler de acciones pasivas que YA existe desde
+  Block 02 (`SpikeApp::nextPassiveDeadlineMs_`,
+  `pet.passiveIntervalSeconds`, `TriggerPassiveAction()`), reutilizado
+  sin ningún cambio, tal como pedía el brief ("reuse, don't rebuild").
+  Al terminar naturalmente, `AnimationController::Advance()` vuelve a
+  Idle sola -- el mismo mecanismo que ya hace esto para
+  `clickReaction`.
+- Un click sigue interrumpiendo una acción pasiva en curso
+  limpiamente: `TriggerClick()` ya tenía prioridad sobre
+  `TriggerPassiveAction()` desde Block 02 (`ControllerState::kClickReaction`
+  reemplaza a `kPassiveAction` sin más ceremonia) -- sin cambios,
+  confirmado con un test nuevo dedicado
+  (`ClickInterruptsPeriodicIdleAndReturnsToStaticBaseAfterward` en
+  `tests/DirectionTest.cpp`).
+
+El intervalo exacto (1/3/5 minutos) sigue siendo política de producto
+no decidida en este bloque -- `pet.passiveIntervalSeconds` se dejó en
+el mismo valor placeholder (300s) que ya traía la primera pasada, sin
+inventar un número nuevo.
+
+### DEC-045 — Canvas lógico genérico, independiente de la resolución nativa del arte fuente
+**Status:** DECIDIDO · Block 04.2, segunda pasada — ver
+`docs/NIDIR_CONTENT.md` §7. **Supersede DEC-042.**
+
+El owner reportó el problema visual real que DEC-042 había dejado
+abierto sin resolver: Nidir ocupaba una ventana visiblemente más
+grande que Bunny. La causa no era arquitectónica --
+`PetDefinition::canvasWidth/canvasHeight` ya gobernaba tanto el
+renderizado como el hit-mask de forma totalmente independiente de la
+resolución nativa de cada frame desde Block 02 -- sino el VALOR
+elegido en la primera pasada (copiar 513×525 nativo 1:1 en vez de
+escalarlo). Se agregó `tools/prep_dev_sprite.compute_logical_canvas_size()`,
+una función genérica y reutilizable (sin ninguna rama específica de
+Nidir) que deriva un canvas lógico comparable en escala al de Bunny
+(160 en el lado más largo, la misma convención que Bunny ya usaba
+implícitamente, ahora explícita) preservando el aspect ratio nativo.
+Para Nidir: canvas lógico 156×160. Ningún PNG fuente se tocó; el
+hit-mask sigue exactamente alineado con el renderizado (ambos siguen
+leyendo el mismo `canvasWidth/canvasHeight`); el comportamiento
+high-DPI y el switching de dirección no cambiaron. Bunny no se vio
+afectado (su canvas ya era 160×160 antes de que esta función
+existiera).
+
+### DEC-046 — Downscale opcional en tiempo de compilación (`runtime_max_frame_dimension`)
+**Status:** DECIDIDO · Block 04.2, segunda pasada — ver
+`docs/NIDIR_CONTENT.md` §8.
+
+El RSS medido de Nidir (~259MB, primera pasada) se investigó en vez de
+descartarse como aceptable: la causa era que cada uno de los 25+ frames
+se decodificaba y almacenaba en el pack compilado a su resolución
+nativa completa (513×525), muy por encima de lo que un canvas lógico
+de 156×160 (DEC-045), incluso a 2x Retina, puede llegar a mostrar en
+pantalla. Se agregó un campo de manifest opcional,
+`runtime_max_frame_dimension` (default `None` = sin cambios de
+comportamiento, preserva byte-a-byte el pack de Bunny, verificado con
+`cmp`), que `tools/compile_pet_pack.py` aplica de forma genérica a
+CUALQUIER frame (de cualquier animación, cualquier override
+direccional) cuyo lado más largo exceda el límite -- reescalado
+determinista nearest-neighbor (`prep_dev_sprite.resize_rgba_nearest()`,
+misma fórmula que `core::AlphaMask::FromAlphaChannel` ya usa) aplicado
+solo a los bytes que van al pack compilado, nunca a los PNG fuente en
+disco. Para Nidir: límite de 320px (2× el tamaño de referencia lógico
+de 160, el mismo factor 2.00 de densidad de pixel que este proyecto ya
+mide para Retina desde Block 01). Resultado medido: pack compilado de
+~58MB a ~21.6MB; RSS en runtime de ~259MB a ~128MB (ver
+`docs/PERFORMANCE_BUDGETS.md`).
+
+### DEC-047 — Blocker de acceso a `~/Downloads`: click-fire real de Nidir no importado en este bloque
+**Status:** DECIDIDO (hallazgo, no una elección de diseño) · Block
+04.2, segunda pasada — ver `docs/NIDIR_CONTENT.md` §10.
+
+El owner exportó la animación real de click-fire
+(`~/Downloads/nidir-click-fire-right`/`-spritesheet`) durante la
+segunda pasada de este bloque, pero el acceso a `~/Downloads` estuvo
+denegado ("Operation not permitted") de forma consistente en más de 6
+intentos, con `~/Documents` y el resto del filesystem accesibles con
+normalidad -- confirmado como un bloqueo específico de esa carpeta
+(muy probablemente TCC/privacidad de macOS para la sesión detrás de
+este agente), no un problema de este repositorio. Se decidió no seguir
+reintentando indefinidamente y, en cambio, dejar `click_reaction` como
+el placeholder existente (DEC-040, ahora con override direccional
+propio agregado) y reportar el blocker explícitamente en vez de
+omitirlo o fabricar una importación. El mecanismo para importarlo en
+cuanto el acceso se restablezca ya está listo y probado (misma
+extensión direccional que ya cubre `idle`, generalizada a
+`clickReaction` en este mismo bloque).

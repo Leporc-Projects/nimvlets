@@ -134,11 +134,14 @@ en X11 (mismo mecanismo event-driven que macOS) ni en Wayland
 (`usingPollDrivenClickThrough_` es `false` ahí específicamente para
 evitar un loop inútil — ver `docs/LINUX_PLATFORM.md` §4).
 
-## Mediciones reales de Block 04.2 (Nidir)
+## Mediciones reales de Block 04.2, primera pasada (SUPERSEDED)
+
+<details><summary>Números originales, ya no vigentes — ver la sección
+siguiente para las mediciones correctas de la segunda pasada</summary>
 
 Medido contra el binario Release real (arm64 nativo, `ps -o rss,%cpu`,
 muestras cada 3s), vía `NIMVLETS_DEV_SWITCH_TEST_COUNT=2` (Bunny ->
-Nidir) — ver `docs/NIDIR_CONTENT.md`.
+Nidir).
 
 **Bunny, sin switch (regresión, sin cambios de Block 04.2):** RSS
 ≈74.0 MB, CPU 0.0% en steady state — idéntico al baseline de bloques
@@ -149,41 +152,74 @@ anteriores.
 | fps del idle loop | CPU (steady state) | RSS (steady state) |
 |---|---|---|
 | 12 (primer intento) | ≈11–12% | ≈199 MB |
-| **6 (valor final elegido)** | **≈4–5.5%** | **≈259 MB** |
+| 6 (valor elegido en la primera pasada) | ≈4–5.5% | ≈259 MB |
 
-**Esto excede el objetivo de ~1% de idle** que este documento
-establece para Bunny — explícitamente no se pretende que un idle loop
-real de 25 frames sea gratis: a diferencia del idle estático de Bunny
-(`PlaybackKind::kStatic`, sin ningún deadline nunca), el idle de Nidir
-es `PlaybackKind::kLoop`, así que `NextFrameDeadlineMs()` siempre tiene
-un valor y el event loop despierta a cadencia fija mientras dure. Dos
-factores concretos explican la magnitud (no solo "es un loop, no
-estático"):
+Esta medición se hizo con el `idle` de Nidir modelado incorrectamente
+como `PlaybackKind::kLoop` continuo (ver DEC-044) — **no es una
+medición válida de idle estático final** y quedó explícitamente
+invalidada por el propio owner al pedir la corrección de semántica.
+Se conserva acá solo como referencia histórica de por qué la
+corrección era necesaria.
 
-1. **Resolución nativa ~10x mayor que Bunny** (513×525 = 269,325
-   pixeles vs. 160×160 = 25,600) — el canvas de Nidir usa su resolución
-   nativa exacta, sin reescalar (ver `docs/NIDIR_CONTENT.md` §7 para
-   por qué, y la tensión real que esto crea con el invariante de
-   "ventana pequeña" de AGENTS.md §2).
-2. `BuildHitTestShapeSurface()` (existente desde Block 01, sin cambios
-   en este bloque) reconstruye la superficie de shape con
-   `SDL_WriteSurfacePixel()` pixel por pixel en cada cambio de frame —
-   un costo que escala linealmente con la resolución del canvas, no
-   optimizado para canvases grandes porque ninguno había existido
-   hasta ahora.
+</details>
 
-**500 switches automatizados alternando Bunny/pets sintéticos**
-(`tests/PetSwitchingTest.cpp`) y **40 cambios de dirección
-automatizados contra el binario real** (`NIMVLETS_DEV_DIRECTION_TEST_COUNT=40`,
-ver `docs/NIDIR_CONTENT.md` §5) no mostraron crecimiento de RSS más
-allá del ruido normal del allocator (~258.9–259.1 MB estable a lo largo
-de 3 muestras separadas por 3s) — "repeated direction changes do not
-accumulate logical resources" (block brief §9) confirmado tanto en el
-test puro (`tests/DirectionTest.cpp`) como contra el binario real.
+## Mediciones reales de Block 04.2, segunda pasada (semántica corregida + canvas lógico + downscale)
 
-**No se estableció ningún presupuesto final para Nidir en este
-bloque** — el número real (~5% CPU en idle) queda documentado como
-dato honesto, no como un target aceptado; optimizar
-`BuildHitTestShapeSurface()` para canvases grandes, o reconsiderar el
-tamaño de canvas de Nidir, quedan fuera de alcance de este bloque (ver
-"Bugs/debt/limitations" del informe final).
+Medido contra el binario Release real (arm64 nativo, `ps -o rss,%cpu`,
+muestras cada 1.5–3s sobre ventanas de 15–30s), tras aplicar
+DEC-044 (base estática + idle periódico one-shot), DEC-045 (canvas
+lógico 156×160) y DEC-046 (downscale de runtime a 320px máx. por
+lado) — ver `docs/NIDIR_CONTENT.md` §§5.1, 7, 8. Escenarios medidos
+por separado, cada uno como proceso propio, señal `SIGTERM` limpia al
+final:
+
+| Escenario | Cómo se disparó | CPU | RSS (steady state) |
+|---|---|---|---|
+| **(A) Base estática** (sin passive action pendiente, sin click) | `NIMVLETS_DEV_SWITCH_TEST_COUNT=2` (Bunny → Nidir), sin overrides adicionales | **0.0%** (5 muestras, 15s) | **≈127.2–127.6 MB** |
+| **(B) Idle periódico activo** (`passiveActions[0]`, `kOneShot`, disparado cada 15s vía `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=15`) | ídem + intervalo forzado (~20x más frecuente que el default de 300s, para poder observar el pico dentro de una ventana corta) | **pico ≈2.2–2.4%** durante la reproducción (~3s), **0.0%** el resto del ciclo | **≈127.5–127.7 MB, plano** en los 4 ciclos observados |
+| **(C) Click activo** (`clickReaction` placeholder, `kOneShot`, ~100ms) | ráfaga de 500 clicks sintéticos vía `NIMVLETS_DEV_CLICK_TEST_COUNT=500` | **no medible de forma confiable** — ver nota abajo | **≈127.2–127.7 MB, sin crecimiento tras 500 disparos** |
+| Bunny, sin switch (regresión) | proceso separado, sin overrides | 0.0% | ≈74.1–74.2 MB — idéntico al baseline histórico |
+
+**Nota sobre (C):** el placeholder de click (dos frames, ~100ms) es
+demasiado corto para que un muestreo de `ps` (que ya de por sí
+promedia sobre intervalos de segundos) capture su CPU real de forma
+aislada; el mecanismo DEV solo puede disparar clicks sintéticos, no
+sostener la reproducción en un loop repetido sin interacción real. Lo
+que sí se confirmó de forma sólida: una ráfaga de 500 clicks
+sintéticos consecutivos no deja crecimiento de RSS (mismo patrón que
+las 500 acciones pasivas — ver abajo), y el costo por frame de
+`clickReaction` comparte exactamente el mismo camino de código de
+render/hit-mask que `passiveActions[0]` (ver
+`docs/ANIMATION_RUNTIME.md` §3) — así que el costo instantáneo real es
+arquitectónicamente comparable al pico medido en (B), aunque no exista
+un número medido de forma independiente para (C). Esto se documenta
+como una limitación honesta, no como un número inventado.
+
+**Comparación con la primera pasada:** el RSS de Nidir bajó de ≈259 MB
+a **≈127 MB** (el downscale de runtime a 320px máx. por lado, DEC-046,
+reduce cada frame a ~37% de sus pixeles nativos) y el CPU en reposo
+real bajó de ≈4–5.5% *continuo* a **0.0% en reposo, con picos breves
+de ≈2.3% solo durante los ~3s que dura una reproducción esporádica**
+— la comparación correcta ya no es "Nidir siempre cuesta X% de CPU"
+sino "Nidir cuesta 0% la gran mayoría del tiempo, igual que Bunny,
+salvo por ventanas cortas y poco frecuentes de reproducción".
+
+**Ausencia de crecimiento de recursos confirmada** con dos mecanismos
+distintos contra el binario real: 500 switches Bunny/Nidir alternados
+(`tests/PetSwitchingTest.cpp` + smoke real), 40 cambios de dirección
+(`NIMVLETS_DEV_DIRECTION_TEST_COUNT=40`), y 500 clicks sintéticos
+consecutivos (`NIMVLETS_DEV_CLICK_TEST_COUNT=500`, este bloque,
+segunda pasada) — ninguno mostró RSS creciendo más allá del ruido
+normal del allocator (variación de menos de 1 MB entre muestras).
+
+**Presupuesto:** con la corrección de semántica, Nidir en reposo ahora
+cumple el objetivo de "CPU, idle con animación corriendo" (< 1%
+promedio) con el mismo margen que Bunny — el idle real ya no es
+continuo, así que la comparación "idle loop siempre corriendo" de la
+primera pasada ya no aplica. El pico breve durante la reproducción
+esporádica del idle periódico (~2.3%, ~3s cada 5 minutos por defecto)
+no se declara sujeto a este mismo presupuesto de "reposo", ya que por
+definición no es reposo — se documenta como el costo real y aceptado
+de reproducir una animación de 25 frames a canvas 156×160, sin
+optimizar más allá de lo que DEC-045/DEC-046 ya hicieron (AGENTS.md:
+"Optimize only where justified by evidence").

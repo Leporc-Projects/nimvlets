@@ -48,12 +48,17 @@ notifications, final content for any of the 8 Nimvlets, UI redesign.
 ```
 PetDefinition
   id, displayName, variantGroup
-  canvasWidth, canvasHeight       — logical size every frame is drawn into
+  canvasWidth, canvasHeight       — logical size (points) every frame is drawn into;
+                                     independiente de la resolución nativa del arte fuente
+                                     (Block 04.2, segunda pasada — ver §11 y docs/NIDIR_CONTENT.md)
   alphaHitThreshold                — per-pet, not a global constant (default 128)
-  idle: AnimationDefinition        — required, at least 1 frame; the pet's canonical idle
-  idleDirectionOverrides: [DirectionalAnimationOverride]  — Block 04.2, zero or more; see below
+  idle: AnimationDefinition        — required, at least 1 frame; la pose base del pet
+                                     (típicamente PlaybackKind::kStatic — ver §3)
+  idleDirectionOverrides: [DirectionalAnimationOverride]           — Block 04.2, zero or more
   clickReaction: AnimationDefinition — required, at least 1 frame
+  clickReactionDirectionOverrides: [DirectionalAnimationOverride]  — Block 04.2, zero or more
   passiveActions: [AnimationDefinition]  — zero or more
+  passiveActionDirectionOverrides: [PassiveActionDirectionalOverride]  — Block 04.2, zero or more
   passiveIntervalSeconds           — target average seconds between passive actions (default 300.0)
   contentVersion                   — schema-only, not read by anything yet
 
@@ -66,17 +71,23 @@ FrameDefinition
 
 DirectionalAnimationOverride (Block 04.2 — see docs/NIDIR_CONTENT.md)
   direction (Direction::kRight | kLeft), animation: AnimationDefinition
+
+PassiveActionDirectionalOverride (Block 04.2 — igual que arriba, más a qué
+  passiveActions[] aplica)
+  passiveActionIndex, direction (Direction::kRight | kLeft), animation: AnimationDefinition
 ```
 
 **Dirección (Block 04.2).** `content::Direction` es un enum genérico
-(`kRight`/`kLeft`), no un concepto por-pet. `content::ResolveIdleAnimation(pet,
-direction)` retorna la entrada dedicada de `idleDirectionOverrides` si
-existe una para `direction`, si no cae a `pet.idle` — un pet sin
-ninguna entrada (Bunny) siempre resuelve a `pet.idle` sin importar la
-dirección pedida. `content::AnimationController::SetDirection()`
-consulta esto mismo. Ver `docs/NIDIR_CONTENT.md` §5 para el diseño
-completo y por qué es una extensión aditiva del modelo anterior, no un
-reemplazo de `idle`.
+(`kRight`/`kLeft`), no un concepto por-pet. `content::ResolveIdleAnimation()`/
+`ResolveClickReaction()`/`ResolvePassiveAction()` retornan la entrada
+dedicada de la lista de overrides correspondiente si existe una para
+`direction`, si no caen a la animación canónica (`idle`/`clickReaction`/
+`passiveActions[i]`) — un pet sin ninguna entrada (Bunny) siempre
+resuelve a la canónica sin importar la dirección pedida.
+`content::AnimationController::SetDirection()`/`TriggerClick()`/
+`TriggerPassiveAction()` consultan esto. Ver `docs/NIDIR_CONTENT.md` §5
+para el diseño completo y por qué es una extensión aditiva del modelo
+anterior, no un reemplazo de los campos canónicos.
 
 No pet identity ever appears as a C++ enum value or `if (petId ==
 "bunny_dev")` branch anywhere in `src/content` or `src/app`. Swapping
@@ -140,10 +151,21 @@ clickReaction              : AnimationBlock
 passiveActionCount         : uint32
 passiveActions[count]      : AnimationBlock, repeated
 
-directionalIdleOverrideCount : uint32   -- Block 04.2, OPTIONAL trailing section
-directionalIdleOverrides[count]:         -- absent entirely in a pre-04.2 pack (e.g.
-  direction : uint8 (0=right, 1=left)    -- assets/dev/bunny_pack.nvpack, never recompiled
-  animation : AnimationBlock             -- for this) — see docs/NIDIR_CONTENT.md §5
+directionalIdleOverrideCount : uint32   -- Block 04.2, tres secciones OPTIONAL trailing,
+directionalIdleOverrides[count]:         -- en este orden fijo. Ausentes por completo en
+  direction : uint8 (0=right, 1=left)    -- un pack pre-04.2 (p.ej. assets/dev/bunny_pack.nvpack,
+  animation : AnimationBlock             -- nunca recompilado para esto). Ver docs/NIDIR_CONTENT.md §5.
+
+directionalClickReactionOverrideCount : uint32
+directionalClickReactionOverrides[count]:
+  direction : uint8 (0=right, 1=left)
+  animation : AnimationBlock
+
+directionalPassiveActionOverrideCount : uint32
+directionalPassiveActionOverrides[count]:
+  passiveActionIndex : uint32   -- a cuál entrada de passiveActions[] aplica
+  direction : uint8 (0=right, 1=left)
+  animation : AnimationBlock
 
 AnimationBlock:
   id            : string

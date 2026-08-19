@@ -5,10 +5,23 @@ runtime (a diferencia de Bunny, que sigue siendo un fixture de QA —
 ver AGENTS.md §11 y `docs/DECISION_LOG.md` DEC-018). Este documento
 describe la convención de asset source que este bloque establece, el
 pipeline de importación/normalización/espejado, la extensión
-direccional del content model, y cómo un futuro Nimvlet sigue el mismo
-patrón. Ver `docs/ANIMATION_RUNTIME.md` para el runtime en el que esto
-se enchufa y `docs/CATALOG.md` para el catálogo en el que Nidir ahora
-es una segunda entrada real.
+direccional del content model, la semántica real de animación (pose
+base estática + idle esporádico + click, corregida en la segunda
+pasada de este bloque), la política genérica de tamaño de canvas
+lógico, y cómo un futuro Nimvlet sigue el mismo patrón. Ver
+`docs/ANIMATION_RUNTIME.md` para el runtime en el que esto se enchufa
+y `docs/CATALOG.md` para el catálogo en el que Nidir ahora es una
+segunda entrada real.
+
+**Nota de alcance de esta versión del documento:** este bloque tuvo
+dos pasadas. La primera integró a Nidir con una semántica de
+animación INCORRECTA (idle en loop continuo) y un canvas del tamaño
+nativo del arte fuente (Nidir aparecía mucho más grande que Bunny en
+pantalla). La segunda pasada corrige ambas cosas y agrega el intento
+de importar la animación real de click-fire — bloqueado por falta de
+acceso a `~/Downloads` en esta sesión, ver §10. Este documento describe
+el estado FINAL (corregido); `docs/DECISION_LOG.md` conserva el
+registro histórico de ambas pasadas con sus propias entradas.
 
 ## 1. Convención de asset source (permanente, para todo Nimvlet futuro)
 
@@ -133,32 +146,39 @@ alas, cuernos/púas, expresión confiada.
 ## 5. Modelo de dirección en runtime
 
 **Extensión aditiva y retrocompatible del formato "NVPACK1"**
-(`src/content/PetPackLoader.cpp`, `tools/compile_pet_pack.py`): una
-sección final, opcional, de "overrides de idle por dirección":
+(`src/content/PetPackLoader.cpp`, `tools/compile_pet_pack.py`): tres
+secciones finales, opcionales, en este orden fijo — overrides de
+`idle`, de `clickReaction`, y de `passiveActions[]`:
 
 ```
 [... exactamente el layout NVPACK1 existente, sin cambios ...]
 
--- sección nueva, SOLO presente si el manifest la pidió --
+-- tres secciones nuevas, SOLO presentes si el manifest pidió alguna --
 directionalIdleOverrideCount : uint32
-overrides[count]:
-  direction : uint8  (0 = right, 1 = left)
-  animation : AnimationBlock
+directionalIdleOverrides[count]: { direction: uint8, animation: AnimationBlock }
+
+directionalClickReactionOverrideCount : uint32
+directionalClickReactionOverrides[count]: { direction: uint8, animation: AnimationBlock }
+
+directionalPassiveActionOverrideCount : uint32
+directionalPassiveActionOverrides[count]: { passiveActionIndex: uint32, direction: uint8, animation: AnimationBlock }
 ```
 
 Un pack compilado antes de este bloque (el `bunny_pack.nvpack` ya
 comiteado, nunca recompilado para esto) simplemente termina justo
 después de `passiveActions` — sin ningún byte extra. El loader
-(`ByteReader::HasMoreData()`) distingue ambos casos sin necesitar un
-bump de `schemaVersion`: si no queda ningún byte, `idleDirectionOverrides`
-queda vacío (comportamiento no-direccional, idéntico al de antes de
-este bloque); si sí quedan bytes, se interpretan como esta sección, y
-cada campo adentro sigue siendo obligatorio (falla ruidosamente igual
-que cualquier otro campo truncado). `tools/compile_pet_pack.py` solo
-escribe la sección cuando el manifest incluye
-`"idle_direction_overrides"` explícitamente — el manifest de Bunny no
-lo incluye, así que su pack compilado es byte-a-byte idéntico al de
-antes de este bloque.
+(`ByteReader::HasMoreData()`) chequea, EN SECUENCIA, si queda algo por
+leer antes de cada una de las tres secciones — así que un pack solo
+necesita tener tantos bytes de más como secciones realmente use.
+`tools/compile_pet_pack.py` escribe las tres juntas (la ausente como
+sección vacía explícita) en cuanto el manifest menciona *cualquiera*
+de `idle_direction_overrides`/`click_reaction_direction_overrides`/
+`passive_action_direction_overrides` — necesario para que ambos lados
+(compilador y loader) coincidan posicionalmente sin ambigüedad; ver el
+docstring de `tools/compile_pet_pack.py` para el detalle exacto. El
+manifest de Bunny no menciona ninguna de las tres, así que su pack
+compilado sigue siendo byte-a-byte idéntico al de antes de este
+bloque.
 
 **Modelo C++** (`src/content/AnimationDefinition.h`):
 
@@ -170,30 +190,46 @@ struct DirectionalAnimationOverride {
     AnimationDefinition animation;
 };
 
+struct PassiveActionDirectionalOverride {
+    std::size_t passiveActionIndex;
+    Direction direction;
+    AnimationDefinition animation;
+};
+
 struct PetDefinition {
     ...
-    AnimationDefinition idle;                                  // sin cambios de significado
-    std::vector<DirectionalAnimationOverride> idleDirectionOverrides;  // nuevo, aditivo
+    AnimationDefinition idle;                                          // sin cambios de significado
+    std::vector<DirectionalAnimationOverride> idleDirectionOverrides;  // aditivo
+
+    AnimationDefinition clickReaction;                                            // sin cambios de significado
+    std::vector<DirectionalAnimationOverride> clickReactionDirectionOverrides;    // aditivo
+
+    std::vector<AnimationDefinition> passiveActions;                              // sin cambios de significado
+    std::vector<PassiveActionDirectionalOverride> passiveActionDirectionOverrides; // aditivo
     ...
 };
 
 const AnimationDefinition& ResolveIdleAnimation(const PetDefinition& pet, Direction direction);
+const AnimationDefinition& ResolveClickReaction(const PetDefinition& pet, Direction direction);
+const AnimationDefinition& ResolvePassiveAction(const PetDefinition& pet, std::size_t passiveActionIndex, Direction direction);
 ```
 
-`pet.idle` conserva exactamente su significado anterior (el idle
-canónico de un pet — para Bunny, el único; para Nidir, por
-convención, el de `Direction::kRight`, ya que ese es el que el export
-real trae). `ResolveIdleAnimation()` es la única forma soportada de
-resolver dirección: retorna la entrada dedicada de
-`idleDirectionOverrides` si existe una para `direction`, si no cae a
-`pet.idle` — política de fallback documentada explícitamente (block
-brief §6: "unsupported direction fails clearly or uses an explicitly
-documented safe fallback"), nunca falla. Este diseño aditivo (en vez
-de reemplazar `pet.idle` por una lista genérica) fue deliberado para
-minimizar el blast radius: `AnimationController`, `SpikeApp`, y todos
-los tests/fixtures existentes que ya referenciaban `pet.idle`
-directamente siguieron compilando y pasando sin ningún cambio — ver
-§7.
+`pet.idle`/`pet.clickReaction`/`pet.passiveActions` conservan
+exactamente su significado anterior (la variante canónica — por
+convención, `Direction::kRight`). Las tres funciones `Resolve*()` son
+la única forma soportada de resolver dirección: cada una retorna la
+entrada dedicada de la lista de overrides correspondiente si existe
+una para `direction`, si no cae a la canónica — política de fallback
+documentada explícitamente (block brief §6: "unsupported direction
+fails clearly or uses an explicitly documented safe fallback"), nunca
+fallan. Este diseño aditivo (en vez de reemplazar los campos
+canónicos por una lista genérica) fue deliberado para minimizar el
+blast radius: `AnimationController`, `SpikeApp`, y todos los tests/
+fixtures existentes que ya referenciaban `pet.idle`/`pet.clickReaction`/
+`pet.passiveActions` directamente siguieron compilando y pasando sin
+ningún cambio en la primera pasada; la segunda pasada extendió el
+mismo patrón a `clickReaction`/`passiveActions` cuando el arte
+direccional real de click-fire lo requirió (ver §9).
 
 `content::AnimationController` gana `direction_` (default
 `Direction::kRight`, igual que todo el runtime) y `SetDirection(direction,
@@ -201,13 +237,18 @@ nowMs)`: si el controller está Idle, el frame mostrado se actualiza de
 inmediato (frame 0 de la nueva variante); si no (ClickReaction/
 PassiveAction en curso), el cambio queda guardado y se aplica recién
 cuando `TransitionToIdle()` corra por su cuenta — dirección es
-metadata, nunca interrumpe un gesto en curso. `SpikeApp::SetActiveDirection()`
-es el "runtime method to change direction" que pide el block brief
-§7 — sin ningún control de UI que lo dispare todavía (explícitamente
-fuera de alcance). `NIMVLETS_DEV_DIRECTION_TEST_COUNT` (mecanismo
-solo-DEV, mismo patrón que `NIMVLETS_DEV_SWITCH_TEST_COUNT`) permite
-smoke-testear cambios de dirección repetidos contra el binario real
-sin QA manual.
+metadata, nunca interrumpe un gesto en curso. `TriggerClick()`/
+`TriggerPassiveAction()` ahora resuelven vía `ResolveClickReaction()`/
+`ResolvePassiveAction()` en vez de leer `pet_.clickReaction`/
+`pet_.passiveActions[i]` directamente, así que un click o una acción
+pasiva disparados mientras `direction_ == kLeft` automáticamente
+reproducen la variante izquierda si existe una.
+`SpikeApp::SetActiveDirection()` es el "runtime method to change
+direction" que pide el block brief §7 — sin ningún control de UI que
+lo dispare todavía (explícitamente fuera de alcance).
+`NIMVLETS_DEV_DIRECTION_TEST_COUNT` (mecanismo solo-DEV, mismo patrón
+que `NIMVLETS_DEV_SWITCH_TEST_COUNT`) permite smoke-testear cambios de
+dirección repetidos contra el binario real sin QA manual.
 
 **Sin persistencia de dirección** — decisión explícita, ver §7 del
 brief ("not required unless essentially free and clearly justified")
@@ -215,6 +256,61 @@ y el comentario de `appState_` en `src/app/SpikeApp.h`: agregar un
 campo al formato NVSTATE1 exigiría un bump de schema por un beneficio
 que nadie pidió. Cada `Init()`/`TrySwitchActivePet()` arranca en
 `Direction::kRight`.
+
+## 5.1 Semántica real de animación (corregida en la segunda pasada)
+
+**La primera pasada de este bloque integró a Nidir con una semántica
+INCORRECTA:** su `idle` se clasificó como `PlaybackKind::kLoop`
+reproduciendo los 25 frames importados en loop continuo, sin nunca
+volver a un reposo estático — el resultado real medido fue ~11-12% de
+CPU en steady state (o ~4-5% tras un primer intento de bajar el fps),
+nunca 0%. Esto contradecía tanto el comportamiento ya establecido para
+Bunny (idle estático, evento-driven, 0% CPU en reposo) como el
+producto real que el owner pidió.
+
+**Semántica corregida y final:**
+
+- **`idle` es la pose base, `PlaybackKind::kStatic`, un solo frame**
+  (`frame_000` de la secuencia importada, para cada dirección) — lo
+  que se muestra la gran mayoría del tiempo. `AnimationController`
+  nunca calcula ningún deadline de frame mientras está acá
+  (`NextFrameDeadlineMs()` retorna `std::nullopt`) — el mismo mecanismo
+  event-driven que Bunny ya demuestra desde Block 02, sin ningún
+  cambio de arquitectura.
+- **La secuencia completa importada es un `passive_action`, `PlaybackKind::kOneShot`**
+  — se dispara esporádicamente a través del scheduler de acciones
+  pasivas que ya existe desde Block 02
+  (`SpikeApp::nextPassiveDeadlineMs_`/
+  `AnimationController::TriggerPassiveAction()`), reproduce sus frames
+  una vez, y al terminar (`returnsToIdle: true`) vuelve a la pose base
+  estática — exactamente el mismo mecanismo que ya usa cualquier
+  `click_reaction` de un solo tiro. **Nunca vuelve a arrancar sola** —
+  cada disparo es un evento discreto, no un loop.
+- **`click_reaction` también es `PlaybackKind::kOneShot`** y ya lo era
+  correctamente desde la primera pasada (el bug estaba en `idle`, no en
+  el click) — reproduce una vez y vuelve a la pose base estática.
+- **Un click SÍ interrumpe una acción pasiva en curso** (mecanismo
+  genérico ya existente desde Block 02, sin cambios — ver
+  `tests/AnimationControllerTest.cpp`'s
+  `ClickReactionInterruptsPassiveAction`, y
+  `tests/DirectionTest.cpp`'s
+  `ClickInterruptsPeriodicIdleAndReturnsToStaticBaseAfterward` para la
+  variante direccional de Nidir): click reaction tiene prioridad más
+  alta que acción pasiva, y ambos vuelven a la misma pose base al
+  terminar.
+- **Nunca hay ningún loop de render/FPS permanente** mientras Nidir
+  está inactivo — el requisito explícito de esta corrección.
+
+La cadencia de reproducción del `passive_action` (fps) se deriva de la
+configuración REAL de Ludo.ai para este export ("3 seconds, Max
+Frames 25" — dato provisto por el owner, no medido ni supuesto por
+este repo): `fps = frame_count_real / 3.0`. Como la animación ahora es
+esporádica (no un loop continuo), esta cadencia ya no necesita
+balancearse contra un costo de CPU permanente — solo importa mientras
+el one-shot está efectivamente en pantalla, unas pocas veces por hora
+como mucho (el intervalo real entre disparos es política de producto
+todavía no decidida — se dejó el mismo default de 300s/5min que el
+esquema ya usaba, ver `tools/generate_nidir_pack.py`).
 
 ## 6. Nidir como entrada real de catálogo
 
@@ -228,15 +324,21 @@ runtime (`docs/CATALOG.md`) no necesitaron ningún cambio de código —
 agregar Nidir fue puramente agregar una fila de manifest + recompilar,
 exactamente la promesa que `docs/CATALOG.md` §4 ya hacía.
 
-`click_reaction` de Nidir es un **placeholder estructural**: un solo
-frame (reutiliza `idle/right/frames/frame_000.png`), `one_shot`,
-~100ms, `returns_to_idle: true` — Nidir no tiene todavía arte de click
-dedicado (el export del owner solo cubre idle). Debe ser `one_shot`,
-nunca `static`: un `click_reaction` estático dejaría al
-`AnimationController` trabado en `ClickReaction` para siempre, ya que
-`Advance()` nunca transiciona de vuelta a Idle para una animación
-`kStatic` (solo lo hace al terminar naturalmente un one-shot). Sin
-`passive_actions` (lista vacía — sin arte fuente para eso todavía).
+`click_reaction` de Nidir sigue siendo, en el estado final de este
+bloque, un **placeholder estructural**: dos frames cortos (reutilizan
+`frame_000` de idle right/left), `one_shot`, ~100ms cada uno,
+`returns_to_idle: true`, con override direccional propio (right/left)
+— NO la animación real de "blue-fire" que el owner terminó de exportar
+durante la segunda pasada de este bloque (`~/Downloads/nidir-click-fire-right`/
+`-spritesheet`). La importación de esa animación real quedó
+**bloqueada** por falta de acceso a `~/Downloads` en esta sesión (ver
+§10) — el placeholder se mantiene exactamente por esa razón: quitarlo
+sin el reemplazo real habría dejado `click_reaction` sin contenido
+válido, una regresión peor que mantenerlo. Debe ser `one_shot`, nunca
+`static`: un `click_reaction` estático dejaría al `AnimationController`
+trabado en `ClickReaction` para siempre, ya que `Advance()` nunca
+transiciona de vuelta a Idle para una animación `kStatic` (solo lo
+hace al terminar naturalmente un one-shot).
 
 **Nota de organización, no resuelta en este bloque:** el pack
 compilado de Nidir vive en `assets/dev/nidir_pack.nvpack`, la misma
@@ -246,38 +348,181 @@ convenciones de ruta ya establecidas en `tools/`/`src/catalog` (cambiar
 la carpeta habría sido una reorganización de alcance mayor, no pedida
 por este bloque) — ver "Bugs/debt/limitations" del informe final.
 
-## 7. Decisiones tomadas fuera del prompt
+## 6.1 First/last frame contract: hallazgo real
+
+El brief pide validar que la secuencia de idle "empiece/termine
+consistentemente" con la pose base, para una vuelta sin sobresaltos.
+Medición real (pixel a pixel) entre `frame_000` (la pose base elegida)
+y `frame_024` (el último frame realmente exportado) de idle-right:
+
+```
+50.63% ambos totalmente transparentes (fondo, coincide)
+0.53%  cruzan el límite alpha=0 (jitter de antialiasing de borde, normal)
+5.84%  ambos visibles, con diferencia REAL >10 por canal (~12% del área visible)
+43.00% ambos visibles, esencialmente idénticos (≤10 por canal)
+```
+
+**Hallazgo:** `frame_024` NO es pixel-idéntico a `frame_000` — hay una
+variación real y visible (~12% del área visible del personaje,
+probablemente boca/expresión/cola) entre el primer y el último frame
+de la secuencia exportada. Esto es normal para una animación de
+"respiración" real (un ease-back, no un corte duro), y NO se corrigió
+inventando/duplicando un frame de reemplazo (el brief lo prohíbe
+explícitamente). El runtime maneja esto correctamente de todos modos:
+`AnimationController::TransitionToIdle()` siempre vuelve a mostrar la
+pose base VERDADERA (`pet.idle`/su override), nunca el último frame de
+la animación que acaba de terminar — así que la vuelta a reposo
+siempre es exacta, aunque pueda haber un "pop" visual perceptible de
+un frame en el instante exacto de la transición (idle-breathing ->
+base). Documentado acá como una limitación real y conocida, no oculta.
+
+## 7. Política genérica de tamaño de canvas lógico vs. resolución de frame
+
+**El problema real:** la primera pasada de este bloque fijó el canvas
+de Nidir a su resolución nativa exacta (513×525) porque
+`PetDefinition::canvasWidth/canvasHeight` YA gobierna tanto el tamaño
+de renderizado (`SDL_RenderTexture`) como el del hit-mask
+(`core::AlphaMask::FromAlphaChannel`) desde Block 02 — ambos ya
+escalan desde CUALQUIER resolución nativa hacia el canvas, así que
+"copiar la resolución nativa 1:1" pareció evitar una transformación
+innecesaria. El costo real: como `SDL_CreateWindow` usa `canvasWidth`/
+`canvasHeight` directamente como tamaño LÓGICO de la ventana (ver
+`src/app/SpikeApp.cpp`), Nidir terminó ocupando una ventana ~3.2x más
+grande que Bunny en cada eje — un problema visual real, no solo
+estético (tensiona con el invariante de producto "ventana pequeña",
+AGENTS.md §2).
+
+**La corrección NO necesitó ningún cambio de runtime** — el mecanismo
+para desacoplar "tamaño en pantalla" de "resolución del arte fuente"
+ya existía desde Block 02; el bug era el VALOR elegido, no la
+arquitectura. Dos políticas GENÉRICAS nuevas, ambas en
+`tools/prep_dev_sprite.py` (reusables por cualquier Nimvlet futuro, sin
+ninguna rama por pet):
+
+- **`compute_logical_canvas_size(native_width, native_height, reference_size=160)`**
+  — deriva el canvas LÓGICO (puntos en pantalla) del aspect ratio
+  nativo del arte fuente: el lado más largo queda en `reference_size`
+  (160 — el mismo valor que Bunny ya usa desde Block 02, hecho
+  explícito como convención en vez de quedar implícito en un solo
+  script), el otro se escala proporcionalmente. Para Nidir (513×525
+  nativo): **canvas lógico = 156×160** — comparable en escala a Bunny,
+  aspect ratio preservado casi exacto (513/525 = 0.9771 vs.
+  156/160 = 0.9750, una desviación de redondeo de ~0.2%, imperceptible).
+- **`resize_rgba_nearest(width, height, pixels, target_width, target_height)`**
+  — reescalado determinista nearest-neighbor (misma fórmula de mapeo
+  que `core::AlphaMask::FromAlphaChannel` y el `resize_nearest()` de
+  `tools/generate_bunny_dev_pack.py` ya usan), reusado por
+  `tools/compile_pet_pack.py`'s downscale opcional en tiempo de
+  compilación (`runtime_max_frame_dimension`, ver §8) — **nunca toca
+  los PNG fuente en disco**, solo los bytes que terminan en el pack
+  compilado.
+
+**Ningún cambio de C++/runtime fue necesario:** el hit-mask sigue
+alineado con el renderizado exactamente igual que antes (ambos siguen
+leyendo `pet.canvasWidth/canvasHeight`, sin importar la resolución
+nativa de cada frame — ya probado por
+`tests/DirectionTest.cpp`'s `HitMaskDimensionsStayConsistentAcrossDirectionSwitch`,
+que deliberadamente usa frames de DISTINTA resolución nativa entre
+right/left para confirmar esto); el comportamiento de high-DPI
+(`SDL_WINDOW_HIGH_PIXEL_DENSITY` + `SDL_SetRenderLogicalPresentation`)
+tampoco cambió, ya que sigue operando sobre el mismo canvas LÓGICO de
+siempre; el switching de dirección sigue siendo el mismo mecanismo de
+`ResolveIdleAnimation()`/etc., completamente ortogonal al tamaño de
+canvas; Bunny no se tocó (su manifest no define
+`runtime_max_frame_dimension` y su `canvas_width`/`canvas_height` ya
+eran 160×160 antes de esta política existir).
+
+## 8. Downscale opcional en tiempo de compilación (RSS)
+
+`runtime_max_frame_dimension` (manifest, opcional — ver
+`tools/compile_pet_pack.py`): si se define, cada frame decodificado
+cuyo lado más largo exceda ese valor se reescala (nearest-neighbor,
+aspect ratio preservado, determinista) ANTES de escribirse al pack
+compilado — el PNG fuente en disco nunca se toca. Para Nidir:
+`runtime_max_frame_dimension = 2 × 160 = 320` — el doble del tamaño de
+referencia lógico, elegido para verse nítido hasta 2x densidad de
+pixel (Retina, el mismo factor que este proyecto ya mide/loguea desde
+Block 01 — "pixel density=2.00") sin almacenar mucho más detalle del
+que cualquier pantalla real puede mostrar. Resultado: los frames de
+513×525 se comprimen a 313×320 (~37% de los pixeles originales) — el
+pack compilado de Nidir bajó de ~58 MB a **~21.6 MB**, y el RSS medido
+en runtime de ~259 MB a **~128 MB** (ver `docs/PERFORMANCE_BUDGETS.md`
+para la medición completa por escenario). "Optimizar solo donde la
+evidencia lo justifica": esta reducción es real y medida, no una
+suposición — el canvas lógico de 156×160 puntos, incluso a 2x Retina,
+nunca necesita más de ~312×320 pixeles físicos reales en pantalla, así
+que 513×525 era objetivamente más resolución de la que cualquier
+renderizado real de Nidir puede llegar a mostrar.
+
+## 9. Decisiones tomadas fuera del prompt
 
 - **`~/Downloads/Nidir.png` se usó como `master.png`.** No estaba
-  entre los dos folders que el brief nombra explícitamente, pero
-  coincide en nombre/ubicación/rol con lo que `assets/source/nimvlets/README.md`
-  ya definía como `master.png` — inferencia con evidencia suficiente,
-  no una adivinanza (§2 del brief solo pedía STOP ante folders
-  faltantes/ambiguos, y ninguno de los dos folders requeridos lo
-  estaba).
-- **fps del idle loop: 6.0**, no un dato del export. Medido contra el
-  binario Release real antes de fijarlo: a 12fps el loop de Nidir
-  promedia ~11-12% CPU en steady state; a 6fps, ~5%. Se prefirió el
-  costo de CPU más bajo — ver `docs/PERFORMANCE_BUDGETS.md`.
-- **Canvas de Nidir = resolución nativa exacta (513×525)**, sin
-  reescalar a algo más chico tipo Bunny (160×160), por instrucción
-  explícita del brief ("Do NOT silently crop/resize/recenter unless
-  required by the runtime contract" — el contrato no lo exige, SDL ya
-  escala cualquier resolución nativa al canvas). Esto tensiona con el
-  invariante de producto "ventana pequeña" de AGENTS.md §2 — ver
-  "Bugs/debt/limitations".
-- **`click_reaction` placeholder de un solo frame** en vez de omitir
-  el campo — el esquema actual de `PetDefinition` lo exige; ver §6.
-- **`ClickThroughPollingIsMeaningful`/dirección no persistida** — ver
-  §5.
-- **`assets/dev/nidir_pack.nvpack`** en vez de una carpeta nueva — ver
-  §6.
+  entre los dos folders que el brief original nombra explícitamente,
+  pero coincide en nombre/ubicación/rol con lo que
+  `assets/source/nimvlets/README.md` ya definía como `master.png` —
+  inferencia con evidencia suficiente, no una adivinanza.
+- **fps del `passive_action` de idle: derivado de `frame_count / 3.0`**
+  (la configuración real de Ludo.ai, dato provisto por el owner en la
+  segunda pasada — "3 seconds, Max Frames 25"), NO una medición de
+  costo de CPU como en el intento fallido de la primera pasada (esa
+  medición dejó de ser relevante en cuanto `idle` dejó de ser un loop
+  continuo — ver §5.1).
+- **Canvas lógico de Nidir corregido a 156×160** (política genérica,
+  §7) — corrige el problema visual real reportado ("Nidir currently
+  appears much larger on screen than Bunny").
+- **Downscale opcional en tiempo de compilación a 320px máximo por
+  lado** (§8) — reduce RSS de forma real y medida, sin tocar ningún
+  PNG fuente.
+- **`click_reaction` sigue siendo un placeholder** (ahora con override
+  direccional propio) en vez de la animación real de blue-fire —
+  bloqueado por falta de acceso a `~/Downloads`, ver §10.
+- **`ResolveClickReaction()`/`ResolvePassiveAction()` nuevos** — la
+  extensión direccional de la primera pasada solo cubría `idle`; la
+  segunda pasada la generalizó a `clickReaction`/`passiveActions`
+  siguiendo el mismo patrón aditivo exacto, necesario para poder
+  resolver right/left del click-fire real en cuanto se importe.
+- **`NIMVLETS_DEV_CLICK_TEST_COUNT` nuevo** — mecanismo solo-DEV para
+  disparar clicks sintéticos sin necesitar un evento de mouse real,
+  mismo patrón que `NIMVLETS_DEV_SWITCH_TEST_COUNT`/
+  `NIMVLETS_DEV_DIRECTION_TEST_COUNT` — necesario para poder medir/
+  smoke-testear el click reaction de forma no interactiva.
+- **Dirección no persistida** — ver §5.
+- **`assets/dev/nidir_pack.nvpack`** en vez de una carpeta nueva — el
+  pack compilado de Nidir sigue viviendo junto al fixture de QA de
+  Bunny por continuidad con las convenciones de ruta ya establecidas.
 - **Sin `provenance.json` para Nidir** — el brief pide `DESCRIPTION.txt`
-  específicamente (rasgos físicos), no procedencia; se dejó
-  `provenance.json` como concepto documentado pero no instanciado,
-  sin contradecir `assets/source/nimvlets/README.md`.
+  específicamente (rasgos físicos), no procedencia.
 
-## 8. Cómo un Nimvlet futuro sigue el mismo patrón
+## 10. Blocker: sin acceso a `~/Downloads` para importar el click-fire real
+
+Durante la segunda pasada de este bloque, el owner exportó la
+animación real de click-fire de Nidir a `~/Downloads/nidir-click-fire-right`/
+`~/Downloads/nidir-click-fire-right-spritesheet`. **El acceso a
+`~/Downloads` estuvo denegado durante toda esta sesión**
+("Operation not permitted" — `ls`, `find`, y `osascript`/Finder vía
+Apple Events fallaron todos de la misma forma, consistentemente, en
+más de 6 intentos separados a lo largo de dos turnos de esta
+conversación; `~/Documents` y el resto del filesystem del usuario sí
+son accesibles con normalidad, así que es un bloqueo específico de la
+carpeta Downloads — muy probablemente un permiso de privacidad de
+macOS (TCC) para la app/terminal detrás de esta sesión, no un problema
+de este repositorio). No se pudo inspeccionar ni copiar ninguno de los
+dos folders.
+
+**Lo que esto significa concretamente:**
+- `click_reaction` de Nidir sigue siendo el placeholder de dos frames
+  (§6), NO la animación real de blue-fire.
+- No existe ningún dato real sobre la cantidad de frames, resolución,
+  o duración del export de click-fire — nada se asumió ni se inventó
+  en su lugar.
+- El mecanismo para importarlo (§11, mismo patrón que idle) está
+  completamente listo y probado (extensión direccional de
+  `clickReaction` ya implementada y testeada — ver §5, §9) — en cuanto
+  el acceso a `~/Downloads` se restablezca, importar el click-fire real
+  es aplicar exactamente los mismos pasos que ya funcionaron para
+  idle, sin ningún cambio de arquitectura adicional.
+
+## 11. Cómo un Nimvlet futuro sigue el mismo patrón
 
 1. Crear `assets/source/nimvlets/<pet>/` con `DESCRIPTION.txt` (rasgos
    físicos estables, en español) y `master.png`.
