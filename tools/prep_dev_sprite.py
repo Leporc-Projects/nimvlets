@@ -175,14 +175,38 @@ def mirror_rgba_horizontal(width: int, height: int, pixels: bytes) -> bytes:
 # desktop companion" en vez de quedar implícito en un solo script.
 REFERENCE_LOGICAL_SIZE = 160
 
+# Factor de escala visual GLOBAL (Block 04.3, candidato de QA del
+# owner: "probar todos los Nimvlets ~5% más grandes mientras se evalúa
+# si el tamaño actual de Nidir era preferible"). Se aplica DENTRO de
+# compute_logical_canvas_size() -- automáticamente, para CUALQUIER pet
+# que use esa función (Nidir y, desde este mismo bloque, Bunny real),
+# sin ninguna constante específica por pet y sin tocar ningún PNG
+# fuente. **Para revertir al tamaño anterior: cambiar este único valor
+# a 1.0 y volver a correr el generate_<pet>_pack.py de cada pet** --
+# ningún otro cambio de código hace falta. 1.05 = ~5% más grande en
+# cada eje que el tamaño de referencia "clase 160" ya establecido
+# (DEC-045).
+DISPLAY_SIZE_SCALE_FACTOR = 1.05
 
-def compute_logical_canvas_size(native_width: int, native_height: int, reference_size: int = REFERENCE_LOGICAL_SIZE) -> tuple[int, int]:
+
+def compute_logical_canvas_size(
+    native_width: int, native_height: int, reference_size: int = REFERENCE_LOGICAL_SIZE, scale_factor: float | None = None
+) -> tuple[int, int]:
     """Deriva el `canvas_width`/`canvas_height` LÓGICO de un pet (lo que
     ocupa en pantalla, en puntos -- ver src/app/SpikeApp.cpp,
     SDL_CreateWindow) a partir de la resolución NATIVA de su arte
     fuente, preservando el aspect ratio exacto: el lado más largo
-    queda en `reference_size`, el otro se escala proporcionalmente
-    (redondeo determinista al entero más cercano).
+    queda en `reference_size * scale_factor`, el otro se escala
+    proporcionalmente (redondeo determinista al entero más cercano).
+
+    `scale_factor`: si se omite (`None`), usa el valor GLOBAL actual
+    de `DISPLAY_SIZE_SCALE_FACTOR` -- así cualquier llamador real
+    (cualquier `generate_<pet>_pack.py`) recibe automáticamente la
+    política de tamaño vigente sin tener que conocerla ni repetirla.
+    Pasar un valor explícito (p. ej. `1.0`) omite el factor global --
+    usado por los tests de esta función para verificar la matemática
+    de aspect ratio en sí, independiente de qué candidato de tamaño
+    esté vigente en un momento dado.
 
     Esto es intencionalmente independiente de la resolución de los PNG
     fuente -- el mismo `PetDefinition::canvasWidth/canvasHeight` que
@@ -197,12 +221,16 @@ def compute_logical_canvas_size(native_width: int, native_height: int, reference
 
     Genérico -- no tiene ninguna rama por pet: cualquier pet futuro
     con cualquier resolución/aspect ratio nativa obtiene un canvas
-    lógico "clase 160" comparable, calculado con la misma fórmula."""
+    lógico "clase 160" (o "clase 160 × factor vigente") comparable,
+    calculado con la misma fórmula."""
     if native_width <= 0 or native_height <= 0:
         raise ValueError(f"compute_logical_canvas_size: dimensiones nativas inválidas {native_width}x{native_height}")
 
+    effective_scale_factor = DISPLAY_SIZE_SCALE_FACTOR if scale_factor is None else scale_factor
+    effective_reference_size = reference_size * effective_scale_factor
+
     longer = max(native_width, native_height)
-    scale = reference_size / longer
+    scale = effective_reference_size / longer
     canvas_width = max(1, round(native_width * scale))
     canvas_height = max(1, round(native_height * scale))
     return canvas_width, canvas_height

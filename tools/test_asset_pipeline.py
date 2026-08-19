@@ -120,28 +120,35 @@ class LogicalCanvasSizeTest(unittest.TestCase):
     tests/DirectionTest.cpp (`HitMaskDimensionsStayConsistentAcrossDirectionSwitch`),
     ya que ambos caminos leen el mismo `canvasWidth/canvasHeight`."""
 
+    # scale_factor=1.0 explícito en la mayoría de estos tests: aíslan la
+    # matemática de aspect ratio en sí, independiente de qué candidato de
+    # tamaño (DISPLAY_SIZE_SCALE_FACTOR) esté vigente en un momento dado
+    # -- ver ScaleFactorTest más abajo para el comportamiento del factor
+    # global en sí.
+
     def test_bunny_reference_size_is_unchanged(self) -> None:
         # Sanity check explícito: la convención ya establecida de Bunny
         # (160x160, cuadrado) debe seguir devolviendo exactamente
-        # 160x160 -- si esto cambiara, Bunny se vería afectado.
-        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(160, 160), (160, 160))
+        # 160x160 con scale_factor=1.0 -- si esto cambiara, Bunny se
+        # vería afectado.
+        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(160, 160, scale_factor=1.0), (160, 160))
 
     def test_wide_native_resolution_scales_longer_edge_to_reference(self) -> None:
-        # 513x525 (nativo real de Nidir) -> el lado más largo (525)
-        # queda en 160, el otro se escala proporcionalmente.
-        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(513, 525)
+        # 513x525 (nativo real de idle de Nidir) -> el lado más largo
+        # (525) queda en 160, el otro se escala proporcionalmente.
+        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(513, 525, scale_factor=1.0)
         self.assertEqual(canvas_height, 160)
         self.assertEqual(canvas_width, 156)
 
     def test_aspect_ratio_is_preserved_within_rounding(self) -> None:
         native_width, native_height = 800, 400
-        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height)
+        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.0)
         native_ratio = native_width / native_height
         canvas_ratio = canvas_width / canvas_height
         self.assertAlmostEqual(native_ratio, canvas_ratio, delta=0.01)
 
     def test_custom_reference_size_is_honored(self) -> None:
-        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(200, 100, reference_size=100), (100, 50))
+        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(200, 100, reference_size=100, scale_factor=1.0), (100, 50))
 
     def test_result_is_deterministic(self) -> None:
         first = prep_dev_sprite.compute_logical_canvas_size(513, 525)
@@ -151,6 +158,40 @@ class LogicalCanvasSizeTest(unittest.TestCase):
     def test_rejects_non_positive_dimensions(self) -> None:
         with self.assertRaises(ValueError):
             prep_dev_sprite.compute_logical_canvas_size(0, 100)
+
+
+class DisplaySizeScaleFactorTest(unittest.TestCase):
+    """`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR` -- la política de
+    tamaño visual GLOBAL (Block 04.3, candidato de QA del owner:
+    "~5% más grande para todos los Nimvlets"). Un solo valor, aplicado
+    automáticamente por compute_logical_canvas_size() a cualquier pet
+    que la use -- revertir es cambiar este único valor a 1.0."""
+
+    def test_default_call_applies_the_current_global_factor(self) -> None:
+        with_default = prep_dev_sprite.compute_logical_canvas_size(160, 160)
+        with_explicit_current_factor = prep_dev_sprite.compute_logical_canvas_size(
+            160, 160, scale_factor=prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR
+        )
+        self.assertEqual(with_default, with_explicit_current_factor)
+
+    def test_explicit_scale_factor_of_one_matches_pre_block_04_3_behavior(self) -> None:
+        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(513, 525, scale_factor=1.0), (156, 160))
+
+    def test_current_global_factor_is_approximately_five_percent_larger(self) -> None:
+        unscaled = prep_dev_sprite.compute_logical_canvas_size(513, 525, scale_factor=1.0)
+        scaled = prep_dev_sprite.compute_logical_canvas_size(513, 525)
+        self.assertGreater(scaled[0], unscaled[0])
+        self.assertGreater(scaled[1], unscaled[1])
+        ratio_w = scaled[0] / unscaled[0]
+        ratio_h = scaled[1] / unscaled[1]
+        self.assertAlmostEqual(ratio_w, prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, delta=0.02)
+        self.assertAlmostEqual(ratio_h, prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, delta=0.02)
+
+    def test_scale_factor_preserves_aspect_ratio(self) -> None:
+        native_width, native_height = 624, 612
+        unscaled = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.0)
+        scaled = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.05)
+        self.assertAlmostEqual(unscaled[0] / unscaled[1], scaled[0] / scaled[1], delta=0.01)
         with self.assertRaises(ValueError):
             prep_dev_sprite.compute_logical_canvas_size(100, -1)
 
