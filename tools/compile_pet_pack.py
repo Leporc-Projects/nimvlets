@@ -25,27 +25,46 @@ Manifest schema (JSON):
       "alpha_hit_threshold": 128,               # optional, default 128
       "passive_interval_seconds": 300.0,        # optional, default 300.0
       "content_version": "block02-dev-1",       # optional, default ""
+      "runtime_max_frame_dimension": 320,       # optional, default: no downscale (see below)
       "idle": { ...AnimationManifest... },
       "click_reaction": { ...AnimationManifest... },
       "passive_actions": [ {...AnimationManifest...}, ... ],  # optional, default []
-      "idle_direction_overrides": [                            # optional, default: field absent entirely
+      "idle_direction_overrides": [                            # optional, see below
         {"direction": "left", ...AnimationManifest...}, ...
+      ],
+      "click_reaction_direction_overrides": [                  # optional, see below
+        {"direction": "left", ...AnimationManifest...}, ...
+      ],
+      "passive_action_direction_overrides": [                  # optional, see below
+        {"passive_action_index": 0, "direction": "left", ...AnimationManifest...}, ...
       ]
     }
 
-`idle_direction_overrides` (Block 04.2, see docs/NIDIR_CONTENT.md) is a
-backward-compatible, purely ADDITIVE extension to the "NVPACK1" format:
-if this key is absent from the manifest (as in every pack compiled
-before Block 04.2, e.g. Bunny's), the compiled output is byte-for-byte
-identical to before -- no existing pack needs recompiling. Each entry
-names a `direction` ("right"/"left") other than the pet's canonical
-`idle` above and provides a full AnimationManifest for that direction
--- see content::ResolveIdleAnimation() (src/content/AnimationDefinition.h)
-for how the C++ runtime picks between `idle` and an override at
-runtime, and content::PetPackLoader.cpp's ByteReader::BytesRemaining()
-for how the loader tells an old-format pack (no trailing section at
-all) apart from a new one (a trailing section, however small) without
-needing a schema-version bump.
+The three `*_direction_overrides` keys (Block 04.2, see
+docs/NIDIR_CONTENT.md) are a backward-compatible, purely ADDITIVE
+extension to the "NVPACK1" format: if NONE of the three are present in
+the manifest (as in every pack compiled before Block 04.2, e.g.
+Bunny's), the compiled output is byte-for-byte identical to before --
+no existing pack needs recompiling. If ANY of the three is present, all
+three sections are written, in this fixed order (idle, click_reaction,
+passive_action), each either real content or an explicit empty section
+(count 0) for whichever key the manifest didn't mention -- the reader
+(src/content/PetPackLoader.cpp) always tries the three sections in that
+same fixed order and only reads a section at all if bytes remain, so
+the two sides must agree positionally; a manifest that only wants
+`click_reaction_direction_overrides`, say, still gets an explicit empty
+`idle_direction_overrides` section ahead of it, never a silently
+skipped one. `passive_action_direction_overrides` entries name which
+`passive_actions[]` entry they override via `passive_action_index`
+(flat list, not nested under each passive action, so the "purely
+additive at the very end" property holds for the whole format, not just
+for idle/click). See content::ResolveIdleAnimation()/
+ResolveClickReaction()/ResolvePassiveAction()
+(src/content/AnimationDefinition.h) for how the C++ runtime picks
+between the canonical animation and an override at runtime, and
+content::PetPackLoader.cpp's ByteReader::HasMoreData() for how the
+loader tells an old-format pack (no trailing section at all) apart from
+a new one, without needing a schema-version bump.
 
 AnimationManifest:
     {
@@ -65,6 +84,24 @@ directory, not the current working directory.
 
 Usage:
     python3 tools/compile_pet_pack.py <manifest.json> <output.nvpack>
+
+`runtime_max_frame_dimension` (Block 04.2's second pass, see
+docs/NIDIR_CONTENT.md) is an OPTIONAL, purely compile-time downscale:
+if set, every decoded frame (across idle/click/passive and every
+direction override) whose longer side exceeds this value is resized
+via prep_dev_sprite.resize_rgba_nearest() (deterministic
+nearest-neighbor, aspect-ratio preserved) before being written into the
+compiled pack -- the canonical source PNGs on disk are NEVER touched,
+only the bytes that end up inside the ".nvpack" file. Absent (the
+default, and what Bunny's manifest still uses) means "store frames at
+their native decoded resolution," identical to every pack compiled
+before this feature existed. This is independent of `canvas_width`/
+`canvas_height` (the pet's LOGICAL on-screen size, in points) -- see
+tools/prep_dev_sprite.py's compute_logical_canvas_size() for how a
+generator script should derive that from a pet's native art
+resolution and aspect ratio, and docs/NIDIR_CONTENT.md for why the two
+are deliberately separate knobs (display size vs. stored pixel
+resolution).
 
 Fails loudly (non-zero exit, a specific message on stderr naming the
 animation/frame at fault) rather than silently inventing or skipping
@@ -107,7 +144,7 @@ def _pack_string(s: str) -> bytes:
     return struct.pack("<I", len(encoded)) + encoded
 
 
-def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str) -> tuple[int, int, bytes]:
+def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str, runtime_max_frame_dimension: int | None) -> tuple[int, int, bytes]:
     source = _require(frame_manifest, "source", context)
     path = os.path.join(manifest_dir, source)
     if not os.path.isfile(path):
@@ -117,6 +154,19 @@ def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str) -> tup
     if len(pixels) != width * height * 4:
         raise PackCompileError(f"{context}: decoded pixel data size mismatch for {path}")
 
+    # Downscale opcional en tiempo de compilación (ver el docstring del
+    # módulo) -- el PNG en disco nunca se toca, solo estos bytes que
+    # van directo al pack compilado. anchor_x/anchor_y por defecto se
+    # calculan DESPUÉS del downscale (mitad del tamaño ya reducido),
+    # para que un manifest que no especifica anchor explícito siga
+    # centrando correctamente sin importar si hubo downscale o no.
+    if runtime_max_frame_dimension is not None and max(width, height) > runtime_max_frame_dimension:
+        scale = runtime_max_frame_dimension / max(width, height)
+        target_w = max(1, round(width * scale))
+        target_h = max(1, round(height * scale))
+        pixels = prep_dev_sprite.resize_rgba_nearest(width, height, pixels, target_w, target_h)
+        width, height = target_w, target_h
+
     anchor_x = float(frame_manifest.get("anchor_x", width / 2.0))
     anchor_y = float(frame_manifest.get("anchor_y", height / 2.0))
     duration_ms = float(frame_manifest.get("duration_ms", 0.0))
@@ -125,7 +175,7 @@ def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str) -> tup
     return width, height, header + pixels
 
 
-def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str) -> bytes:
+def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str, runtime_max_frame_dimension: int | None) -> bytes:
     anim_id = _require(anim_manifest, "id", context)
     full_context = f"{context} ('{anim_id}')"
 
@@ -144,7 +194,7 @@ def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str) -> 
     frame_blobs: list[bytes] = []
     first_dims: tuple[int, int] | None = None
     for i, fm in enumerate(frame_manifests):
-        w, h, blob = _compile_frame(fm, manifest_dir, f"{full_context} frame {i}")
+        w, h, blob = _compile_frame(fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension)
         if first_dims is None:
             first_dims = (w, h)
         elif (w, h) != first_dims:
@@ -186,6 +236,12 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
     passive_interval = float(manifest.get("passive_interval_seconds", 300.0))
     content_version = str(manifest.get("content_version", ""))
 
+    runtime_max_frame_dimension = manifest.get("runtime_max_frame_dimension")
+    if runtime_max_frame_dimension is not None:
+        runtime_max_frame_dimension = int(runtime_max_frame_dimension)
+        if runtime_max_frame_dimension <= 0:
+            raise PackCompileError(f"manifest: runtime_max_frame_dimension {runtime_max_frame_dimension} must be positive")
+
     idle_manifest = _require(manifest, "idle", "manifest")
     click_manifest = _require(manifest, "click_reaction", "manifest")
     passive_manifests = manifest.get("passive_actions", [])
@@ -200,28 +256,57 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
     out += struct.pack("<d", passive_interval)
     out += _pack_string(content_version)
 
-    out += _compile_animation(idle_manifest, manifest_dir, "idle")
-    out += _compile_animation(click_manifest, manifest_dir, "click_reaction")
+    out += _compile_animation(idle_manifest, manifest_dir, "idle", runtime_max_frame_dimension)
+    out += _compile_animation(click_manifest, manifest_dir, "click_reaction", runtime_max_frame_dimension)
 
     out += struct.pack("<I", len(passive_manifests))
     for i, pm in enumerate(passive_manifests):
-        out += _compile_animation(pm, manifest_dir, f"passive_actions[{i}]")
+        out += _compile_animation(pm, manifest_dir, f"passive_actions[{i}]", runtime_max_frame_dimension)
 
-    # Sección final, opcional y aditiva (Block 04.2) -- solo se escribe
-    # un solo byte de esta sección si el manifest la pide
-    # explícitamente. Un manifest que no la menciona (todo pack
-    # compilado antes de Block 04.2) produce exactamente los mismos
-    # bytes que antes -- ver el docstring del módulo.
-    if "idle_direction_overrides" in manifest:
-        override_manifests = manifest["idle_direction_overrides"]
-        out += struct.pack("<I", len(override_manifests))
-        for i, om in enumerate(override_manifests):
+    # Tres secciones finales, opcionales y aditivas (Block 04.2) -- ver
+    # el docstring del módulo para por qué las tres se escriben juntas
+    # (aunque el manifest solo mencione una) en cuanto el manifest
+    # menciona cualquiera de ellas, y por qué ninguna se escribe si el
+    # manifest no menciona ninguna (byte-a-byte igual que antes de este
+    # bloque -- el caso de Bunny).
+    direction_keys = ("idle_direction_overrides", "click_reaction_direction_overrides", "passive_action_direction_overrides")
+    if any(key in manifest for key in direction_keys):
+        idle_overrides = manifest.get("idle_direction_overrides", [])
+        out += struct.pack("<I", len(idle_overrides))
+        for i, om in enumerate(idle_overrides):
             context = f"idle_direction_overrides[{i}]"
             direction_str = _require(om, "direction", context)
             if direction_str not in _DIRECTION_TO_BYTE:
                 raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
             out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
-            out += _compile_animation(om, manifest_dir, context)
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
+
+        click_overrides = manifest.get("click_reaction_direction_overrides", [])
+        out += struct.pack("<I", len(click_overrides))
+        for i, om in enumerate(click_overrides):
+            context = f"click_reaction_direction_overrides[{i}]"
+            direction_str = _require(om, "direction", context)
+            if direction_str not in _DIRECTION_TO_BYTE:
+                raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
+            out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
+
+        passive_overrides = manifest.get("passive_action_direction_overrides", [])
+        out += struct.pack("<I", len(passive_overrides))
+        for i, om in enumerate(passive_overrides):
+            context = f"passive_action_direction_overrides[{i}]"
+            passive_action_index = int(_require(om, "passive_action_index", context))
+            if not 0 <= passive_action_index < len(passive_manifests):
+                raise PackCompileError(
+                    f"{context}: passive_action_index {passive_action_index} is out of range "
+                    f"(manifest has {len(passive_manifests)} passive_actions entr{'y' if len(passive_manifests) == 1 else 'ies'})"
+                )
+            direction_str = _require(om, "direction", context)
+            if direction_str not in _DIRECTION_TO_BYTE:
+                raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
+            out += struct.pack("<I", passive_action_index)
+            out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
 
     with open(output_path, "wb") as f:
         f.write(out)

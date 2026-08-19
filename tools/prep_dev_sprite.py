@@ -23,6 +23,15 @@ tools/generate_nidir_pack.py to derive Nidir's "left" idle frames from
 its real "right" idle frames by deterministic horizontal flip (never
 AI-regenerated) -- see docs/NIDIR_CONTENT.md.
 
+Block 04.2's second pass adds the generic display-size policy:
+`compute_logical_canvas_size()` (a pet's on-screen logical size, derived
+from its native art's aspect ratio, independent of that native
+resolution) and `resize_rgba_nearest()` (the deterministic
+nearest-neighbor resize `tools/compile_pet_pack.py` uses for the
+optional `runtime_max_frame_dimension` compile-time downscale) -- see
+docs/NIDIR_CONTENT.md, "tamaño de canvas lógico vs. resolución de
+frame".
+
 This file's own CLI entry point (`main()`, below) is a one-time,
 offline prep step for temporary QA/dev fixtures — not a runtime tool,
 not part of any content pipeline (see docs/PET_CONTENT_SPEC.md, still
@@ -143,6 +152,75 @@ def mirror_rgba_horizontal(width: int, height: int, pixels: bytes) -> bytes:
             dst_x = width - 1 - x
             dst_off = dst_x * 4
             out[row_start + dst_off : row_start + dst_off + 4] = row[src_off : src_off + 4]
+    return bytes(out)
+
+
+# Tamaño "de referencia" del lado más largo del canvas lógico de un
+# pet -- el mismo valor que Bunny ya usa desde Block 02
+# (tools/generate_bunny_dev_pack.py's CANVAS_SIZE = 160), hecho
+# explícito y reusable acá como la convención GENÉRICA de "tamaño de
+# desktop companion" en vez de quedar implícito en un solo script.
+REFERENCE_LOGICAL_SIZE = 160
+
+
+def compute_logical_canvas_size(native_width: int, native_height: int, reference_size: int = REFERENCE_LOGICAL_SIZE) -> tuple[int, int]:
+    """Deriva el `canvas_width`/`canvas_height` LÓGICO de un pet (lo que
+    ocupa en pantalla, en puntos -- ver src/app/SpikeApp.cpp,
+    SDL_CreateWindow) a partir de la resolución NATIVA de su arte
+    fuente, preservando el aspect ratio exacto: el lado más largo
+    queda en `reference_size`, el otro se escala proporcionalmente
+    (redondeo determinista al entero más cercano).
+
+    Esto es intencionalmente independiente de la resolución de los PNG
+    fuente -- el mismo `PetDefinition::canvasWidth/canvasHeight` que
+    ya gobierna tanto el tamaño de renderizado (SDL_RenderTexture)
+    como el del hit-mask (core::AlphaMask::FromAlphaChannel) desde
+    Block 02, ambos ya escalando desde CUALQUIER resolución nativa
+    hacia el canvas -- así que ningún cambio de runtime hizo falta
+    para esto, solo elegir el VALOR correcto en vez de copiar la
+    resolución nativa 1:1 (ver docs/NIDIR_CONTENT.md, "tamaño de
+    canvas lógico vs. resolución de frame", para el bug que esto
+    corrige en el Nidir de la primera pasada de este bloque).
+
+    Genérico -- no tiene ninguna rama por pet: cualquier pet futuro
+    con cualquier resolución/aspect ratio nativa obtiene un canvas
+    lógico "clase 160" comparable, calculado con la misma fórmula."""
+    if native_width <= 0 or native_height <= 0:
+        raise ValueError(f"compute_logical_canvas_size: dimensiones nativas inválidas {native_width}x{native_height}")
+
+    longer = max(native_width, native_height)
+    scale = reference_size / longer
+    canvas_width = max(1, round(native_width * scale))
+    canvas_height = max(1, round(native_height * scale))
+    return canvas_width, canvas_height
+
+
+def resize_rgba_nearest(width: int, height: int, pixels: bytes, target_width: int, target_height: int) -> bytes:
+    """Reescala un buffer RGBA8 a `target_width`x`target_height` por
+    muestreo nearest-neighbor INVERSO (destino -> fuente) -- la misma
+    fórmula de mapeo que core::AlphaMask::FromAlphaChannel y
+    tools/generate_bunny_dev_pack.py's resize_nearest() ya usan,
+    mantenida deliberadamente consistente entre el runtime C++ y el
+    tooling Python (ver docs/ANIMATION_RUNTIME.md). Usado por
+    tools/compile_pet_pack.py para el downscale opcional en tiempo de
+    compilación (`runtime_max_frame_dimension`) -- nunca modifica los
+    PNG fuente en disco, solo los bytes que terminan adentro del pack
+    compilado."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(f"resize_rgba_nearest: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8")
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError(f"resize_rgba_nearest: target dimensions must be positive, got {target_width}x{target_height}")
+
+    src_stride = width * 4
+    out = bytearray(target_width * target_height * 4)
+    for ty in range(target_height):
+        sy = min(height - 1, (ty * height) // target_height)
+        src_row = sy * src_stride
+        for tx in range(target_width):
+            sx = min(width - 1, (tx * width) // target_width)
+            src_off = src_row + sx * 4
+            dst_off = (ty * target_width + tx) * 4
+            out[dst_off : dst_off + 4] = pixels[src_off : src_off + 4]
     return bytes(out)
 
 
