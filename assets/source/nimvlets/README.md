@@ -1,66 +1,53 @@
-# assets/source/nimvlets — source art contract (target, not yet populated)
+# assets/source/nimvlets — source art contract
 
 This directory is the **agreed destination** for real Nimvlet master art
-and its animation sequences (from Krita, Ludo.ai, or any other tool),
-once that art exists. **Nothing under here is populated by Block 02** —
-this file documents the contract so the art pipeline and the engine
+and its animation sequences (from Krita, Ludo.ai, or any other tool).
+This file documents the contract so the art pipeline and the engine
 pipeline (`tools/compile_pet_pack.py` → `content::PetPackLoader`, see
-`docs/ANIMATION_RUNTIME.md`) can be built to agree on layout *before*
-either side has to guess, the same reasoning behind
-`docs/PET_CONTENT_SPEC.md` existing before Block 01 had a content
-loader at all. No per-pet subdirectories are created ahead of having
-real files to put in them — see AGENTS.md's general "don't build ahead
-of need" principle.
+`docs/ANIMATION_RUNTIME.md`) agree on layout. No per-pet subdirectories
+are created ahead of having real files to put in them — see AGENTS.md's
+general "don't build ahead of need" principle.
+
+**Block 04.2 populated the first real entry** (`nidir/`, see
+`docs/NIDIR_CONTENT.md`) and, with it, refined the target layout below
+from Block 02's original sketch: individual PNG frames (not a
+spritesheet) are the canonical animation source, directional
+(`right`/`left`) asset sets are explicit subfolders, and
+`DESCRIPTION.txt` (not `provenance.json`) is what a real pet actually
+ships with today — see "Provenance record" below for how the two
+relate.
 
 ## Target layout
 
 ```
 assets/source/nimvlets/
-  bunny/
+  nidir/                          -- Block 04.2, real, see docs/NIDIR_CONTENT.md
+    DESCRIPTION.txt
     master.png
+    pack_manifest.json
     animations/
-      click/
-      passive/
-  rato/
-    master.png
-    animations/
-      click/
-      passive/
-  rin-rin/
-    master.png
-    animations/
-      click/
-      passive/
+      idle/
+        right/
+          frames/frame_000.png .. frame_NNN.png   -- canonical source
+          spritesheet/spritesheet.png              -- secondary export/reference
+        left/
+          frames/frame_000.png .. frame_NNN.png   -- deterministic horizontal mirror
+          spritesheet/spritesheet.png              -- assembled from the mirrored frames
+  bunny/           -- not populated (Bunny stays a Block 01 QA fixture under assets/dev/, not here)
+  rato/            -- not populated yet
+  rin-rin/         -- not populated yet
   frin/
-    male/
-      master.png
-      animations/
-        click/
-        passive/
-    female/
-      master.png
-      animations/
-        click/
-        passive/
-  artu/
-    master.png
-    animations/
-  kyubi/
-    master.png
-    animations/
-  nidir/
-    master.png
-    animations/
-  sweetie/
-    master.png
-    animations/
+    male/          -- not populated yet
+    female/        -- not populated yet
+  artu/            -- not populated yet
+  kyubi/           -- not populated yet
+  sweetie/         -- not populated yet
 ```
 
 - One directory per Nimvlet, named with its stable id (lowercase,
   hyphenated — matching `content::PetDefinition::id`'s style, e.g.
-  `"bunny_dev"` today, `"rin-rin"` for that Nimvlet later; the exact id
-  string is whatever `docs/PET_CONTENT_SPEC.md`/the content team settles
-  on per pet, this doc doesn't mandate one).
+  `"nidir"`; the exact id string is whatever `docs/PET_CONTENT_SPEC.md`/
+  the content team settles on per pet, this doc doesn't mandate one).
 - **Variants** (e.g. Frin's male/female) nest *above* `master.png` —
   `frin/male/master.png`, `frin/female/master.png` — not as a suffix on
   a shared master, since each variant is visually distinct end to end.
@@ -71,11 +58,28 @@ assets/source/nimvlets/
 - `master.png` — the single reference illustration a pet's animation
   frames are derived from (hand-drawn, AI-generated, or both);
   intentionally unopinionated about resolution or tool.
-- `animations/<category>/` — one subfolder per exported PNG sequence,
-  each folder holding that sequence's ordered frames (naming convention
-  for individual frame files is left to whatever the export tool
-  produces; `tools/compile_pet_pack.py`'s manifest references them by
-  explicit filename, not by pattern-matching a folder).
+- `DESCRIPTION.txt` — stable physical traits (in Spanish), for keeping
+  future generations/edits visually consistent — see
+  `docs/NIDIR_CONTENT.md` §4 and `nidir/DESCRIPTION.txt` for a real
+  example. Not a product/personality spec (that's
+  `docs/PET_CONTENT_SPEC.md`/`docs/PRD_V1.md`).
+- `animations/<name>/<direction>/frames/` — **canonical source**: one
+  subfolder per exported PNG sequence, ordered, deterministically named
+  `frame_000.png`, `frame_001.png`, ... `tools/validate_frame_sequence.py`
+  (Block 04.2) checks this contract (dimensions, ordering, no gaps/
+  duplicates, real non-degenerate alpha) before anything compiles them.
+  `<direction>` (`right`/`left`) only exists for animations that
+  actually have direction-specific art — see
+  `docs/NIDIR_CONTENT.md` §5 for how a non-directional animation (or a
+  whole non-directional pet) simply omits it.
+- `animations/<name>/<direction>/spritesheet/` — **secondary
+  artifact/reference only**, never what `tools/compile_pet_pack.py`
+  reads. If the spritesheet and the individual frames ever disagree,
+  the frames win.
+- `pack_manifest.json` — the `tools/compile_pet_pack.py` input for this
+  pet, living next to its own source frames (unlike Bunny's manifest,
+  which lives under `assets/dev/bunny_pack/` since Bunny's frames are
+  themselves dev-generated, not a hand-authored source tree).
 
 ## `click` / `passive` are categories, not a hard limit
 
@@ -97,6 +101,14 @@ only these two categories will ever exist, and nothing here pre-builds
 that generalization speculatively before a real consumer needs it.
 
 ## Provenance record
+
+**Not yet instantiated for Nidir** (Block 04.2 shipped `DESCRIPTION.txt`
+instead — physical-consistency traits, not origin tracking; see
+`docs/NIDIR_CONTENT.md` §7). The two serve different purposes and can
+coexist: `DESCRIPTION.txt` answers "what must never change by
+accident," `provenance.json` below answers "where did this come from."
+Nothing here contradicts adding a real `provenance.json` for Nidir (or
+any pet) in a future block.
 
 Alongside each pet's `master.png`, a small `provenance.json` should
 record where the art came from — not a database, not a legal system,

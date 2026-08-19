@@ -813,3 +813,81 @@ más un intento real (no un placeholder), imprimiendo explícitamente
 build/código Wayland en sí (`SDL_WAYLAND=ON`, la rama Wayland del
 adapter) queda completo y testeado independientemente del resultado de
 ese paso.
+
+### DEC-039 — Extensión aditiva y retrocompatible del formato "NVPACK1" para direcciones
+**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §5.
+
+En vez de reemplazar `PetDefinition::idle` por una lista genérica
+indexada por dirección (lo que habría exigido tocar cada sitio que ya
+leía `pet.idle`/`pet_.idle` — `AnimationController`, `SpikeApp`, y una
+docena de fixtures de test), se agregó `idleDirectionOverrides` como
+campo puramente aditivo: `idle` conserva su significado exacto de
+antes (el idle canónico, kRight por convención), y una sección final
+OPCIONAL del formato binario ("NVPACK1", sin bump de magic ni de
+schema version) codifica cualquier variante direccional extra.
+`ByteReader::HasMoreData()` distingue un pack viejo (termina justo
+después de `passiveActions`, sin bytes extra) de uno nuevo (sí quedan
+bytes) sin ambigüedad. Resultado directo: `assets/dev/bunny_pack.nvpack`
+no necesitó recompilarse — su manifest nunca menciona
+`idle_direction_overrides`, así que `tools/compile_pet_pack.py` no
+escribe ni un byte de más, y el pack compilado es idéntico al de antes
+de este bloque.
+
+### DEC-040 — Placeholder de un solo frame para el click_reaction de Nidir
+**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §6.
+
+El export real que el owner proveyó solo cubre la animación de idle
+-- no existe arte de click dedicado para Nidir todavía. Como
+`content::PetDefinition::clickReaction` es un campo obligatorio del
+esquema actual, se completó con un placeholder estructural mínimo:
+un solo frame (reutiliza `idle/right/frames/frame_000.png`), `one_shot`,
+~100ms, `returns_to_idle: true`. Debe ser `one_shot`, nunca `static`:
+`AnimationController::Advance()` solo transiciona de vuelta a Idle
+cuando una animación `kOneShot` termina naturalmente -- una animación
+`kStatic` nunca dispara esa transición, así que un click_reaction
+`static` habría dejado al controller trabado en `ClickReaction` para
+siempre después del primer click, bloqueando clicks y acciones
+pasivas futuras. Documentado explícitamente como placeholder, no como
+contenido terminado.
+
+### DEC-041 — fps del idle loop de Nidir: 6.0, elegido por medición real, no por el export
+**Status:** DECIDIDO · Block 04.2 — ver `docs/PERFORMANCE_BUDGETS.md`, "Mediciones reales de Block 04.2".
+
+El export de Ludo.ai no trae ninguna cadencia de reproducción
+indicada. Se midió contra el binario Release real antes de fijar un
+valor: a 12fps, el idle loop de Nidir (25 frames, canvas nativo
+513×525) promedia ~11-12% CPU en steady state; a 6fps, ~4-5.5%. Se
+priorizó el costo de CPU más bajo sobre una cadencia más fluida, ya
+que el brief de este bloque tiene un requisito explícito de recursos
+(§10) y ninguno de fluidez visual específica. Ambos números exceden el
+objetivo de ~1% que `docs/PERFORMANCE_BUDGETS.md` documenta para Bunny
+-- documentado como una limitación real, no ocultado (ver "Bugs/debt/
+limitations" del informe final de este bloque).
+
+### DEC-042 — Canvas de Nidir a resolución nativa (513×525), sin reescalar
+**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §7.
+
+A diferencia de Bunny (reescalado a 160×160 como fixture de dev), el
+canvas de Nidir usa exactamente la resolución nativa de los frames
+importados. Instrucción explícita del block brief §4: "Do NOT silently
+crop/resize/recenter unless required by the runtime contract" -- el
+contrato de runtime no lo exige (`SDL_RenderTexture` ya escala
+cualquier resolución nativa al tamaño de canvas del pet). Se identificó
+-- pero no se resolvió unilateralmente, ya que hacerlo habría sido
+exactamente el tipo de reescalado silencioso que el brief prohíbe --
+una tensión real con el invariante de producto "ventana pequeña"
+(AGENTS.md §2), y con el costo de CPU medido en DEC-041. Queda como
+una decisión pendiente para un futuro bloque/el owner, no resuelta acá.
+
+### DEC-043 — `~/Downloads/Nidir.png` usado como `master.png`
+**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §7.
+
+No listado explícitamente entre los dos folders que el block brief §2
+nombra, pero coincide en nombre, ubicación (junto a los dos exports
+requeridos, dejado por el owner al mismo tiempo), y rol (una única
+imagen de referencia estática, sin alpha real, 1254×1254 -- exactamente
+lo que `assets/source/nimvlets/README.md` ya definía como `master.png`
+desde Block 02) -- evidencia suficiente para una inferencia razonable,
+no una adivinanza. El brief solo pedía STOP ante folders faltantes/
+ambiguos entre los dos requeridos explícitamente, y ninguno de esos dos
+lo estaba.

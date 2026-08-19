@@ -149,3 +149,25 @@ entradas del catálogo que comparten un mismo `petId` (el caso Frin
 male/female), sin exigir ninguna relación fija entre ese `variantId` de
 catálogo y el `variantGroup` interno de un pack — ver
 `docs/CATALOG.md` §2.
+
+## Relación de Block 04.2 con este spec
+
+Block 04.2 agrega el primer campo genuinamente nuevo a
+`content::PetDefinition` desde Block 02:
+`idleDirectionOverrides` (más el enum `content::Direction` y la
+función pura `content::ResolveIdleAnimation()`) — ver
+`docs/NIDIR_CONTENT.md` §5 para el diseño completo. No está en la
+tabla original de este documento (dirección no era un campo previsto),
+pero encaja en el mismo principio de "especie-específico expresado
+como datos, no como C++" que este spec siempre pidió: agregar contenido
+direccional a un Nimvlet nuevo nunca requiere tocar
+`src/content`/`src/app`, solo su propio pack compilado.
+
+Más importante: Block 04.2 es el primer bloque en poblar
+`assets/source/nimvlets/` con contenido real (Nidir) — hasta ahora
+solo Bunny (un fixture de QA bajo `assets/dev/`, fuera de este
+contrato) había ejercitado el runtime con arte real. La convención de
+carpeta de origen (frames PNG individuales como fuente canónica,
+spritesheet como artefacto secundario, `DESCRIPTION.txt` por rasgos
+físicos estables) queda documentada como el patrón real para cualquier
+Nimvlet futuro — ver `docs/NIDIR_CONTENT.md` §8.

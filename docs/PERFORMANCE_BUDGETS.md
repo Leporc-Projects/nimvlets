@@ -133,3 +133,57 @@ event loop deadline-driven que macOS/Windows, sin ningún polling nuevo
 en X11 (mismo mecanismo event-driven que macOS) ni en Wayland
 (`usingPollDrivenClickThrough_` es `false` ahí específicamente para
 evitar un loop inútil — ver `docs/LINUX_PLATFORM.md` §4).
+
+## Mediciones reales de Block 04.2 (Nidir)
+
+Medido contra el binario Release real (arm64 nativo, `ps -o rss,%cpu`,
+muestras cada 3s), vía `NIMVLETS_DEV_SWITCH_TEST_COUNT=2` (Bunny ->
+Nidir) — ver `docs/NIDIR_CONTENT.md`.
+
+**Bunny, sin switch (regresión, sin cambios de Block 04.2):** RSS
+≈74.0 MB, CPU 0.0% en steady state — idéntico al baseline de bloques
+anteriores.
+
+**Nidir cargado (idle loop real, 25 frames, canvas nativo 513×525):**
+
+| fps del idle loop | CPU (steady state) | RSS (steady state) |
+|---|---|---|
+| 12 (primer intento) | ≈11–12% | ≈199 MB |
+| **6 (valor final elegido)** | **≈4–5.5%** | **≈259 MB** |
+
+**Esto excede el objetivo de ~1% de idle** que este documento
+establece para Bunny — explícitamente no se pretende que un idle loop
+real de 25 frames sea gratis: a diferencia del idle estático de Bunny
+(`PlaybackKind::kStatic`, sin ningún deadline nunca), el idle de Nidir
+es `PlaybackKind::kLoop`, así que `NextFrameDeadlineMs()` siempre tiene
+un valor y el event loop despierta a cadencia fija mientras dure. Dos
+factores concretos explican la magnitud (no solo "es un loop, no
+estático"):
+
+1. **Resolución nativa ~10x mayor que Bunny** (513×525 = 269,325
+   pixeles vs. 160×160 = 25,600) — el canvas de Nidir usa su resolución
+   nativa exacta, sin reescalar (ver `docs/NIDIR_CONTENT.md` §7 para
+   por qué, y la tensión real que esto crea con el invariante de
+   "ventana pequeña" de AGENTS.md §2).
+2. `BuildHitTestShapeSurface()` (existente desde Block 01, sin cambios
+   en este bloque) reconstruye la superficie de shape con
+   `SDL_WriteSurfacePixel()` pixel por pixel en cada cambio de frame —
+   un costo que escala linealmente con la resolución del canvas, no
+   optimizado para canvases grandes porque ninguno había existido
+   hasta ahora.
+
+**500 switches automatizados alternando Bunny/pets sintéticos**
+(`tests/PetSwitchingTest.cpp`) y **40 cambios de dirección
+automatizados contra el binario real** (`NIMVLETS_DEV_DIRECTION_TEST_COUNT=40`,
+ver `docs/NIDIR_CONTENT.md` §5) no mostraron crecimiento de RSS más
+allá del ruido normal del allocator (~258.9–259.1 MB estable a lo largo
+de 3 muestras separadas por 3s) — "repeated direction changes do not
+accumulate logical resources" (block brief §9) confirmado tanto en el
+test puro (`tests/DirectionTest.cpp`) como contra el binario real.
+
+**No se estableció ningún presupuesto final para Nidir en este
+bloque** — el número real (~5% CPU en idle) queda documentado como
+dato honesto, no como un target aceptado; optimizar
+`BuildHitTestShapeSurface()` para canvases grandes, o reconsiderar el
+tamaño de canvas de Nidir, quedan fuera de alcance de este bloque (ver
+"Bugs/debt/limitations" del informe final).

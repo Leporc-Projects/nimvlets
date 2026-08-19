@@ -18,6 +18,13 @@ exactamente una entrada. El resultado deja todo lo necesario para que
 un bloque futuro agregue más pets reales y construya una UI de
 selección sin tocar `src/catalog` ni `src/app`.
 
+**Actualización (Block 04.2):** el catálogo real de dev ahora tiene
+**dos** entradas — Bunny (sigue siendo el default) y Nidir, el primer
+pet con arte real de producción (ver `docs/NIDIR_CONTENT.md`).
+Agregarlo fue exactamente la promesa de este párrafo: una fila nueva
+en `assets/dev/pet_catalog_manifest.json` + recompilar, cero cambios
+en `src/catalog` ni `src/app`.
+
 ## 2. Identidad de pet
 
 `catalog::PetIdentity` (`src/catalog/PetIdentity.h`): un `petId` más un
@@ -284,8 +291,9 @@ usuario ni requiere display.
   bloque.
 - **Sin migración de schema del catálogo.** Exactamente un
   `schemaVersion` soportado, igual que `persistence::AppState`.
-- **Sin arte real para ningún Nimvlet más allá de Bunny.** El catálogo
-  real de dev tiene una sola entrada.
+- **Sin arte real para ningún Nimvlet más allá de Nidir** (Block 04.2
+  — ver `docs/NIDIR_CONTENT.md`). Bunny sigue siendo un fixture de QA,
+  no un Nimvlet real.
 - **Sin verificación de existencia de `packPath` en el loader C++.**
   Ver §3/§5 para por qué, y dónde sí se descubre un pack faltante.
 - **Sin variantes reales cargadas.** El concepto de variante está

@@ -50,7 +50,8 @@ PetDefinition
   id, displayName, variantGroup
   canvasWidth, canvasHeight       — logical size every frame is drawn into
   alphaHitThreshold                — per-pet, not a global constant (default 128)
-  idle: AnimationDefinition        — required, at least 1 frame
+  idle: AnimationDefinition        — required, at least 1 frame; the pet's canonical idle
+  idleDirectionOverrides: [DirectionalAnimationOverride]  — Block 04.2, zero or more; see below
   clickReaction: AnimationDefinition — required, at least 1 frame
   passiveActions: [AnimationDefinition]  — zero or more
   passiveIntervalSeconds           — target average seconds between passive actions (default 300.0)
@@ -62,7 +63,20 @@ AnimationDefinition
 
 FrameDefinition
   width, height, anchor, durationMs, pixels (RGBA8), rendererHandle (opaque)
+
+DirectionalAnimationOverride (Block 04.2 — see docs/NIDIR_CONTENT.md)
+  direction (Direction::kRight | kLeft), animation: AnimationDefinition
 ```
+
+**Dirección (Block 04.2).** `content::Direction` es un enum genérico
+(`kRight`/`kLeft`), no un concepto por-pet. `content::ResolveIdleAnimation(pet,
+direction)` retorna la entrada dedicada de `idleDirectionOverrides` si
+existe una para `direction`, si no cae a `pet.idle` — un pet sin
+ninguna entrada (Bunny) siempre resuelve a `pet.idle` sin importar la
+dirección pedida. `content::AnimationController::SetDirection()`
+consulta esto mismo. Ver `docs/NIDIR_CONTENT.md` §5 para el diseño
+completo y por qué es una extensión aditiva del modelo anterior, no un
+reemplazo de `idle`.
 
 No pet identity ever appears as a C++ enum value or `if (petId ==
 "bunny_dev")` branch anywhere in `src/content` or `src/app`. Swapping
@@ -126,6 +140,11 @@ clickReaction              : AnimationBlock
 passiveActionCount         : uint32
 passiveActions[count]      : AnimationBlock, repeated
 
+directionalIdleOverrideCount : uint32   -- Block 04.2, OPTIONAL trailing section
+directionalIdleOverrides[count]:         -- absent entirely in a pre-04.2 pack (e.g.
+  direction : uint8 (0=right, 1=left)    -- assets/dev/bunny_pack.nvpack, never recompiled
+  animation : AnimationBlock             -- for this) — see docs/NIDIR_CONTENT.md §5
+
 AnimationBlock:
   id            : string
   kind          : uint8   (0=static, 1=loop, 2=one_shot)
@@ -188,17 +207,19 @@ shaped manifest, not just Bunny's — but the manifest format and this
 tool remain development tooling, not the production content pipeline
 `docs/PET_CONTENT_SPEC.md` describes.
 
-## 5.1 Where future master art will live
+## 5.1 Where master art lives
 
-`assets/source/nimvlets/README.md` documents (but does not yet
-populate) the target contract for real Nimvlet master art and its
-exported animation sequences — one directory per pet, `master.png` +
-`animations/<category>/`, plus a small per-pet `provenance.json`
-schema. Written ahead of having real files so a future block adding
-real art doesn't have to invent layout under time pressure. `click` and
-`passive` are this block's two required categories, not a hard limit —
-see that document for how passive actions are already an open-ended,
-data-driven list today.
+`assets/source/nimvlets/README.md` documents the target contract for
+real Nimvlet master art and its exported animation sequences — one
+directory per pet, `master.png` + `animations/<name>/<direction>/`
+(individual PNG frames as the canonical source, a spritesheet as a
+secondary artifact), plus a small per-pet `provenance.json` schema.
+Block 04.2 populated the first real entry (`nidir/`) and refined this
+contract with real data — see `docs/NIDIR_CONTENT.md` for the full
+pipeline (import, normalization, deterministic left-direction mirror,
+pack compilation). `click` and `passive` remain open-ended categories,
+not a hard limit — passive actions are already a data-driven list
+today.
 
 ## 6. Scheduler behavior — the CPU result
 

@@ -5,8 +5,10 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está actualmente en **Block 04.1 — Habilitación de
-Linux como Plataforma de Escritorio**, construido sobre Block 04 —
+Este repositorio está actualmente en **Block 04.2 — Nidir: Assets
+Reales + Pipeline de Animación Direccional**, construido sobre Block
+04.1 — Habilitación de Linux como Plataforma de Escritorio (ver
+[`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04 —
 Catálogo de Pets + Switching en Runtime (ver
 [`docs/CATALOG.md`](docs/CATALOG.md)), Block 03 — Persistencia Local
 de Estado (el click balance, el id del pet activo, y la última
@@ -17,13 +19,14 @@ data-driven — ver
 [`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)), y Block 01 —
 Foundation + Platform Feasibility Spike (bootstrap disciplinado del
 repo más una prueba de que el enfoque central de
-windowing/transparencia/hit-testing/drag es viable). Block 04.1 suma
-**Linux x86_64 (X11 y Wayland)** como target de escritorio de primera
-clase, sin cambiar ningún feature de producto — ver
-[`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md) para el diseño
-completo, incluyendo las limitaciones reales de Wayland (sin
-always-on-top, sin restauración de posición absoluta) que el protocolo
-en sí impone. Esto explícitamente *no* es todavía el producto
+windowing/transparencia/hit-testing/drag es viable). Block 04.2
+integra **Nidir**, el primer Nimvlet con arte real de producción (no
+un fixture de QA como Bunny), y establece el contrato permanente de
+asset source para todo Nimvlet futuro: frames PNG individuales como
+fuente canónica, spritesheet como artefacto secundario, sets
+direccionales explícitos (right/left) — ver
+[`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) para el diseño
+completo. Esto explícitamente *no* es todavía el producto
 terminado — ver [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md)
 para lo que está verificado y lo que no, y `AGENTS.md` para los
 contratos de ingeniería permanentes que sigue este bloque y cada
@@ -90,16 +93,25 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nimvlets_dev_state ./build/macos-debug/src/app/nim
 # interactivos justo después de arrancar, para smoke-testear el
 # switching (no es comportamiento de producto — ver docs/CATALOG.md §7)
 NIMVLETS_DEV_SWITCH_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
+
+# conveniencia de QA: alterna N veces entre Direction::kRight/kLeft
+# justo después de arrancar (Block 04.2 — no es comportamiento de
+# producto, ver docs/NIDIR_CONTENT.md §5)
+NIMVLETS_DEV_DIRECTION_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 ```
 
-This opens a small (160×160), borderless, always-on-top, transparent
-window showing whichever pet the catalog resolves as active (see
-[`docs/CATALOG.md`](docs/CATALOG.md)) — for now, always **Bunny**, a
-deterministically-generated DEV animation pack
+This opens a small, borderless, always-on-top, transparent window
+showing whichever pet the catalog resolves as active (see
+[`docs/CATALOG.md`](docs/CATALOG.md)) — by default **Bunny**
+(160×160), a deterministically-generated DEV animation pack
 (`assets/dev/bunny_pack.nvpack`) derived from a real illustrated QA
 fixture the repository owner supplied in Block 01, *not* final content
 (see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). The catalog
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). **Nidir**
+(513×525, `assets/dev/nidir_pack.nvpack`) is the catalog's second, real
+entry since Block 04.2 — see
+[`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) — reachable today via
+`NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). The catalog
 and the active pet's pack are required, not optional — if either can't
 be loaded (e.g. not run from the repo root), the app logs a specific
 error and exits rather than falling back to any placeholder; if a
@@ -165,8 +177,10 @@ src/platform     native macOS (AppKit) / Windows (Win32) / Linux (X11+Wayland) w
                  plus LinuxBackendPolicy — pure X11-vs-Wayland capability logic, built on every OS
 src/app          the spike executable: event loop + wiring
 tests/           CTest-driven unit tests for src/core, src/content, src/catalog, and src/persistence
-tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, compile_pet_catalog.py, generate_bunny_dev_pack.py)
-assets/dev/      dev-only placeholder assets (see assets/dev/README.md)
+tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, compile_pet_catalog.py,
+                 generate_bunny_dev_pack.py, validate_frame_sequence.py, generate_nidir_pack.py, test_asset_pipeline.py)
+assets/dev/      dev-only placeholder assets (see assets/dev/README.md) + compiled runtime packs (*.nvpack)
+assets/source/nimvlets/  real Nimvlet source art (frames, spritesheets, DESCRIPTION.txt — see docs/NIDIR_CONTENT.md)
 cmake/           CMake helper modules (warnings, SDL3 fetch)
 docs/            product + engineering contracts (see AGENTS.md §18)
 ```
