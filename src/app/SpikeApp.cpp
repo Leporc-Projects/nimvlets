@@ -32,6 +32,10 @@ constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL
 // SpikeApp::RunDevSwitchSmokeTestIfRequested().
 constexpr const char* kDevSwitchTestCountEnvVar = "NIMVLETS_DEV_SWITCH_TEST_COUNT";
 
+// Lee NIMVLETS_DEV_DIRECTION_TEST_COUNT — ver el comentario de
+// SpikeApp::RunDevDirectionSmokeTestIfRequested().
+constexpr const char* kDevDirectionTestCountEnvVar = "NIMVLETS_DEV_DIRECTION_TEST_COUNT";
+
 // Identifica el directorio de app-data por usuario que resuelve
 // SDL_GetPrefPath() (ver docs/PERSISTENCE.md, "política de ubicación
 // de almacenamiento"). "org" coincide con el "built by Leporc
@@ -145,6 +149,9 @@ void SpikeApp::AttachAllTextures() {
         }
     };
     attach(pet_.idle);
+    for (content::DirectionalAnimationOverride& override_ : pet_.idleDirectionOverrides) {
+        attach(override_.animation);
+    }
     attach(pet_.clickReaction);
     for (content::AnimationDefinition& passive : pet_.passiveActions) {
         attach(passive);
@@ -158,6 +165,9 @@ void SpikeApp::ReleaseAllTextures() {
         }
     };
     release(pet_.idle);
+    for (content::DirectionalAnimationOverride& override_ : pet_.idleDirectionOverrides) {
+        release(override_.animation);
+    }
     release(pet_.clickReaction);
     for (content::AnimationDefinition& passive : pet_.passiveActions) {
         release(passive);
@@ -514,6 +524,47 @@ void SpikeApp::RunDevSwitchSmokeTestIfRequested() {
     SDL_Log("nimvlets: DEV switch smoke test complete — %zu/%zu switches succeeded", successCount, count);
 }
 
+void SpikeApp::SetActiveDirection(content::Direction direction) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    const bool changed = animController_->SetDirection(direction, nowMs);
+    SDL_Log(
+        "nimvlets: active direction -> %s%s",
+        content::ToString(direction), changed ? "" : " (no visual change -- already active, or a gesture is in progress)");
+    if (changed) {
+        needsRedraw_ = true;  // el loop principal se encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima vuelta
+    }
+}
+
+void SpikeApp::RunDevDirectionSmokeTestIfRequested() {
+    const char* countEnv = std::getenv(kDevDirectionTestCountEnvVar);
+    if (countEnv == nullptr || countEnv[0] == '\0') {
+        return;  // sin la variable de entorno, esto es un no-op total
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(countEnv, &end, 10);
+    if (end == countEnv || parsed <= 0) {
+        SDL_Log("nimvlets: %s='%s' is not a valid positive integer; ignoring", kDevDirectionTestCountEnvVar, countEnv);
+        return;
+    }
+    const auto count = static_cast<std::size_t>(parsed);
+
+    SDL_Log("nimvlets: DEV direction smoke test active — %s=%zu", kDevDirectionTestCountEnvVar, count);
+
+    // Alterna kRight/kLeft -- ejercita tanto "cambiar a una dirección
+    // con override real" como "volver a la dirección canónica", sin
+    // asumir que el pet activo en este momento realmente tiene
+    // contenido direccional (si no lo tiene, cada llamado
+    // simplemente resuelve siempre a pet_.idle -- ver
+    // ResolveIdleAnimation() -- y esto sigue siendo un no-op seguro).
+    for (std::size_t i = 0; i < count; ++i) {
+        const content::Direction target = (i % 2 == 0) ? content::Direction::kLeft : content::Direction::kRight;
+        SetActiveDirection(target);
+    }
+
+    SDL_Log("nimvlets: DEV direction smoke test complete — %zu direction change(s) requested", count);
+}
+
 void SpikeApp::Shutdown() {
     // Flushea primero, antes de desmontar cualquier otra cosa — ver el
     // comentario de FlushPersistedState(): el shutdown limpio siempre
@@ -796,6 +847,10 @@ int SpikeApp::Run() {
     // el comentario del método. Corre una sola vez, sincrónicamente,
     // antes de entrar al loop principal (no agrega ningún polling).
     RunDevSwitchSmokeTestIfRequested();
+
+    // Idem para NIMVLETS_DEV_DIRECTION_TEST_COUNT (Block 04.2) — ver el
+    // comentario del método.
+    RunDevDirectionSmokeTestIfRequested();
 
     bool running = true;
 

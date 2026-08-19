@@ -76,8 +76,9 @@ private:
     bool IsPointInteractive(core::Point localPoint) const;
 
     // Creates/releases one SDL_Texture per frame across pet_'s idle,
-    // click-reaction, and every passive action — see
-    // graphics::AttachFrameTexture()/ReleaseFrameTexture().
+    // every idle direction override (Block 04.2 — see
+    // docs/NIDIR_CONTENT.md), click-reaction, and every passive action
+    // — see graphics::AttachFrameTexture()/ReleaseFrameTexture().
     void AttachAllTextures();
     void ReleaseAllTextures();
 
@@ -124,6 +125,29 @@ private:
     // esto es un no-op total: cero cambio de comportamiento en
     // producción. Ver docs/CATALOG.md.
     void RunDevSwitchSmokeTestIfRequested();
+
+    // El "runtime method to change direction" que pide el block brief
+    // 04.2 §7 — todavía sin ningún control de UI que lo dispare
+    // (explícitamente fuera de alcance de este bloque). Delega en
+    // content::AnimationController::SetDirection(); si el frame
+    // mostrado cambió de verdad, pide un redraw (el loop principal se
+    // encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima
+    // vuelta, igual que TrySwitchActivePet() ya hace). No toca
+    // appState_ — ver el comentario de appState_ sobre por qué la
+    // dirección no se persiste en este bloque.
+    void SetActiveDirection(content::Direction direction);
+
+    // Mecanismo solo-DEV para smoke-testear cambios de dirección de
+    // forma no interactiva contra el binario real, reflejando
+    // exactamente el patrón ya establecido de
+    // RunDevSwitchSmokeTestIfRequested() (block brief §9: "repeated
+    // direction changes do not accumulate logical resources" necesita
+    // poder ejercitarse sin QA manual). Si
+    // NIMVLETS_DEV_DIRECTION_TEST_COUNT es un entero positivo válido,
+    // alterna esa cantidad de veces entre Direction::kRight/kLeft
+    // -- sincrónicamente, antes del loop principal -- logueando cada
+    // cambio. Sin la variable de entorno, no-op total.
+    void RunDevDirectionSmokeTestIfRequested();
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
@@ -186,6 +210,15 @@ private:
     // no existe ningún save, o el save no se puede leer) y se muta
     // mientras la app corre; nunca se relee desde disco hasta el
     // *siguiente* arranque del proceso.
+    //
+    // La dirección activa (Block 04.2 — ver SetActiveDirection()) NO
+    // vive acá ni en ningún lado persistido: el block brief §7 es
+    // explícito ("Persistence of direction is not required unless
+    // essentially free and clearly justified") y agregar un campo acá
+    // exigiría tocar el formato NVSTATE1 (bump de schema, migración)
+    // por un beneficio que nadie pidió — no calza con "esencialmente
+    // gratis". animController_ arranca en Direction::kRight en cada
+    // Init()/TrySwitchActivePet(), sin excepción.
     persistence::AppState appState_;
 
     // Se construye en Init() una vez que se resuelve el directorio de
