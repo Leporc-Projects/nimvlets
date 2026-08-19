@@ -52,6 +52,24 @@ struct FrameDefinition {
     void* rendererHandle = nullptr;
 };
 
+// Dirección genérica de un Nimvlet direccional (Block 04.2 — ver
+// docs/NIDIR_CONTENT.md). Metadata/estado, no un concepto por-pet: un
+// pet sin arte direccional (Bunny) simplemente nunca puebla
+// `PetDefinition::idleDirectionOverrides`, y toda resolución de
+// dirección cae de forma determinista a `PetDefinition::idle` — ver
+// ResolveIdleAnimation() más abajo. `kRight` es la dirección default en
+// todo el runtime (AnimationController arranca ahí — ver
+// AnimationController.h) y la que `idle` representa implícitamente
+// cuando un pet sí tiene contenido direccional.
+enum class Direction : std::uint8_t {
+    kRight = 0,
+    kLeft = 1,
+};
+
+// Solo para logs/diagnóstico — nunca para lógica de negocio (comparar
+// Direction directamente, no su nombre).
+const char* ToString(Direction direction);
+
 // An ordered sequence of frames plus how they play back. Stable `id` is
 // data, not an enum — new animations never require new C++.
 struct AnimationDefinition {
@@ -74,6 +92,16 @@ struct AnimationDefinition {
     // frame — callers treat 0.0 as "cannot advance" (effectively
     // static), never as "advance instantly forever".
     double FrameDurationMs(std::size_t frameIndex) const;
+};
+
+// Una variante de `PetDefinition::idle` para una dirección distinta de
+// la canónica que `idle` ya representa (ver el comentario de
+// Direction). Solo existen entradas para direcciones con arte propio
+// de verdad — Nidir (Block 04.2) tiene exactamente una, `kLeft`; un pet
+// no direccional (Bunny) no tiene ninguna. Ver ResolveIdleAnimation().
+struct DirectionalAnimationOverride {
+    Direction direction = Direction::kRight;
+    AnimationDefinition animation;
 };
 
 // Everything needed to run one kind of Nimvlet: its idle look, its
@@ -100,7 +128,19 @@ struct PetDefinition {
     // the default.
     std::uint8_t alphaHitThreshold = 128;
 
+    // El idle canónico del pet. Para un pet no direccional (Bunny) es
+    // simplemente "el" idle. Para un pet direccional (Nidir) es, por
+    // convención, el idle de Direction::kRight — nunca hace falta una
+    // entrada explícita en idleDirectionOverrides para kRight, ver
+    // ResolveIdleAnimation().
     AnimationDefinition idle;
+
+    // Variantes de idle para direcciones DISTINTAS de la que `idle`
+    // arriba ya representa (Block 04.2 — ver docs/NIDIR_CONTENT.md).
+    // Vacío para un pet no direccional. Nunca indexar directamente —
+    // usar ResolveIdleAnimation().
+    std::vector<DirectionalAnimationOverride> idleDirectionOverrides;
+
     AnimationDefinition clickReaction;
 
     // Zero or more sparse autonomous actions; AnimationController picks
@@ -116,5 +156,20 @@ struct PetDefinition {
     // packs have a place to record it without a schema change.
     std::string contentVersion;
 };
+
+// Resuelve qué AnimationDefinition de idle mostrar para `direction`
+// (block brief 04.2 §6: "active animation resolves using current pet +
+// animation id + direction" — "idle" es, en este bloque, la única
+// animación con variantes por dirección). Política de fallback,
+// documentada explícitamente en vez de dejarla implícita (block brief
+// §6: "unsupported direction fails clearly or uses an explicitly
+// documented safe fallback"):
+//   - Direction::kRight, o cualquier dirección sin entrada dedicada en
+//     `pet.idleDirectionOverrides`: retorna `pet.idle`.
+//   - Cualquier otra dirección CON una entrada dedicada: retorna esa
+//     animación.
+// Nunca falla — todo PetDefinition válido (impuesto por
+// PetPackLoader/PetDefinition's ctor implícito) tiene al menos `idle`.
+const AnimationDefinition& ResolveIdleAnimation(const PetDefinition& pet, Direction direction);
 
 }  // namespace nimvlets::content
