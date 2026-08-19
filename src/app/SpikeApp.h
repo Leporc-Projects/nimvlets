@@ -149,6 +149,23 @@ private:
     // cambio. Sin la variable de entorno, no-op total.
     void RunDevDirectionSmokeTestIfRequested();
 
+    // Mecanismo solo-DEV para smoke-testear el click reaction de forma
+    // no interactiva contra el binario real -- este bloque no tiene
+    // ninguna forma de sintetizar un click de mouse real de forma
+    // segura/no invasiva (ver AGENTS.md §5), así que esto llama
+    // directamente a animController_->TriggerClick(), el mismo método
+    // que SDL_EVENT_MOUSE_BUTTON_UP ya llama para un click real -- ver
+    // HandleEvent(). Si NIMVLETS_DEV_CLICK_TEST_COUNT es un entero
+    // positivo válido, ejecuta esa cantidad de clicks sintéticos --
+    // uno detrás de otro, sincrónicamente, antes del loop principal --
+    // exactamente igual que RunDevSwitchSmokeTestIfRequested(). El
+    // último click deja al controller efectivamente en
+    // ControllerState::kClickReaction al momento en que el loop
+    // principal arranca, así que su reproducción real (frame a frame,
+    // deadline-driven) se puede observar/medir contra el binario
+    // corriendo de verdad. Sin la variable de entorno, no-op total.
+    void RunDevClickSmokeTestIfRequested();
+
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 

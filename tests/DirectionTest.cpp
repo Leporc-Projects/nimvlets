@@ -17,9 +17,12 @@ using nimvlets::content::ControllerState;
 using nimvlets::content::Direction;
 using nimvlets::content::DirectionalAnimationOverride;
 using nimvlets::content::FrameDefinition;
+using nimvlets::content::PassiveActionDirectionalOverride;
 using nimvlets::content::PetDefinition;
 using nimvlets::content::PlaybackKind;
+using nimvlets::content::ResolveClickReaction;
 using nimvlets::content::ResolveIdleAnimation;
+using nimvlets::content::ResolvePassiveAction;
 using nimvlets::core::AlphaMask;
 
 namespace nimvlets::tests {
@@ -64,6 +67,66 @@ PetDefinition MakeDirectionalPet() {
     left.animation.fps = 10.0;
     left.animation.frames = {MakeFrame(4, 4, 0xB0), MakeFrame(4, 4, 0xB1)};
     pet.idleDirectionOverrides = {left};
+    return pet;
+}
+
+// Pet con la forma REAL de Nidir (segunda pasada de Block 04.2, ver
+// docs/NIDIR_CONTENT.md): pose base ESTÁTICA (idle), una acción pasiva
+// ONE-SHOT esporádica (la animación de idle real, reclasificada), y un
+// click_reaction ONE-SHOT -- ambas con override direccional kLeft.
+// Fill bytes distintos en cada variante para poder confirmar sin
+// ambigüedad cuál terminó activa.
+PetDefinition MakeProductionShapedDirectionalPet() {
+    PetDefinition pet;
+    pet.id = "nidir_shaped_pet";
+    pet.canvasWidth = 4;
+    pet.canvasHeight = 4;
+
+    // idle: pose base estática, right y left.
+    pet.idle.kind = PlaybackKind::kStatic;
+    pet.idle.frames = {MakeFrame(4, 4, 0x01)};
+    DirectionalAnimationOverride idleLeft;
+    idleLeft.direction = Direction::kLeft;
+    idleLeft.animation.kind = PlaybackKind::kStatic;
+    idleLeft.animation.frames = {MakeFrame(4, 4, 0x02)};
+    pet.idleDirectionOverrides = {idleLeft};
+
+    // click_reaction: one-shot, right y left.
+    pet.clickReaction.kind = PlaybackKind::kOneShot;
+    pet.clickReaction.returnsToIdle = true;
+    pet.clickReaction.frames = {MakeFrame(4, 4, 0x10), MakeFrame(4, 4, 0x11)};
+    pet.clickReaction.fps = 0;
+    pet.clickReaction.frames[0].durationMs = 50.0;
+    pet.clickReaction.frames[1].durationMs = 50.0;
+    DirectionalAnimationOverride clickLeft;
+    clickLeft.direction = Direction::kLeft;
+    clickLeft.animation.kind = PlaybackKind::kOneShot;
+    clickLeft.animation.returnsToIdle = true;
+    clickLeft.animation.frames = {MakeFrame(4, 4, 0x20), MakeFrame(4, 4, 0x21)};
+    clickLeft.animation.frames[0].durationMs = 50.0;
+    clickLeft.animation.frames[1].durationMs = 50.0;
+    pet.clickReactionDirectionOverrides = {clickLeft};
+
+    // passive_actions[0]: one-shot esporádico (la animación de idle
+    // real), right y left.
+    AnimationDefinition passiveRight;
+    passiveRight.kind = PlaybackKind::kOneShot;
+    passiveRight.returnsToIdle = true;
+    passiveRight.frames = {MakeFrame(4, 4, 0x30), MakeFrame(4, 4, 0x31)};
+    passiveRight.frames[0].durationMs = 50.0;
+    passiveRight.frames[1].durationMs = 50.0;
+    pet.passiveActions = {passiveRight};
+
+    PassiveActionDirectionalOverride passiveLeft;
+    passiveLeft.passiveActionIndex = 0;
+    passiveLeft.direction = Direction::kLeft;
+    passiveLeft.animation.kind = PlaybackKind::kOneShot;
+    passiveLeft.animation.returnsToIdle = true;
+    passiveLeft.animation.frames = {MakeFrame(4, 4, 0x40), MakeFrame(4, 4, 0x41)};
+    passiveLeft.animation.frames[0].durationMs = 50.0;
+    passiveLeft.animation.frames[1].durationMs = 50.0;
+    pet.passiveActionDirectionOverrides = {passiveLeft};
+
     return pet;
 }
 
@@ -199,6 +262,137 @@ bool HitMaskDimensionsStayConsistentAcrossDirectionSwitch() {
     return true;
 }
 
+bool ResolveClickReactionReturnsCanonicalForRight() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    NIMVLETS_CHECK(&ResolveClickReaction(pet, Direction::kRight) == &pet.clickReaction);
+    return true;
+}
+
+bool ResolveClickReactionReturnsOverrideForLeftWhenPresent() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    const AnimationDefinition& resolved = ResolveClickReaction(pet, Direction::kLeft);
+    NIMVLETS_CHECK(&resolved == &pet.clickReactionDirectionOverrides[0].animation);
+    NIMVLETS_CHECK(resolved.frames[0].pixels[0] == 0x20);
+    return true;
+}
+
+bool ResolveClickReactionFallsBackWhenDirectionMissing() {
+    const PetDefinition pet = MakeNonDirectionalPet();  // sin clickReactionDirectionOverrides
+    NIMVLETS_CHECK(&ResolveClickReaction(pet, Direction::kLeft) == &pet.clickReaction);
+    return true;
+}
+
+bool ResolvePassiveActionReturnsCanonicalForRight() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    NIMVLETS_CHECK(&ResolvePassiveAction(pet, 0, Direction::kRight) == &pet.passiveActions[0]);
+    return true;
+}
+
+bool ResolvePassiveActionReturnsOverrideForLeftWhenPresent() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    const AnimationDefinition& resolved = ResolvePassiveAction(pet, 0, Direction::kLeft);
+    NIMVLETS_CHECK(&resolved == &pet.passiveActionDirectionOverrides[0].animation);
+    NIMVLETS_CHECK(resolved.frames[0].pixels[0] == 0x40);
+    return true;
+}
+
+bool ResolvePassiveActionFallsBackWhenDirectionMissing() {
+    PetDefinition pet = MakeNonDirectionalPet();
+    pet.passiveActions = {AnimationDefinition{}};
+    pet.passiveActions[0].kind = PlaybackKind::kOneShot;
+    pet.passiveActions[0].frames = {MakeFrame(4, 4, 0x99)};
+    NIMVLETS_CHECK(&ResolvePassiveAction(pet, 0, Direction::kLeft) == &pet.passiveActions[0]);
+    return true;
+}
+
+// "static base state has no animation-frame deadline" (independiente
+// de la dirección activa) -- el requisito central de la corrección de
+// semántica de este bloque: la pose base NUNCA debe tener ningún
+// deadline de frame, sin importar qué dirección esté activa.
+bool StaticBaseHasNoFrameDeadlineRegardlessOfDirection() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    AnimationController controllerRight(pet);
+    NIMVLETS_CHECK(!controllerRight.NextFrameDeadlineMs().has_value());
+    NIMVLETS_CHECK(!controllerRight.Advance(1'000'000.0));  // ni un salto de tiempo enorme cambia nada
+
+    AnimationController controllerLeft(pet);
+    controllerLeft.SetDirection(Direction::kLeft, 0.0);
+    NIMVLETS_CHECK(!controllerLeft.NextFrameDeadlineMs().has_value());
+    NIMVLETS_CHECK(!controllerLeft.Advance(1'000'000.0));
+    return true;
+}
+
+// "periodic idle is one-shot": la acción pasiva esporádica de Nidir
+// nunca debe ser PlaybackKind::kLoop -- ver docs/DECISION_LOG.md, la
+// corrección de semántica de este bloque.
+bool PeriodicIdleIsClassifiedAsOneShotNotLoop() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    NIMVLETS_CHECK(pet.passiveActions[0].kind == PlaybackKind::kOneShot);
+    NIMVLETS_CHECK(pet.passiveActionDirectionOverrides[0].animation.kind == PlaybackKind::kOneShot);
+    return true;
+}
+
+// "click-fire uses the directional resolver when triggered" +
+// "right/left click-fire resolution" (block brief §9/§7).
+bool ClickReactionUsesDirectionalOverrideWhenTriggered() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    AnimationController controller(pet);
+    controller.SetDirection(Direction::kLeft, 0.0);
+    controller.TriggerClick(0.0);
+    NIMVLETS_CHECK(controller.State() == ControllerState::kClickReaction);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.clickReactionDirectionOverrides[0].animation.frames[0]);
+    return true;
+}
+
+// "click-fire is one-shot" + "click-fire returns to static base":
+// avanzar más allá de la duración completa del click reaction vuelve
+// a la pose base ESTÁTICA correcta para la dirección activa.
+bool ClickReactionReturnsToStaticBaseAfterCompleting() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    AnimationController controller(pet);
+    controller.SetDirection(Direction::kLeft, 0.0);
+    controller.TriggerClick(0.0);
+    NIMVLETS_CHECK(controller.Advance(100.0));  // 2 frames @ 50ms = 100ms, termina justo
+    NIMVLETS_CHECK(controller.State() == ControllerState::kIdle);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.idleDirectionOverrides[0].animation.frames[0]);  // base estática LEFT
+    NIMVLETS_CHECK(!controller.NextFrameDeadlineMs().has_value());  // de vuelta a estático, sin deadline
+    return true;
+}
+
+// "periodic idle returns to static base": mismo contrato que el click
+// reaction, para la acción pasiva esporádica.
+bool PeriodicIdleReturnsToStaticBaseAfterCompleting() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    AnimationController controller(pet);
+    controller.TriggerPassiveAction(0, 0.0);
+    NIMVLETS_CHECK(controller.State() == ControllerState::kPassiveAction);
+    NIMVLETS_CHECK(controller.Advance(100.0));  // 2 frames @ 50ms
+    NIMVLETS_CHECK(controller.State() == ControllerState::kIdle);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.idle.frames[0]);  // base estática RIGHT (default)
+    NIMVLETS_CHECK(!controller.NextFrameDeadlineMs().has_value());
+    return true;
+}
+
+// "click interrupts periodic idle cleanly" + vuelve a la base estática
+// después -- combina ambos contratos en una sola secuencia realista.
+bool ClickInterruptsPeriodicIdleAndReturnsToStaticBaseAfterward() {
+    const PetDefinition pet = MakeProductionShapedDirectionalPet();
+    AnimationController controller(pet);
+    controller.TriggerPassiveAction(0, 0.0);
+    NIMVLETS_CHECK(controller.State() == ControllerState::kPassiveAction);
+    controller.Advance(25.0);  // a mitad de camino, todavía frame 0
+
+    controller.TriggerClick(30.0);
+    NIMVLETS_CHECK(controller.State() == ControllerState::kClickReaction);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.clickReaction.frames[0]);  // click, no el resto de la pasiva
+
+    NIMVLETS_CHECK(controller.Advance(130.0));  // 2 frames @ 50ms desde t=30 => termina en t=130
+    NIMVLETS_CHECK(controller.State() == ControllerState::kIdle);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.idle.frames[0]);
+    NIMVLETS_CHECK(!controller.NextFrameDeadlineMs().has_value());
+    return true;
+}
+
 }  // namespace
 
 void RegisterDirectionTests(testing::TestRunner& runner) {
@@ -211,6 +405,18 @@ void RegisterDirectionTests(testing::TestRunner& runner) {
     runner.Add("Direction/SetDirectionDuringClickReactionIsDeferred", SetDirectionDuringClickReactionIsDeferred);
     runner.Add("Direction/RepeatedDirectionChangesDoNotAccumulateState", RepeatedDirectionChangesDoNotAccumulateState);
     runner.Add("Direction/HitMaskDimensionsStayConsistentAcrossDirectionSwitch", HitMaskDimensionsStayConsistentAcrossDirectionSwitch);
+    runner.Add("Direction/ResolveClickReactionReturnsCanonicalForRight", ResolveClickReactionReturnsCanonicalForRight);
+    runner.Add("Direction/ResolveClickReactionReturnsOverrideForLeftWhenPresent", ResolveClickReactionReturnsOverrideForLeftWhenPresent);
+    runner.Add("Direction/ResolveClickReactionFallsBackWhenDirectionMissing", ResolveClickReactionFallsBackWhenDirectionMissing);
+    runner.Add("Direction/ResolvePassiveActionReturnsCanonicalForRight", ResolvePassiveActionReturnsCanonicalForRight);
+    runner.Add("Direction/ResolvePassiveActionReturnsOverrideForLeftWhenPresent", ResolvePassiveActionReturnsOverrideForLeftWhenPresent);
+    runner.Add("Direction/ResolvePassiveActionFallsBackWhenDirectionMissing", ResolvePassiveActionFallsBackWhenDirectionMissing);
+    runner.Add("Direction/StaticBaseHasNoFrameDeadlineRegardlessOfDirection", StaticBaseHasNoFrameDeadlineRegardlessOfDirection);
+    runner.Add("Direction/PeriodicIdleIsClassifiedAsOneShotNotLoop", PeriodicIdleIsClassifiedAsOneShotNotLoop);
+    runner.Add("Direction/ClickReactionUsesDirectionalOverrideWhenTriggered", ClickReactionUsesDirectionalOverrideWhenTriggered);
+    runner.Add("Direction/ClickReactionReturnsToStaticBaseAfterCompleting", ClickReactionReturnsToStaticBaseAfterCompleting);
+    runner.Add("Direction/PeriodicIdleReturnsToStaticBaseAfterCompleting", PeriodicIdleReturnsToStaticBaseAfterCompleting);
+    runner.Add("Direction/ClickInterruptsPeriodicIdleAndReturnsToStaticBaseAfterward", ClickInterruptsPeriodicIdleAndReturnsToStaticBaseAfterward);
 }
 
 }  // namespace nimvlets::tests

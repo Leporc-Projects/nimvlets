@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Tests puros (stdlib `unittest`, sin dependencias de terceros) para
 la lógica de tools/ que Block 04.2 agrega: espejado horizontal
-(`prep_dev_sprite.mirror_rgba_horizontal`) y validación de secuencias
-de frames (`validate_frame_sequence.validate_frame_sequence`).
+(`prep_dev_sprite.mirror_rgba_horizontal`), validación de secuencias
+de frames (`validate_frame_sequence.validate_frame_sequence`), y --
+agregado en la segunda pasada de este bloque -- la política genérica
+de canvas lógico (`prep_dev_sprite.compute_logical_canvas_size`) y el
+downscale opcional de runtime (`prep_dev_sprite.resize_rgba_nearest`).
 
 Estos NO corren a través de `ctest` -- este repositorio no tiene
 (todavía) ninguna integración de tests Python en CI/CTest, y este
@@ -100,6 +103,102 @@ class MirrorHorizontalTest(unittest.TestCase):
     def test_rejects_wrong_buffer_size(self) -> None:
         with self.assertRaises(ValueError):
             prep_dev_sprite.mirror_rgba_horizontal(4, 4, b"\x00" * 10)
+
+
+class LogicalCanvasSizeTest(unittest.TestCase):
+    """`prep_dev_sprite.compute_logical_canvas_size()` -- la política
+    genérica de tamaño de canvas lógico (Block 04.2, segunda pasada,
+    DEC-045). Corresponde al item del brief "generic display sizing
+    keeps render and hit-mask dimensions consistent": estos tests
+    cubren la función pura que produce ese tamaño; la consistencia
+    render/hit-mask en sí ya está cubierta del lado C++ por
+    tests/DirectionTest.cpp (`HitMaskDimensionsStayConsistentAcrossDirectionSwitch`),
+    ya que ambos caminos leen el mismo `canvasWidth/canvasHeight`."""
+
+    def test_bunny_reference_size_is_unchanged(self) -> None:
+        # Sanity check explícito: la convención ya establecida de Bunny
+        # (160x160, cuadrado) debe seguir devolviendo exactamente
+        # 160x160 -- si esto cambiara, Bunny se vería afectado.
+        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(160, 160), (160, 160))
+
+    def test_wide_native_resolution_scales_longer_edge_to_reference(self) -> None:
+        # 513x525 (nativo real de Nidir) -> el lado más largo (525)
+        # queda en 160, el otro se escala proporcionalmente.
+        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(513, 525)
+        self.assertEqual(canvas_height, 160)
+        self.assertEqual(canvas_width, 156)
+
+    def test_aspect_ratio_is_preserved_within_rounding(self) -> None:
+        native_width, native_height = 800, 400
+        canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height)
+        native_ratio = native_width / native_height
+        canvas_ratio = canvas_width / canvas_height
+        self.assertAlmostEqual(native_ratio, canvas_ratio, delta=0.01)
+
+    def test_custom_reference_size_is_honored(self) -> None:
+        self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(200, 100, reference_size=100), (100, 50))
+
+    def test_result_is_deterministic(self) -> None:
+        first = prep_dev_sprite.compute_logical_canvas_size(513, 525)
+        second = prep_dev_sprite.compute_logical_canvas_size(513, 525)
+        self.assertEqual(first, second)
+
+    def test_rejects_non_positive_dimensions(self) -> None:
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compute_logical_canvas_size(0, 100)
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compute_logical_canvas_size(100, -1)
+
+
+class ResizeRgbaNearestTest(unittest.TestCase):
+    """`prep_dev_sprite.resize_rgba_nearest()` -- el downscale opcional
+    de runtime en tiempo de compilación (Block 04.2, segunda pasada,
+    DEC-046). Cubre "mirror preserves alpha"-equivalente para el
+    downscale: dimensiones de salida correctas y alpha preservado sin
+    corromperse por el resampling."""
+
+    def test_output_has_requested_dimensions(self) -> None:
+        pixels = _solid_frame(8, 8, (10, 20, 30), (2, 2, 6, 6))
+        resized = prep_dev_sprite.resize_rgba_nearest(8, 8, pixels, 4, 4)
+        self.assertEqual(len(resized), 4 * 4 * 4)
+
+    def test_upscale_and_downscale_are_both_supported(self) -> None:
+        pixels = _solid_frame(4, 4, (1, 2, 3), (1, 1, 3, 3))
+        smaller = prep_dev_sprite.resize_rgba_nearest(4, 4, pixels, 2, 2)
+        larger = prep_dev_sprite.resize_rgba_nearest(4, 4, pixels, 8, 8)
+        self.assertEqual(len(smaller), 2 * 2 * 4)
+        self.assertEqual(len(larger), 8 * 8 * 4)
+
+    def test_identity_resize_preserves_pixels_exactly(self) -> None:
+        pixels = _solid_frame(5, 5, (42, 84, 126), (1, 1, 4, 4))
+        resized = prep_dev_sprite.resize_rgba_nearest(5, 5, pixels, 5, 5)
+        self.assertEqual(resized, pixels)
+
+    def test_alpha_channel_survives_downscale_without_corruption(self) -> None:
+        # 16x16, mitad opaca / mitad transparente -- confirma que el
+        # downscale no introduce alpha "intermedio" inventado (nearest-
+        # neighbor nunca promedia, a diferencia de un resize bilinear):
+        # todo pixel de salida debe tener alpha exactamente 0 o 255,
+        # nunca un valor fantasma entre medio.
+        pixels = _solid_frame(16, 16, (200, 100, 50), (0, 0, 16, 8))
+        resized = prep_dev_sprite.resize_rgba_nearest(16, 16, pixels, 4, 4)
+        alphas = {resized[i] for i in range(3, len(resized), 4)}
+        self.assertTrue(alphas.issubset({0, 255}))
+
+    def test_result_is_deterministic(self) -> None:
+        pixels = _solid_frame(10, 10, (5, 6, 7), (2, 2, 8, 8))
+        first = prep_dev_sprite.resize_rgba_nearest(10, 10, pixels, 4, 4)
+        second = prep_dev_sprite.resize_rgba_nearest(10, 10, pixels, 4, 4)
+        self.assertEqual(first, second)
+
+    def test_rejects_wrong_buffer_size(self) -> None:
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.resize_rgba_nearest(4, 4, b"\x00" * 10, 2, 2)
+
+    def test_rejects_non_positive_target_dimensions(self) -> None:
+        pixels = _solid_frame(4, 4, (1, 2, 3), (0, 0, 4, 4))
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.resize_rgba_nearest(4, 4, pixels, 0, 4)
 
 
 class FrameSequenceValidationTest(unittest.TestCase):

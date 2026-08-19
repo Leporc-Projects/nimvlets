@@ -36,6 +36,10 @@ constexpr const char* kDevSwitchTestCountEnvVar = "NIMVLETS_DEV_SWITCH_TEST_COUN
 // SpikeApp::RunDevDirectionSmokeTestIfRequested().
 constexpr const char* kDevDirectionTestCountEnvVar = "NIMVLETS_DEV_DIRECTION_TEST_COUNT";
 
+// Lee NIMVLETS_DEV_CLICK_TEST_COUNT — ver el comentario de
+// SpikeApp::RunDevClickSmokeTestIfRequested().
+constexpr const char* kDevClickTestCountEnvVar = "NIMVLETS_DEV_CLICK_TEST_COUNT";
+
 // Identifica el directorio de app-data por usuario que resuelve
 // SDL_GetPrefPath() (ver docs/PERSISTENCE.md, "política de ubicación
 // de almacenamiento"). "org" coincide con el "built by Leporc
@@ -565,6 +569,39 @@ void SpikeApp::RunDevDirectionSmokeTestIfRequested() {
     SDL_Log("nimvlets: DEV direction smoke test complete — %zu direction change(s) requested", count);
 }
 
+void SpikeApp::RunDevClickSmokeTestIfRequested() {
+    const char* countEnv = std::getenv(kDevClickTestCountEnvVar);
+    if (countEnv == nullptr || countEnv[0] == '\0') {
+        return;  // sin la variable de entorno, esto es un no-op total
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(countEnv, &end, 10);
+    if (end == countEnv || parsed <= 0) {
+        SDL_Log("nimvlets: %s='%s' is not a valid positive integer; ignoring", kDevClickTestCountEnvVar, countEnv);
+        return;
+    }
+    const auto count = static_cast<std::size_t>(parsed);
+
+    SDL_Log("nimvlets: DEV click smoke test active — %s=%zu", kDevClickTestCountEnvVar, count);
+
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    for (std::size_t i = 0; i < count; ++i) {
+        // Mismo conteo incondicional que un click real de mouse (ver
+        // HandleEvent()) -- clickCount_/appState_.clickBalance suben
+        // en cada uno, aunque TriggerClick() en sí coalesque mientras
+        // ya está reproduciendo (mismo comportamiento ya testeado en
+        // tests/ClickAccountingTest.cpp).
+        ++clickCount_;
+        ++appState_.clickBalance;
+        persistenceScheduler_.MarkDirty(nowMs);
+        animController_->TriggerClick(nowMs);
+    }
+    needsRedraw_ = true;
+
+    SDL_Log("nimvlets: DEV click smoke test complete — %zu click(s) requested", count);
+}
+
 void SpikeApp::Shutdown() {
     // Flushea primero, antes de desmontar cualquier otra cosa — ver el
     // comentario de FlushPersistedState(): el shutdown limpio siempre
@@ -851,6 +888,13 @@ int SpikeApp::Run() {
     // Idem para NIMVLETS_DEV_DIRECTION_TEST_COUNT (Block 04.2) — ver el
     // comentario del método.
     RunDevDirectionSmokeTestIfRequested();
+
+    // Idem para NIMVLETS_DEV_CLICK_TEST_COUNT (Block 04.2, segunda
+    // pasada) — ver el comentario del método. Corre último a
+    // propósito: si tanto un switch/dirección como un click DEV están
+    // pedidos en la misma corrida, el click actúa sobre el pet/
+    // dirección ya resueltos por los dos anteriores.
+    RunDevClickSmokeTestIfRequested();
 
     bool running = true;
 
