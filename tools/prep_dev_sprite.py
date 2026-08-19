@@ -18,6 +18,11 @@ derived frames as real PNG files, so the pipeline documented in
 docs/ANIMATION_RUNTIME.md is exercised with genuine PNG input end to
 end, not an in-memory shortcut.
 
+Block 04.2 adds `mirror_rgba_horizontal()`, reused by
+tools/generate_nidir_pack.py to derive Nidir's "left" idle frames from
+its real "right" idle frames by deterministic horizontal flip (never
+AI-regenerated) -- see docs/NIDIR_CONTENT.md.
+
 This file's own CLI entry point (`main()`, below) is a one-time,
 offline prep step for temporary QA/dev fixtures — not a runtime tool,
 not part of any content pipeline (see docs/PET_CONTENT_SPEC.md, still
@@ -110,6 +115,35 @@ def read_png_rgba(path: str) -> tuple[int, int, bytes]:
         prev = line
 
     return width, height, bytes(out)
+
+
+def mirror_rgba_horizontal(width: int, height: int, pixels: bytes) -> bytes:
+    """Espeja horizontalmente un buffer RGBA8 (mismo layout que
+    read_png_rgba/write_png_rgba: row-major, top-to-bottom, alpha
+    directo) -- invierte el orden de columnas en cada fila, pixel por
+    pixel completo (los 4 canales RGBA se mueven juntos, así que el
+    canal alpha se preserva exactamente, nunca se recalcula ni se
+    aproxima). Usado por tools/generate_nidir_pack.py (Block 04.2) para
+    derivar los frames "left" a partir de los frames "right" reales de
+    forma determinista, sin IA y sin ninguna otra transformación (ver
+    block brief §3: "Do not use AI to regenerate the left side").
+
+    Determinista y sin pérdida: espejar dos veces devuelve el buffer
+    original byte a byte (ver tools/test_asset_pipeline.py)."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(f"mirror_rgba_horizontal: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8")
+
+    stride = width * 4
+    out = bytearray(len(pixels))
+    for y in range(height):
+        row_start = y * stride
+        row = pixels[row_start : row_start + stride]
+        for x in range(width):
+            src_off = x * 4
+            dst_x = width - 1 - x
+            dst_off = dst_x * 4
+            out[row_start + dst_off : row_start + dst_off + 4] = row[src_off : src_off + 4]
+    return bytes(out)
 
 
 def write_raw_rgba(path: str, width: int, height: int, pixels: bytes) -> None:

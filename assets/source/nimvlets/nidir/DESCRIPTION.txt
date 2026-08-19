@@ -1,0 +1,79 @@
+NIDIR — Descripción física de referencia
+=========================================
+
+Este documento registra únicamente los rasgos físicos ESTABLES de
+Nidir: lo que debe preservarse sin cambios accidentales en cualquier
+generación, edición o extensión futura de su arte (nuevas poses,
+nuevas animaciones, nuevas direcciones). No es una ficha de producto
+ni de personalidad — ver docs/PET_CONTENT_SPEC.md y docs/PRD_V1.md
+para eso. No documenta procedencia/herramientas (ver
+assets/source/nimvlets/README.md, sección "Provenance record", si
+algún día se agrega un provenance.json para Nidir).
+
+Especie / identidad
+--------------------
+- Dragón negro (black dragon).
+- Diseño de estilo "chibi": proporciones compactas, cabeza grande
+  relativa al cuerpo, postura sentada/en cuclillas.
+- Género: masculino.
+
+Rasgos físicos estables (no deben cambiar entre generaciones/ediciones)
+------------------------------------------------------------------------
+- Rasgos faciales marcados y angulosos: ceja/cresta pronunciada sobre
+  los ojos, hocico corto y anguloso, expresión seria por defecto.
+- Cuerpo robusto y compacto (sturdy, compact body) — no un dragón
+  esbelto/estilizado.
+- Escamas de color negro / carbón oscuro (dark charcoal/black), con
+  reflejos gris-azulados sutiles en los bordes de las escamas y en las
+  membranas de las alas — nunca un negro completamente plano sin
+  ningún matiz.
+- Ojos violeta/púrpura (violet/purple), claramente luminosos/vívidos
+  en contraste con las escamas oscuras — el rasgo de color más
+  distintivo de Nidir.
+- Dos colas (two tails). Nota honesta: en el material de referencia
+  actual (master.png y la animación idle-right importada en este
+  bloque) solo se ve UNA cola con claridad, por el ángulo de la pose
+  (sentado, en tres cuartos) — la segunda cola se asume oculta detrás
+  del cuerpo/ala en este ángulo específico, no ausente. Cualquier
+  generación futura desde un ángulo donde ambas colas sean visibles
+  debe mostrar las dos.
+- Alas de dragón (membranosas, tipo murciélago), visibles y
+  desplegadas en la pose de referencia.
+- Cuernos/púas (horns/spikes): un par de cuernos curvos en la parte
+  superior de la cabeza, más una hilera de púas/escamas erizadas
+  bajando por la nuca (una cresta tipo "melena" de escamas puntiagudas,
+  no pelo).
+- Expresión confiada (confident expression) — mirada firme, no tímida
+  ni asustadiza, incluso en el diseño "tierno"/chibi.
+
+Dirección canónica actual en el master
+----------------------------------------
+`master.png` (la imagen de referencia estática) muestra a Nidir en una
+pose sentada, de frente/tres-cuartos, sin un perfil estrictamente
+izquierdo o derecho. La animación idle importada en este bloque
+(`animations/idle/right/`) SÍ tiene una orientación definida: el hocico
+apunta hacia la izquierda de la imagen, con el cuerpo girado en tres
+cuartos de modo que el flanco derecho de Nidir (su ala más grande y
+visible) queda hacia el espectador. Esta es la dirección que este
+bloque trata como "right" (ver docs/NIDIR_CONTENT.md) — coincide con el
+nombre que el propio export de Ludo.ai ya traía
+("nidir-idle-right"), no es una inferencia hecha por este documento.
+`animations/idle/left/` (generado en este bloque por espejado
+horizontal determinista — ver docs/NIDIR_CONTENT.md) es exactamente el
+reflejo de esa misma pose, nunca una generación nueva.
+
+Invariantes visuales que nunca deben cambiar por accidente
+-------------------------------------------------------------
+- El color de ojos (violeta/púrpura) no debe derivar a otro tono
+  (azul, rojo, dorado) en ninguna generación futura.
+- La paleta de escamas se mantiene en la familia negro/carbón oscuro —
+  no debe aclararse a un gris medio ni recibir un tinte de color
+  distinto (verde, marrón, etc.).
+- El par de cuernos y la cresta de púas de la nuca deben conservar su
+  forma curva característica — no deben convertirse en cuernos rectos
+  ni desaparecer.
+- Las proporciones "chibi" (cabeza grande, cuerpo compacto) deben
+  preservarse — no derivar hacia un dragón adulto de proporciones
+  realistas.
+- El número de colas (dos) es un dato fijo de diseño aunque no siempre
+  sea visible en una pose dada (ver arriba).
