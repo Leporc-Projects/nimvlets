@@ -119,6 +119,23 @@ struct PassiveActionDirectionalOverride {
 // govern them. One logical Nimvlet — `variantGroup` exists so a future
 // block can express "Frin has male/female variants" in data, without
 // implementing selection/unlocking here (see docs/DECISION_LOG.md).
+// AVISO para quien agregue una colección de animaciones nueva acá
+// (idle/clickReaction/passiveActions y sus respectivos overrides
+// direccionales YA existentes son todas las que hay hoy): cada
+// colección de frames de este struct debe estar cubierta tanto por
+// `SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()`
+// (src/app/SpikeApp.cpp) como por cualquier futuro camino de
+// carga/descarga de texturas -- una colección nueva que se olvide ahí
+// se resuelve correctamente en `AnimationController` (los `Resolve*()`
+// de este archivo no tienen ningún problema) pero se renderiza
+// completamente transparente en runtime, en silencio (sin crash, sin
+// error visible más allá de un log de advertencia en
+// `SpikeApp::RenderFrame()`). Esto fue un bug real, no hipotético:
+// `clickReactionDirectionOverrides`/`passiveActionDirectionOverrides`
+// (agregados en la segunda pasada de Block 04.2) faltaban en
+// `AttachAllTextures()`/`ReleaseAllTextures()` hasta que se detectó al
+// importar el click-fire real de Nidir en la tercera pasada -- ver
+// docs/NIDIR_CONTENT.md, "bug de cobertura de texturas".
 struct PetDefinition {
     std::string id;
     std::string displayName;

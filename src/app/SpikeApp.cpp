@@ -157,8 +157,28 @@ void SpikeApp::AttachAllTextures() {
         attach(override_.animation);
     }
     attach(pet_.clickReaction);
+    // Overrides direccionales de clickReaction/passiveActions (Block
+    // 04.2, segunda pasada -- ver ResolveClickReaction()/
+    // ResolvePassiveAction()) faltaban acá: sin esto, un click o una
+    // acción pasiva reproducidos en dirección "left" (o cualquier
+    // dirección no canónica) resolvían correctamente el override en
+    // AnimationController, pero sus frames nunca tenían una textura
+    // adjunta -- RenderFrame() los dibuja como completamente
+    // transparentes (frame.rendererHandle == nullptr), un bug real y
+    // silencioso (el pet "desaparece" durante esa reproducción) recién
+    // detectado al importar el click-fire real de Nidir en la tercera
+    // pasada de este bloque. El hit-mask no se veía afectado (usa
+    // frame.pixels directamente, no la textura), así que el
+    // click-through seguía siendo correcto -- solo el render era el
+    // problema.
+    for (content::DirectionalAnimationOverride& override_ : pet_.clickReactionDirectionOverrides) {
+        attach(override_.animation);
+    }
     for (content::AnimationDefinition& passive : pet_.passiveActions) {
         attach(passive);
+    }
+    for (content::PassiveActionDirectionalOverride& override_ : pet_.passiveActionDirectionOverrides) {
+        attach(override_.animation);
     }
 }
 
@@ -173,8 +193,16 @@ void SpikeApp::ReleaseAllTextures() {
         release(override_.animation);
     }
     release(pet_.clickReaction);
+    // Simétrico al fix de AttachAllTextures() de arriba -- liberar
+    // exactamente lo que se adjuntó, ni más ni menos.
+    for (content::DirectionalAnimationOverride& override_ : pet_.clickReactionDirectionOverrides) {
+        release(override_.animation);
+    }
     for (content::AnimationDefinition& passive : pet_.passiveActions) {
         release(passive);
+    }
+    for (content::PassiveActionDirectionalOverride& override_ : pet_.passiveActionDirectionOverrides) {
+        release(override_.animation);
     }
 }
 
@@ -637,6 +665,19 @@ void SpikeApp::RenderFrame() {
     if (texture != nullptr) {
         const SDL_FRect dst{0.0f, 0.0f, static_cast<float>(pet_.canvasWidth), static_cast<float>(pet_.canvasHeight)};
         SDL_RenderTexture(renderer_, texture, nullptr, &dst);
+    } else if (!frame.pixels.empty()) {
+        // Diagnóstico defensivo (Block 04.2, tercera pasada): un frame
+        // con pixels reales pero sin textura adjunta es siempre un bug
+        // de cobertura en AttachAllTextures() (ver su comentario), no
+        // un estado válido -- se renderizaría completamente
+        // transparente en silencio si no se loguea. No es spam en la
+        // práctica: RenderFrame() solo corre cuando needsRedraw_ está
+        // activo (event-driven, ver el loop principal), nunca en un
+        // tick fijo.
+        SDL_Log(
+            "nimvlets: RenderFrame: current frame (%dx%d) has pixel data but no attached texture -- "
+            "rendering fully transparent; check AttachAllTextures() coverage",
+            frame.width, frame.height);
     }
     SDL_RenderPresent(renderer_);
 }
