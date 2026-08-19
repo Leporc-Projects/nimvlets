@@ -1218,3 +1218,136 @@ producto real para este pet específico. Cambio de un solo valor en
 `tools/generate_nidir_pack.py`; ningún mecanismo nuevo (el campo, su
 override solo-DEV, y el scheduler que lo lee vienen sin cambios desde
 Block 02/04.2). Bunny no se ve afectado (manifest independiente).
+
+---
+
+### DEC-054 — Doble-present + redraw de confirmación programado, corrigiendo el sprite parcial tras un cambio de dirección
+**Status:** DECIDIDO (diagnóstico + mitigación, no confirmado
+visualmente en este entorno) · Block 04.3, corrección post-QA — ver
+`docs/NIDIR_CONTENT.md` §15.
+
+QA manual real encontró un bug reproducible: al cruzar el punto medio
+de pantalla arrastrando Nidir, el sprite estático recién mostrado a
+veces aparecía parcial/corrupto; reproducir cualquier animación después
+lo arreglaba. Se inspeccionó el camino completo antes de tocar código:
+`AnimationController::SetDirection()` (correcto, sin cambios),
+cobertura de texturas (correcta, ya arreglada en Block 04.2), y --
+leyendo directamente la fuente pineada de SDL 3.4.12
+(`SDL_cocoashape.m`) -- se confirmó que `SDL_SetWindowShape()` en
+macOS únicamente actualiza `NSWindow.ignoresMouseEvents`, nunca
+compone/recorta pixeles, descartando ese mecanismo como causa posible
+por diseño (reconfirma DEC-017). Con la lógica de contenido descartada,
+la explicación mejor sustentada por el patrón reportado (un present
+frío incompleto, presentes repetidos lo arreglan) es una clase conocida
+de problema macOS/Metal: un `SDL_RenderPresent()` tras un período largo
+sin presentar (este runtime es deliberadamente event/deadline-driven,
+puede estar minutos sin renderizar) puede mostrar un drawable de
+`CAMetalLayer` todavía no asentado en su rotación de buffers.
+
+Corrección genérica (aplica a cualquier pet/redraw, no solo Nidir):
+`SpikeApp::RenderFrame()` presenta el mismo contenido dos veces
+seguidas; un cambio de dirección que sí cambia el frame mostrado
+además arma `confirmRedrawDeadlineMs_`, forzando un SEGUNDO redraw
+completo ~120ms después, con separación real de wall-clock -- la
+corrección no depende de que una animación futura "arregle" el estado
+por casualidad (instrucción explícita del brief). Verificado
+mecánicamente contra un build Debug (tres redraws reales del mismo
+frame, separados en el tiempo, confirmados vía el diagnóstico `[diag]
+animation redraw`) y con una ráfaga de 500 cambios de dirección
+automatizados contra el binario Release real (sin errores, sin
+crecimiento de RSS). **No se pudo confirmar visualmente que el bug
+reportado esté resuelto** -- este entorno no tiene forma de capturar
+pixeles realmente presentados en pantalla; queda pendiente de
+confirmación en la próxima QA manual del owner, documentado
+honestamente como limitación, no como un hecho verificado.
+
+### DEC-055 — Tamaño visual global +5%, candidato de QA reversible
+**Status:** CANDIDATO (explícitamente no una decisión de producto
+cerrada) · Block 04.3, corrección post-QA — ver
+`docs/NIDIR_CONTENT.md` §16.
+
+El owner pidió evaluar todos los Nimvlets ~5% más grandes que el
+tamaño ya confirmado bueno de Nidir. Implementado como
+`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR = 1.05`, un único valor de
+módulo aplicado automáticamente por `compute_logical_canvas_size()` a
+cualquier pet que la use (genérico -- ninguna constante propia de
+Nidir) -- multiplica el `reference_size` (160, DEC-045) antes de
+derivar el canvas lógico final, después del canvas de trabajo
+compartido de DEC-051, así que la relación de tamaño/encuadre relativo
+entre animaciones no se ve afectada por este factor. Resultado: Nidir
+160×157 -> 168×165; Bunny (importado en este mismo bloque, DEC-056)
+122×160 -> 128×168. Revertir es cambiar un único valor a `1.0` y
+volver a correr los `generate_<pet>_pack.py` -- ningún otro cambio de
+código. El parámetro `scale_factor` de la función sigue permitiendo
+pasar `1.0` explícitamente (usado por los tests que verifican la
+matemática de aspect ratio en sí, independiente del candidato vigente).
+
+### DEC-056 — Migración de Bunny a assets reales, segunda validación del pipeline genérico
+**Status:** DECIDIDO · Block 04.3, corrección post-QA — ver
+`docs/BUNNY_CONTENT.md`.
+
+El owner exportó el idle y click reales de Bunny
+(`local_imports/bunny/`), migrándolo del fixture sintético de Block
+01/02 (`tools/generate_bunny_dev_pack.py`) a contenido real, usando el
+MISMO pipeline genérico construido para Nidir sin ningún cambio de
+runtime ni rama de código por pet -- la validación real de que
+`normalize_visual_scale`/`compute_frame_normalization_plan()`/el
+formato NVPACK1 de tres secciones son genuinamente genéricos, no solo
+"funcionan para Nidir". Hallazgo real que Nidir nunca ejercitó: el
+`content_scale` de Bunny's `click_reaction` NO es 1.0 (0.9586 --
+Bunny sí tiene al personaje dibujado a una escala ligeramente distinta
+entre idle y click dentro de sus propios frames nativos), confirmando
+que la rama de reescalado de la política (no solo el posicionamiento)
+funciona correctamente con datos reales por primera vez.
+
+Detalle crítico encontrado durante la implementación: el export real
+de Bunny nombra su dirección canónica "left" (a diferencia de Nidir,
+"right") -- como `ResolveIdleAnimation()`/etc. siempre resuelven el
+campo CANÓNICO de `PetDefinition` (sin override) para
+`Direction::kRight`, wirear los frames reales "left" directamente en
+el campo canónico habría sido un bug real (Bunny se vería con la
+dirección equivocada en `kRight`, el default inicial). Corregido
+wireando el campo canónico con los frames DERIVADOS (espejados,
+"right") y el override "left" con los frames reales -- verificado
+contra el binario real y visualmente (frames real/derivado exportados
+e inspeccionados, confirmando que son espejos horizontales exactos).
+
+Migración cuidadosa de identidad: `id` se mantiene `"bunny_dev"`,
+`assets/dev/bunny_pack.nvpack` se mantiene el mismo path -- ningún
+estado persistido ni entrada de catálogo existente se rompe.
+`display_name` sí se actualizó ("Bunny (dev fixture)" -> "Bunny", solo
+una etiqueta, no una clave de identidad). `tools/generate_bunny_dev_pack.py`
+se conserva como artefacto histórico con una advertencia explícita
+agregada: correrlo ahora sobrescribiría el pack real con contenido
+sintético.
+
+Alcance deliberadamente limitado (instrucción explícita del brief): se
+integra solo lo que existe hoy (un idle, un click) -- una segunda
+animación de idle, el comportamiento ponderado 70/30, y un disparador
+por hover quedan diferidos a un futuro bloque de interacción, después
+de que exista el arte nuevo. No se diseñó de forma especulativa.
+
+### DEC-057 — Prioridad click > idle periódico: invariante ya garantizado, sin cambios necesarios
+**Status:** DECIDIDO (verificación, no un cambio) · Block 04.3,
+corrección post-QA.
+
+El brief de esta corrección pidió verificar (sin implementar el futuro
+sistema 70/30) que un idle periódico programado no pueda corromper ni
+superponerse a un click en reproducción. Revisado
+`content::AnimationController` (sin cambios): `TriggerPassiveAction()`
+tiene un guard explícito (`if (state_ != ControllerState::kIdle)
+return;`) que la vuelve un no-op completo si un click está en curso --
+nunca reemplaza `currentAnimation_` en ese caso. `SpikeApp::Run()`
+además chequea `State() == kIdle` ANTES de siquiera llamar
+`TriggerPassiveAction()` (guard redundante, doble seguro, no dañino).
+Por construcción (`currentAnimation_` es un único puntero, nunca dos
+animaciones a la vez), "renderizar concurrentemente" es estructuralmente
+imposible. Ya cubierto por tests existentes, sin cambios de este
+bloque: `AnimationControllerTest.cpp`'s `PassiveActionNeverInterruptsClickReaction`
+(un trigger de acción pasiva durante un click se ignora por completo)
+y `ClickReactionInterruptsPassiveAction`/`PassiveActionPlaysAndReturnsToIdle`
+(la dirección inversa, y que completar un one-shot siempre vuelve a un
+estado Idle coherente). Re-confirmados pasando contra el binario
+actual -- ningún cambio de `AnimationController` fue necesario ni se
+hizo, siguiendo la instrucción explícita del brief de "avoid
+unnecessary changes" cuando el invariante ya está garantizado.

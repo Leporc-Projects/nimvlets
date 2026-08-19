@@ -8,11 +8,20 @@ creatures permanently.
 Este repositorio está actualmente en **Block 04.3 — Nidir: Calidad
 Visual y Tamaño**, un bloque CORRECTIVO abierto sobre Block 04.2 —
 Nidir: Assets Reales + Pipeline de Animación Direccional (todavía sin
-mergear a main) tras encontrar problemas visuales reales en QA manual
-del owner (clipping, tamaño inconsistente entre animaciones, "sprites
-incompletos" al volver a idle) — ver `docs/NIDIR_CONTENT.md` §12–§14
-para el diagnóstico y la corrección. Construido, a su vez, sobre Block
-04.1 — Habilitación de Linux como Plataforma de Escritorio (ver
+mergear a main). Primera pasada: tras encontrar problemas visuales
+reales en QA manual del owner (clipping, tamaño inconsistente entre
+animaciones, "sprites incompletos" al volver a idle) — ver
+`docs/NIDIR_CONTENT.md` §12–§14 para el diagnóstico y la corrección.
+Segunda pasada (corrección post-QA, tras una segunda ronda de QA
+manual): un bug real de corrupción visual al cambiar de dirección
+automáticamente (ver `docs/NIDIR_CONTENT.md` §15), un candidato de
+tamaño global +5% (§16), y la migración de **Bunny** de fixture de QA
+sintético a assets reales de producción (ver
+[`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md)) — la segunda
+validación real (después de Nidir) del pipeline direccional/de
+normalización visual genérico que este bloque construyó. Construido, a
+su vez, sobre Block 04.1 — Habilitación de Linux como Plataforma de
+Escritorio (ver
 [`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04 —
 Catálogo de Pets + Switching en Runtime (ver
 [`docs/CATALOG.md`](docs/CATALOG.md)), Block 03 — Persistencia Local
@@ -25,11 +34,11 @@ data-driven — ver
 Foundation + Platform Feasibility Spike (bootstrap disciplinado del
 repo más una prueba de que el enfoque central de
 windowing/transparencia/hit-testing/drag es viable). Block 04.2
-integra **Nidir**, el primer Nimvlet con arte real de producción (no
-un fixture de QA como Bunny), y establece el contrato permanente de
-asset source para todo Nimvlet futuro: frames PNG individuales como
-fuente canónica, spritesheet como artefacto secundario, sets
-direccionales explícitos (right/left) — ver
+integra **Nidir**, el primer Nimvlet con arte real de producción (Bunny
+era, hasta Block 04.3, un fixture de QA sintético — ver más abajo), y
+establece el contrato permanente de asset source para todo Nimvlet
+futuro: frames PNG individuales como fuente canónica, spritesheet como
+artefacto secundario, sets direccionales explícitos (right/left) — ver
 [`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) para el diseño
 completo. Esto explícitamente *no* es todavía el producto
 terminado — ver [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md)
@@ -111,19 +120,25 @@ NIMVLETS_DEV_DIRECTION_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 
 This opens a small, borderless, always-on-top, transparent window
 showing whichever pet the catalog resolves as active (see
-[`docs/CATALOG.md`](docs/CATALOG.md)) — by default **Bunny**
-(160×160), a deterministically-generated DEV animation pack
-(`assets/dev/bunny_pack.nvpack`) derived from a real illustrated QA
-fixture the repository owner supplied in Block 01, *not* final content
-(see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). **Nidir**
-(160×157 logical canvas, derived from a shared content-anchored
-working canvas across its idle and click-fire animations, not just
-idle's native 513×525 art alone — see `docs/NIDIR_CONTENT.md` §12 —
-`assets/dev/nidir_pack.nvpack`) is the catalog's second, real entry
-since Block 04.2 — see
+[`docs/CATALOG.md`](docs/CATALOG.md)) — by default **Bunny** (id
+`bunny_dev`, kept unchanged for catalog/persisted-state compatibility;
+128×168 logical canvas, derived the same content-anchored way as
+Nidir — see [`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md)).
+Migrated in Block 04.3 from a synthetic Block 01/02 QA-fixture-derived
+pack to the owner's real production art (idle + click) — the OLD
+synthetic generator (`tools/generate_bunny_dev_pack.py`) is kept only
+as a historical artifact, explicitly marked "do not run" in its own
+docstring (see [`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md) for
+why). **Nidir** (168×165 logical canvas, derived from a shared
+content-anchored working canvas across its idle and click-fire
+animations, not just idle's native 513×525 art alone — see
+`docs/NIDIR_CONTENT.md` §12 — `assets/dev/nidir_pack.nvpack`) is the
+catalog's second, real entry since Block 04.2 — see
 [`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) — reachable today via
-`NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). The catalog
+`NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). Both
+pets' logical canvases include a +5% global display-size candidate
+(`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR`, Block 04.3 — see
+`docs/NIDIR_CONTENT.md` §16 for how to revert it). The catalog
 and the active pet's pack are required, not optional — if either can't
 be loaded (e.g. not run from the repo root), the app logs a specific
 error and exits rather than falling back to any placeholder; if a

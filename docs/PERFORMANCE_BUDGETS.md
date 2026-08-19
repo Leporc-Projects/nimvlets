@@ -325,3 +325,59 @@ se dispara solo ante eventos reales (`SDL_EVENT_WINDOW_MOVED`) o una
 vez en `Init()`/tras un switch, así que no se esperaba ni se midió
 ningún impacto de CPU en reposo, confirmado por el 0.0% de la fila
 "Base estática" de arriba.
+
+## Mediciones reales de Block 04.3, corrección post-QA (doble-present, +5% tamaño, Bunny real)
+
+Re-medido tras: el fix de doble-present/redraw de confirmación
+(DEC-054), el candidato de tamaño global +5% (DEC-055), y la migración
+de Bunny a assets reales (DEC-056). Mismo método (Release, arm64
+nativo, `ps -o rss,%cpu`), lanzamientos DIRECTOS al pet en cuestión
+(vía un `state.nvstate` fabricado) para evitar que un switch previo
+contamine la medición del pet en reposo (ver la nota de RSS-tras-switch
+más abajo):
+
+| Pet | Escenario | CPU | RSS (steady state) |
+|---|---|---|---|
+| Nidir | Base estática | 0.0% | ≈155.7 MB |
+| Nidir | Idle periódico activo | pico ≈2.6% | ≈155.7 MB, plano |
+| Nidir | Click-fire activo | pico ≈2.2–3.5% (excluido el primer sample, dominado por arranque) | ≈155.8 MB, plano |
+| Bunny (real) | Base estática | 0.0% | ≈138.0 MB |
+| Bunny (real) | Idle periódico activo | pico ≈2.5% | ≈137.5–138.0 MB, plano |
+| Bunny (real) | Click activo | pico ≈2.1–2.9% (excluido el primer sample) | ≈138.0 MB, plano |
+
+**Sin cambio material para Nidir** respecto a la medición anterior de
+esta misma sección (~156MB estático, picos ~2-4% durante reproducción)
+-- ni el fix de doble-present (solo agrega presents, sin costo de
+memoria) ni el candidato +5% (el canvas de trabajo y el límite de
+`runtime_max_frame_dimension` no cambian, solo el tamaño LÓGICO en
+puntos) tenían por qué moverlo, y no lo hicieron.
+
+**Bunny real (~138MB estático) reemplaza al fixture sintético anterior
+(~73-74MB)** -- un aumento esperado y proporcional: el fixture
+sintético tenía 7 frames derivados de una sola imagen; el contenido
+real trae 50 frames genuinamente distintos (25 idle + 25 click, cada
+uno con su propia dirección espejada) en dos animaciones completas,
+mucho más comparable en volumen al de Nidir que al fixture anterior.
+
+**Hallazgo honesto sobre RSS post-switch:** un lanzamiento DIRECTO a
+Nidir mide ≈155.7MB, pero Nidir medido DESPUÉS de haber cargado a
+Bunny al menos una vez en la misma corrida (p. ej. vía
+`NIMVLETS_DEV_SWITCH_TEST_COUNT=2`, Bunny -> Nidir) mide ≈188-192MB —
+una diferencia real de ~32-36MB que NO aparece en un lanzamiento
+directo. Investigado antes de descartarlo como ruido: una ráfaga de
+500 switches automatizados (`NIMVLETS_DEV_SWITCH_TEST_COUNT=500`,
+terminando en Nidir) se estabiliza en ≈191.9MB -- prácticamente
+idéntico a la medición de solo 2 switches (≈188.4MB), NO escalando
+con la cantidad de switches. Esto descarta un leak real por switch
+(que sí escalaría con la cantidad de repeticiones) y es consistente
+con un comportamiento benigno y bien conocido de los allocators de
+memoria (macOS `libmalloc` incluido): páginas de heap liberadas tras
+soltar el pack más grande de Bunny (31.7MB, ~100 texturas reales)
+pueden quedar retenidas/reservadas por el allocator en vez de
+devolverse inmediatamente al sistema operativo, apareciendo como RSS
+"elevado" aunque la memoria esté genuinamente libre y sea reutilizable
+por asignaciones futuras del mismo proceso. Documentado honestamente
+como la explicación mejor sustentada por la evidencia disponible (un
+offset constante, no creciente, tras el primer switch con contenido
+grande) -- no confirmado con una herramienta de profiling de memoria
+dedicada, que este entorno no tiene disponible.

@@ -943,3 +943,146 @@ QA/smoke tests). Cambio de un solo valor en
 requiere ningún cambio de código C++. Bunny no se ve afectado (su
 propio manifest define su propio `passive_interval_seconds`,
 independiente).
+
+## 15. Bug real de QA manual: sprite estático parcial tras un cambio de dirección (corrección post-QA)
+
+QA manual real del owner sobre el estado cerrado de Block 04.3 (antes
+de esta corrección) confirmó que la calidad/tamaño visual ya estaban
+bien, pero encontró un bug reproducible: al arrastrar Nidir a través
+del punto medio de la pantalla (la dirección automática cambia
+left↔right, ver §13), el sprite estático recién mostrado a veces
+aparecía parcial/corrupto (p. ej. el hocico faltante). Reproducir
+cualquier animación (idle o click) después "arreglaba" la vista.
+
+### Diagnóstico
+
+Se inspeccionó el camino completo de un cambio de dirección antes de
+tocar código, punto por punto:
+
+- **`AnimationController::SetDirection()`** (sin cambios desde
+  Block 04.2): actualiza `direction_` y, si el controller está Idle,
+  re-resuelve `currentAnimation_` a `ResolveIdleAnimation(pet_,
+  direction_)` con `currentFrameIndex_=0` -- correcto, sin overrides
+  colgantes ni frames a medio actualizar.
+- **Textura del frame estático de la nueva dirección**: ya adjuntada
+  desde la carga del pet (`AttachAllTextures()`, corregida en Block
+  04.2 tercera pasada, cubre `idleDirectionOverrides` completo) --
+  confirmado que el bug de cobertura de texturas de esa pasada NO
+  reaparece acá.
+- **`ApplyCurrentHitMask()`/`SDL_SetWindowShape()`**: se leyó
+  DIRECTAMENTE la fuente pineada de SDL 3.4.12
+  (`src/video/cocoa/SDL_cocoashape.m`, función `Cocoa_UpdateWindowShape`)
+  para confirmar, no asumir, su comportamiento real -- en macOS esta
+  función ÚNICAMENTE actualiza `NSWindow.ignoresMouseEvents` según la
+  posición actual del cursor; no compone, recorta, ni toca ningún
+  pixel renderizado (reconfirma DEC-017 de Block 01). **Esto descarta
+  con evidencia directa de código fuente que el mecanismo de
+  click-through/shape sea la causa de cualquier corrupción visual en
+  macOS** -- por diseño, no puede serlo.
+- **Canvas lógico/tamaño de renderizado**: `pet_.canvasWidth/canvasHeight`
+  es un valor a nivel de PET, no cambia con la dirección -- descartada
+  cualquier discrepancia de tamaño entre direcciones.
+- **`RenderFrame()`/`ApplyCurrentHitMask()`**: ambas leen
+  `animController_->CurrentFrame()` de forma independiente pero
+  consecutiva dentro del mismo bloque `if (needsRedraw_)`, sin ninguna
+  mutación de estado entre medio -- ambas ven siempre el mismo frame
+  resuelto, coherente.
+
+Con la lógica de contenido/estado descartada por inspección directa
+(y, en el caso del shape, por lectura de la fuente real de SDL), la
+explicación que mejor encaja con el patrón reportado ("un present
+frío se ve incompleto; presentar varias veces seguidas -- exactamente
+lo que hace una animación reproduciéndose -- lo arregla") es una clase
+de problema conocida de macOS/Metal: `SDL_RenderPresent()` puede
+mostrar un drawable de `CAMetalLayer` todavía no completamente
+asentado en su rotación de buffers cuando es el primer present después
+de un período largo sin presentar nada -- exactamente la situación de
+este runtime, deliberadamente event/deadline-driven (`SDL_WaitEventTimeout`
+puede bloquear por minutos, ver §6 de `docs/ANIMATION_RUNTIME.md`).
+**No se pudo confirmar visualmente en este entorno** (sin display
+interactivo real disponible para esta sesión) -- documentado
+honestamente como la explicación mejor sustentada por la evidencia
+disponible, no como un hecho verificado con captura de pantalla.
+
+### La corrección
+
+Genérica -- aplica a CUALQUIER redraw de CUALQUIER pet, no solo a
+Nidir ni solo a cambios de dirección:
+
+1. **`SpikeApp::RenderFrame()`** presenta el mismo contenido dos veces
+   seguidas (clear+draw+present, dos veces) en vez de una -- fuerza
+   dos drawables físicos distintos a través de la rotación de buffers
+   en cada redraw.
+2. **`confirmRedrawDeadlineMs_`** (nuevo, `SpikeApp.h`): un cambio de
+   dirección que sí cambia el frame mostrado arma, además del redraw
+   inmediato, un SEGUNDO redraw completo ~120ms más tarde -- una
+   separación real de wall-clock (no microsegundos), más parecida a
+   cómo una animación en reproducción naturalmente presenta varias
+   veces separadas en el tiempo. Esto es lo que hace que la corrección
+   **no dependa de que una animación futura "arregle" el estado por
+   casualidad** (instrucción explícita del brief de esta corrección):
+   el propio cambio de dirección programa su propia confirmación,
+   siempre, sin importar si el usuario dispara una animación después o
+   no.
+
+Verificado (no solo diseñado): con un build Debug (que loguea cada
+redraw real vía el diagnóstico `[diag] animation redraw`), un solo
+cambio de dirección mientras el pet está Idle produjo tres redraws
+reales del mismo frame, separados en el tiempo (t=433ms, t=435ms,
+t=531ms -- el último, ~98ms después del primero, es
+`confirmRedrawDeadlineMs_` disparando). Se corrió además una ráfaga de
+500 cambios de dirección automatizados
+(`NIMVLETS_DEV_DIRECTION_TEST_COUNT=500`) contra el binario Release
+real: 500/500 sin errores, RSS estable (~156.7MB, sin crecimiento),
+apagado limpio -- confirma que el mecanismo no introduce ninguna
+acumulación de recursos ni inestabilidad, aunque -- honestamente -- no
+puede confirmar por sí solo que el bug visual específico esté
+resuelto, ya que este entorno no tiene forma de capturar/inspeccionar
+los pixeles realmente presentados en pantalla. Queda pendiente de
+confirmación visual real en la próxima QA manual del owner.
+
+## 16. Tamaño visual global: candidato +5% (Block 04.3, corrección post-QA)
+
+El owner confirmó en QA manual que el tamaño actual de Nidir (tras la
+corrección de §12) está bien, pero pidió evaluar TODOS los Nimvlets
+~5% más grandes antes de decidir definitivamente. Implementado como
+una política GENÉRICA, no una constante propia de Nidir:
+
+`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR = 1.05` -- un único valor
+de módulo, aplicado automáticamente por
+`compute_logical_canvas_size()` a CUALQUIER pet que use esa función
+(hoy: Nidir y Bunny, ambos migrados a `generate_<pet>_pack.py` con
+`normalize_visual_scale`/canvas de trabajo compartido). El parámetro
+`scale_factor` de la función sigue existiendo para poder pasar `1.0`
+explícitamente (usado por los tests que verifican la matemática de
+aspect ratio en sí, independiente del candidato de tamaño vigente).
+
+**Para revertir al tamaño anterior:** cambiar `DISPLAY_SIZE_SCALE_FACTOR`
+a `1.0` en `tools/prep_dev_sprite.py` y volver a correr
+`tools/generate_nidir_pack.py`/`tools/generate_bunny_pack.py` -- ningún
+otro cambio de código hace falta, ninguna recompilación de la política
+en sí. Esto es intencional: este es un candidato de QA, no una decisión
+de producto cerrada.
+
+**Dimensiones lógicas resultantes, documentadas exactamente:**
+
+| Pet | Canvas de trabajo | Canvas lógico ANTES (factor 1.0) | Canvas lógico AHORA (factor 1.05) |
+|---|---|---|---|
+| Nidir | 624×612 | 160×157 | **168×165** |
+| Bunny | 428×563 | 122×160 | **128×168** |
+
+Preservado, sin excepciones: PNG fuente intactos (el factor solo
+afecta el cálculo de `canvas_width`/`canvas_height`, nunca los pixeles
+de ningún frame); la política de normalización visual de §12 (el
+factor se aplica DESPUÉS de derivar el canvas de trabajo, multiplicando
+el resultado final -- el encuadre relativo entre animaciones no
+cambia); la alineación del hit-mask (sigue leyendo el mismo
+`canvasWidth/canvasHeight` que el render, sin excepción); el
+click-through (sin cambios de mecanismo); el comportamiento de
+high-DPI (`SDL_SetRenderLogicalPresentation` sigue operando sobre el
+mismo canvas lógico, solo que un poco más grande); la escala relativa
+entre estático/idle/click (ambos pets siguen usando el mismo canvas de
+trabajo compartido para todas sus animaciones); y la consistencia
+izquierda/derecha (el factor es un escalar aplicado igual a ambas
+direcciones, no rompe la simetría del espejado).
+
