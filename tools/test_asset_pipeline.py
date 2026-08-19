@@ -6,6 +6,11 @@ de frames (`validate_frame_sequence.validate_frame_sequence`), y --
 agregado en la segunda pasada de este bloque -- la política genérica
 de canvas lógico (`prep_dev_sprite.compute_logical_canvas_size`) y el
 downscale opcional de runtime (`prep_dev_sprite.resize_rgba_nearest`).
+Block 04.3 agrega la política de canvas de trabajo compartido anclado
+por contenido (`prep_dev_sprite.compute_content_bbox`,
+`compose_on_canvas`, `compute_frame_normalization_plan`) -- ver
+docs/NIDIR_CONTENT.md, "clipping y tamaño visual inconsistente entre
+animaciones".
 
 Estos NO corren a través de `ctest` -- este repositorio no tiene
 (todavía) ninguna integración de tests Python en CI/CTest, y este
@@ -199,6 +204,181 @@ class ResizeRgbaNearestTest(unittest.TestCase):
         pixels = _solid_frame(4, 4, (1, 2, 3), (0, 0, 4, 4))
         with self.assertRaises(ValueError):
             prep_dev_sprite.resize_rgba_nearest(4, 4, pixels, 0, 4)
+
+
+class ContentBboxTest(unittest.TestCase):
+    """`prep_dev_sprite.compute_content_bbox()` -- Block 04.3, base de
+    la política de canvas de trabajo compartido (docs/NIDIR_CONTENT.md,
+    "clipping y tamaño visual inconsistente entre animaciones")."""
+
+    def test_returns_exact_bbox_of_visible_rect(self) -> None:
+        # Rect visible en (2,3)-(5,6) exclusivo -> bbox inclusivo (2,3)-(4,5)
+        pixels = _solid_frame(10, 10, (1, 2, 3), (2, 3, 5, 6))
+        self.assertEqual(prep_dev_sprite.compute_content_bbox(10, 10, pixels), (2, 3, 4, 5))
+
+    def test_fully_transparent_frame_returns_none(self) -> None:
+        pixels = _solid_frame(6, 6, (1, 2, 3), (0, 0, 0, 0))
+        self.assertIsNone(prep_dev_sprite.compute_content_bbox(6, 6, pixels))
+
+    def test_respects_custom_alpha_threshold(self) -> None:
+        # Un solo pixel visible con alpha=50 -- por debajo de un umbral
+        # alto (100) no debería contar como contenido.
+        pixels = bytearray(4 * 4 * 4)
+        pixels[(1 * 4 + 1) * 4 : (1 * 4 + 1) * 4 + 4] = bytes([10, 20, 30, 50])
+        self.assertIsNone(prep_dev_sprite.compute_content_bbox(4, 4, bytes(pixels), alpha_threshold=100))
+        self.assertEqual(prep_dev_sprite.compute_content_bbox(4, 4, bytes(pixels), alpha_threshold=10), (1, 1, 1, 1))
+
+    def test_rejects_wrong_buffer_size(self) -> None:
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compute_content_bbox(4, 4, b"\x00" * 10)
+
+
+class ComposeOnCanvasTest(unittest.TestCase):
+    """`prep_dev_sprite.compose_on_canvas()` -- coloca un frame completo
+    (sin recortar ni resamplear) dentro de un canvas más grande y
+    transparente."""
+
+    def test_places_frame_at_exact_offset(self) -> None:
+        pixels = _solid_frame(2, 2, (9, 8, 7), (0, 0, 2, 2))  # 2x2 completamente opaco
+        composed = prep_dev_sprite.compose_on_canvas(2, 2, pixels, 6, 6, offset_x=2, offset_y=3)
+        self.assertEqual(len(composed), 6 * 6 * 4)
+        # El frame 2x2 debe caer exactamente en columnas 2-3, filas 3-4.
+        for y in range(6):
+            for x in range(6):
+                off = (y * 6 + x) * 4
+                alpha = composed[off + 3]
+                if 2 <= x < 4 and 3 <= y < 5:
+                    self.assertEqual(alpha, 255, f"expected opaque at ({x},{y})")
+                else:
+                    self.assertEqual(alpha, 0, f"expected transparent at ({x},{y})")
+
+    def test_preserves_pixel_values_exactly_no_resample(self) -> None:
+        pixels = _solid_frame(3, 3, (42, 84, 126), (0, 0, 3, 3))
+        composed = prep_dev_sprite.compose_on_canvas(3, 3, pixels, 3, 3, offset_x=0, offset_y=0)
+        self.assertEqual(composed, pixels)  # canvas del mismo tamaño, offset (0,0) -> copia idéntica
+
+    def test_areas_outside_placed_frame_stay_transparent(self) -> None:
+        pixels = _solid_frame(2, 2, (1, 1, 1), (0, 0, 2, 2))
+        composed = prep_dev_sprite.compose_on_canvas(2, 2, pixels, 10, 10, offset_x=0, offset_y=0)
+        # Esquina opuesta del canvas, lejos del frame colocado -- debe
+        # seguir en alpha=0.
+        off = (9 * 10 + 9) * 4
+        self.assertEqual(composed[off + 3], 0)
+
+    def test_rejects_wrong_buffer_size(self) -> None:
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compose_on_canvas(4, 4, b"\x00" * 10, 8, 8, 0, 0)
+
+    def test_rejects_non_positive_canvas_dimensions(self) -> None:
+        pixels = _solid_frame(2, 2, (1, 2, 3), (0, 0, 2, 2))
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compose_on_canvas(2, 2, pixels, 0, 8, 0, 0)
+
+
+class FrameNormalizationPlanTest(unittest.TestCase):
+    """`prep_dev_sprite.compute_frame_normalization_plan()` -- Block
+    04.3, la política genérica de canvas de trabajo compartido/anclado
+    por contenido que corrige el clipping y la inconsistencia de
+    tamaño visual entre animaciones de un mismo pet (ver
+    docs/NIDIR_CONTENT.md)."""
+
+    def _entry(self, w: int, h: int, rect: tuple[int, int, int, int]) -> tuple[int, int, bytes]:
+        return w, h, _solid_frame(w, h, (5, 5, 5), rect)
+
+    def test_reference_group_always_gets_scale_one(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(20, 20, (5, 5, 15, 15)),
+        }
+        groups = {"idle": "idle", "click": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        self.assertEqual(plan["idle"][0], 1.0)
+
+    def test_matching_content_size_yields_no_rescale(self) -> None:
+        # Mismo tamaño de contenido (10x10) en frames nativos de
+        # tamaño distinto -- solo difiere el margen alrededor, como el
+        # caso real de Nidir (idle vs. click_reaction).
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),  # contenido 10x10
+            "click": self._entry(30, 30, (10, 10, 20, 20)),  # contenido 10x10, canvas nativo más grande
+        }
+        groups = {"idle": "idle", "click": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        self.assertAlmostEqual(plan["click"][0], 1.0, places=6)
+
+    def test_different_content_size_yields_real_rescale(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),  # contenido 10x10
+            "click": self._entry(20, 20, (8, 8, 12, 12)),  # contenido 4x4 -- mucho más chico
+        }
+        groups = {"idle": "idle", "click": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        content_scale = plan["click"][0]
+        self.assertGreater(content_scale, 1.0)  # el contenido "click" es más chico -> hay que agrandarlo
+        self.assertAlmostEqual(content_scale, 10.0 / 4.0, places=6)
+
+    def test_all_entries_share_the_same_working_canvas_dimensions(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "idle_left": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(30, 26, (12, 8, 22, 18)),
+            "click_left": self._entry(30, 26, (8, 8, 18, 18)),
+        }
+        groups = {"idle": "idle", "idle_left": "idle", "click": "click", "click_left": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        working_dims = {(w, h) for _, w, h, _, _ in plan.values()}
+        self.assertEqual(len(working_dims), 1, f"expected one shared working canvas, got {working_dims}")
+
+    def test_canonical_and_override_in_same_group_share_content_scale(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(20, 20, (8, 8, 12, 12)),
+            "click_left": self._entry(20, 20, (8, 8, 12, 12)),
+        }
+        groups = {"idle": "idle", "click": "click", "click_left": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        self.assertEqual(plan["click"][0], plan["click_left"][0])
+
+    def test_working_canvas_is_large_enough_to_avoid_cropping_every_entry(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(40, 12, (2, 2, 38, 10)),  # contenido muy ancho, casi todo el frame
+        }
+        groups = {"idle": "idle", "click": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        for key, (scale, working_w, working_h, offset_x, offset_y) in plan.items():
+            w, h, _ = entries[key]
+            scaled_w = round(w * scale)
+            scaled_h = round(h * scale)
+            self.assertGreaterEqual(offset_x, -0.001, f"{key}: el frame no debería empezar antes del canvas")
+            self.assertGreaterEqual(offset_y, -0.001, f"{key}: el frame no debería empezar antes del canvas")
+            self.assertLessEqual(offset_x + scaled_w, working_w + 1, f"{key}: el frame no debería exceder el canvas en X")
+            self.assertLessEqual(offset_y + scaled_h, working_h + 1, f"{key}: el frame no debería exceder el canvas en Y")
+
+    def test_fully_transparent_entry_falls_back_to_frame_center_without_raising(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(20, 20, (0, 0, 0, 0)),  # completamente transparente
+        }
+        groups = {"idle": "idle", "click": "click"}
+        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        self.assertIn("click", plan)  # no debe fallar ni omitir la entrada
+
+    def test_rejects_unknown_reference_group(self) -> None:
+        entries = {"idle": self._entry(10, 10, (2, 2, 8, 8))}
+        groups = {"idle": "idle"}
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="does_not_exist")
+
+    def test_result_is_deterministic(self) -> None:
+        entries = {
+            "idle": self._entry(20, 20, (5, 5, 15, 15)),
+            "click": self._entry(30, 30, (10, 10, 20, 20)),
+        }
+        groups = {"idle": "idle", "click": "click"}
+        first = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        second = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        self.assertEqual(first, second)
 
 
 class FrameSequenceValidationTest(unittest.TestCase):
