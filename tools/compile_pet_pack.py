@@ -26,6 +26,7 @@ Manifest schema (JSON):
       "passive_interval_seconds": 300.0,        # optional, default 300.0
       "content_version": "block02-dev-1",       # optional, default ""
       "runtime_max_frame_dimension": 320,       # optional, default: no downscale (see below)
+      "normalize_visual_scale": true,           # optional, default false (see below)
       "idle": { ...AnimationManifest... },
       "click_reaction": { ...AnimationManifest... },
       "passive_actions": [ {...AnimationManifest...}, ... ],  # optional, default []
@@ -103,6 +104,28 @@ resolution and aspect ratio, and docs/NIDIR_CONTENT.md for why the two
 are deliberately separate knobs (display size vs. stored pixel
 resolution).
 
+`normalize_visual_scale` (Block 04.3, see docs/NIDIR_CONTENT.md,
+"clipping y tamaño visual inconsistente entre animaciones") is an
+OPTIONAL, purely compile-time content-anchored normalization: if
+`true`, every animation of this pet (idle/click_reaction/passive
+actions and their direction overrides) is scaled and padded (never
+cropped) onto ONE shared working canvas, derived entirely from each
+animation's own first-frame content bounding box (see
+prep_dev_sprite.compute_frame_normalization_plan()), so the character
+appears at the same apparent size and position on screen regardless of
+which animation is currently playing -- fixes the real bug where an
+animation with more empty margin around the character in its own
+native frame (e.g. a click/fire effect that needs extra room) would
+render the character visibly smaller than idle once independently
+stretched to fill the same fixed logical canvas. Absent (the default,
+and what Bunny's manifest still uses) means "no change," identical to
+every pack compiled before this feature existed. Applied BEFORE
+`runtime_max_frame_dimension` -- the working-canvas-sized frame is what
+gets downscaled, not the raw native frame. Canonical source PNGs on
+disk are never touched, only the bytes that end up inside the
+".nvpack" file, following the exact same precedent as
+`runtime_max_frame_dimension`.
+
 Fails loudly (non-zero exit, a specific message on stderr naming the
 animation/frame at fault) rather than silently inventing or skipping
 data, on:
@@ -144,7 +167,13 @@ def _pack_string(s: str) -> bytes:
     return struct.pack("<I", len(encoded)) + encoded
 
 
-def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str, runtime_max_frame_dimension: int | None) -> tuple[int, int, bytes]:
+def _compile_frame(
+    frame_manifest: dict,
+    manifest_dir: str,
+    context: str,
+    runtime_max_frame_dimension: int | None,
+    normalization: tuple[float, int, int, int, int] | None,
+) -> tuple[int, int, bytes]:
     source = _require(frame_manifest, "source", context)
     path = os.path.join(manifest_dir, source)
     if not os.path.isfile(path):
@@ -153,6 +182,24 @@ def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str, runtim
     width, height, pixels = prep_dev_sprite.read_png_rgba(path)
     if len(pixels) != width * height * 4:
         raise PackCompileError(f"{context}: decoded pixel data size mismatch for {path}")
+
+    # Normalización de escala/encuadre por contenido, opcional (Block
+    # 04.3 -- ver el docstring del módulo y
+    # prep_dev_sprite.compute_frame_normalization_plan()). Se aplica
+    # ANTES del downscale de abajo: primero se reescala (si
+    # content_scale != 1.0) y se ubica dentro del canvas de trabajo
+    # compartido del pet (nunca recorta, solo agrega margen
+    # transparente), y ESE resultado es lo que eventualmente se
+    # downscalea a runtime_max_frame_dimension si corresponde.
+    if normalization is not None:
+        content_scale, working_width, working_height, offset_x, offset_y = normalization
+        if abs(content_scale - 1.0) > 1e-9:
+            target_w = max(1, round(width * content_scale))
+            target_h = max(1, round(height * content_scale))
+            pixels = prep_dev_sprite.resize_rgba_nearest(width, height, pixels, target_w, target_h)
+            width, height = target_w, target_h
+        pixels = prep_dev_sprite.compose_on_canvas(width, height, pixels, working_width, working_height, offset_x, offset_y)
+        width, height = working_width, working_height
 
     # Downscale opcional en tiempo de compilación (ver el docstring del
     # módulo) -- el PNG en disco nunca se toca, solo estos bytes que
@@ -175,7 +222,13 @@ def _compile_frame(frame_manifest: dict, manifest_dir: str, context: str, runtim
     return width, height, header + pixels
 
 
-def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str, runtime_max_frame_dimension: int | None) -> bytes:
+def _compile_animation(
+    anim_manifest: dict,
+    manifest_dir: str,
+    context: str,
+    runtime_max_frame_dimension: int | None,
+    normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
+) -> bytes:
     anim_id = _require(anim_manifest, "id", context)
     full_context = f"{context} ('{anim_id}')"
 
@@ -191,10 +244,16 @@ def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str, run
     if not frame_manifests:
         raise PackCompileError(f"{full_context}: must have at least one frame")
 
+    # La misma tupla de normalización (content_scale/canvas de trabajo/
+    # offset) aplica a TODOS los frames de esta animación -- se calculó
+    # una sola vez en el pre-pass a partir del primer frame, ver
+    # _build_normalization_plan().
+    normalization = normalization_plan.get(context) if normalization_plan is not None else None
+
     frame_blobs: list[bytes] = []
     first_dims: tuple[int, int] | None = None
     for i, fm in enumerate(frame_manifests):
-        w, h, blob = _compile_frame(fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension)
+        w, h, blob = _compile_frame(fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension, normalization)
         if first_dims is None:
             first_dims = (w, h)
         elif (w, h) != first_dims:
@@ -214,6 +273,70 @@ def _compile_animation(anim_manifest: dict, manifest_dir: str, context: str, run
     for blob in frame_blobs:
         out += blob
     return bytes(out)
+
+
+def _first_frame_pixels(anim_manifest: dict, manifest_dir: str, context: str) -> tuple[int, int, bytes]:
+    """Decodifica SOLO el primer frame de una animación -- usado
+    exclusivamente por el pre-pass de _build_normalization_plan() para
+    conocer su bounding box de contenido nativo, sin decodificar la
+    secuencia completa dos veces más de lo necesario."""
+    frame_manifests = _require(anim_manifest, "frames", context)
+    if not frame_manifests:
+        raise PackCompileError(f"{context}: must have at least one frame")
+    source = _require(frame_manifests[0], "source", f"{context} frame 0")
+    path = os.path.join(manifest_dir, source)
+    if not os.path.isfile(path):
+        raise PackCompileError(f"{context} frame 0: source frame not found: {path}")
+    return prep_dev_sprite.read_png_rgba(path)
+
+
+def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tuple[float, int, int, int, int]]:
+    """Pre-pass del feature opcional `normalize_visual_scale` (ver el
+    docstring del módulo): recorre la MISMA estructura de manifest que
+    compile_pack() ya recorre (idle/click_reaction/passive_actions y
+    sus tres secciones de overrides direccionales), decodificando solo
+    el primer frame de cada una, y arma los diccionarios `entries`/
+    `groups` que prep_dev_sprite.compute_frame_normalization_plan()
+    necesita -- las claves usadas acá ("idle", "click_reaction",
+    "passive_actions[i]", "idle_direction_overrides[j]", etc.) son
+    exactamente los mismos strings `context` que _compile_animation()
+    ya recibe más abajo, así que el resultado se puede indexar
+    directamente con ese mismo `context` en la segunda pasada real de
+    compilación, sin necesidad de ningún esquema de claves paralelo."""
+    entries: dict[str, tuple[int, int, bytes]] = {}
+    groups: dict[str, str] = {}
+
+    idle_manifest = _require(manifest, "idle", "manifest")
+    entries["idle"] = _first_frame_pixels(idle_manifest, manifest_dir, "idle")
+    groups["idle"] = "idle"
+
+    click_manifest = _require(manifest, "click_reaction", "manifest")
+    entries["click_reaction"] = _first_frame_pixels(click_manifest, manifest_dir, "click_reaction")
+    groups["click_reaction"] = "click_reaction"
+
+    passive_manifests = manifest.get("passive_actions", [])
+    for i, pm in enumerate(passive_manifests):
+        context = f"passive_actions[{i}]"
+        entries[context] = _first_frame_pixels(pm, manifest_dir, context)
+        groups[context] = context
+
+    for i, om in enumerate(manifest.get("idle_direction_overrides", [])):
+        context = f"idle_direction_overrides[{i}]"
+        entries[context] = _first_frame_pixels(om, manifest_dir, context)
+        groups[context] = "idle"
+
+    for i, om in enumerate(manifest.get("click_reaction_direction_overrides", [])):
+        context = f"click_reaction_direction_overrides[{i}]"
+        entries[context] = _first_frame_pixels(om, manifest_dir, context)
+        groups[context] = "click_reaction"
+
+    for i, om in enumerate(manifest.get("passive_action_direction_overrides", [])):
+        context = f"passive_action_direction_overrides[{i}]"
+        passive_action_index = int(_require(om, "passive_action_index", context))
+        entries[context] = _first_frame_pixels(om, manifest_dir, context)
+        groups[context] = f"passive_actions[{passive_action_index}]"
+
+    return prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
 
 
 def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
@@ -246,6 +369,14 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
     click_manifest = _require(manifest, "click_reaction", "manifest")
     passive_manifests = manifest.get("passive_actions", [])
 
+    # Pre-pass opcional (ver el docstring del módulo): decodifica solo
+    # el primer frame de cada animación para derivar el plan de
+    # normalización de escala/encuadre por contenido, ANTES de la
+    # compilación real de más abajo. None cuando el manifest no pide
+    # esto -- comportamiento 100% sin cambios (byte-a-byte igual al de
+    # antes de este feature).
+    normalization_plan = _build_normalization_plan(manifest, manifest_dir) if bool(manifest.get("normalize_visual_scale", False)) else None
+
     out = bytearray()
     out += b"NVPACK1\0"
     out += _pack_string(pet_id)
@@ -256,12 +387,12 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
     out += struct.pack("<d", passive_interval)
     out += _pack_string(content_version)
 
-    out += _compile_animation(idle_manifest, manifest_dir, "idle", runtime_max_frame_dimension)
-    out += _compile_animation(click_manifest, manifest_dir, "click_reaction", runtime_max_frame_dimension)
+    out += _compile_animation(idle_manifest, manifest_dir, "idle", runtime_max_frame_dimension, normalization_plan)
+    out += _compile_animation(click_manifest, manifest_dir, "click_reaction", runtime_max_frame_dimension, normalization_plan)
 
     out += struct.pack("<I", len(passive_manifests))
     for i, pm in enumerate(passive_manifests):
-        out += _compile_animation(pm, manifest_dir, f"passive_actions[{i}]", runtime_max_frame_dimension)
+        out += _compile_animation(pm, manifest_dir, f"passive_actions[{i}]", runtime_max_frame_dimension, normalization_plan)
 
     # Tres secciones finales, opcionales y aditivas (Block 04.2) -- ver
     # el docstring del módulo para por qué las tres se escriben juntas
@@ -279,7 +410,7 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
             if direction_str not in _DIRECTION_TO_BYTE:
                 raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
             out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
-            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
 
         click_overrides = manifest.get("click_reaction_direction_overrides", [])
         out += struct.pack("<I", len(click_overrides))
@@ -289,7 +420,7 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
             if direction_str not in _DIRECTION_TO_BYTE:
                 raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
             out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
-            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
 
         passive_overrides = manifest.get("passive_action_direction_overrides", [])
         out += struct.pack("<I", len(passive_overrides))
@@ -306,7 +437,7 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
                 raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
             out += struct.pack("<I", passive_action_index)
             out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
-            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension)
+            out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
 
     with open(output_path, "wb") as f:
         f.write(out)

@@ -32,6 +32,19 @@ optional `runtime_max_frame_dimension` compile-time downscale) -- see
 docs/NIDIR_CONTENT.md, "tamaño de canvas lógico vs. resolución de
 frame".
 
+Block 04.3 agrega la política genérica de "canvas de trabajo
+compartido, anclado por contenido": `compute_content_bbox()` (bounding
+box real de pixeles visibles de un frame), `compose_on_canvas()`
+(coloca un frame completo, sin recortar ni resamplear, dentro de un
+canvas más grande y transparente) y `compute_frame_normalization_plan()`
+(la política en sí -- deriva, a partir de los propios pixeles de cada
+animación de un pet, un factor de escala y un desplazamiento por
+entrada para que el personaje aparezca al mismo tamaño y en la misma
+posición relativa sin importar qué animación esté activa, sin recortar
+contenido en el proceso). Usado por `tools/compile_pet_pack.py` (el
+campo de manifest opcional `normalize_visual_scale`) -- ver
+docs/NIDIR_CONTENT.md, "clipping y tamaño visual inconsistente".
+
 This file's own CLI entry point (`main()`, below) is a one-time,
 offline prep step for temporary QA/dev fixtures — not a runtime tool,
 not part of any content pipeline (see docs/PET_CONTENT_SPEC.md, still
@@ -222,6 +235,204 @@ def resize_rgba_nearest(width: int, height: int, pixels: bytes, target_width: in
             dst_off = (ty * target_width + tx) * 4
             out[dst_off : dst_off + 4] = pixels[src_off : src_off + 4]
     return bytes(out)
+
+
+# Umbral bajo por defecto para el bounding box de CONTENIDO visible --
+# deliberadamente distinto del umbral de hit-testing de clicks (128,
+# ver DEC-018), que decide qué cuenta como "clickeable". Acá se busca
+# la extensión visual REAL de un frame (para políticas de encuadre/
+# tamaño), donde incluso un borde antialiaseado muy tenue debe contar
+# como "hay algo ahí" -- un umbral alto subestimaría cuánto espacio
+# ocupa realmente el contenido.
+DEFAULT_CONTENT_ALPHA_THRESHOLD = 8
+
+
+def compute_content_bbox(
+    width: int, height: int, pixels: bytes, alpha_threshold: int = DEFAULT_CONTENT_ALPHA_THRESHOLD
+) -> tuple[int, int, int, int] | None:
+    """Bounding box (min_x, min_y, max_x, max_y), inclusive, de los
+    pixeles con alpha > `alpha_threshold`. Devuelve None si el frame es
+    completamente transparente (no hay ningún pixel por encima del
+    umbral) -- el llamador decide qué hacer en ese caso, esta función
+    nunca inventa un bounding box para contenido que no existe."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(f"compute_content_bbox: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8")
+
+    min_x = min_y = None
+    max_x = max_y = -1
+    for y in range(height):
+        row = y * width * 4
+        for x in range(width):
+            if pixels[row + x * 4 + 3] > alpha_threshold:
+                if min_x is None or x < min_x:
+                    min_x = x
+                if min_y is None or y < min_y:
+                    min_y = y
+                if x > max_x:
+                    max_x = x
+                if y > max_y:
+                    max_y = y
+    if min_x is None:
+        return None
+    return min_x, min_y, max_x, max_y
+
+
+def compose_on_canvas(
+    width: int, height: int, pixels: bytes, canvas_width: int, canvas_height: int, offset_x: int, offset_y: int
+) -> bytes:
+    """Coloca el frame COMPLETO (sin recortar ni resamplear) dentro de
+    un canvas más grande y transparente, en la posición entera
+    (offset_x, offset_y) -- una copia directa de pixeles, nunca un
+    resample, así que preserva el contenido exactamente. El llamador es
+    responsable de que el canvas de destino sea lo bastante grande como
+    para contener el frame completo en esa posición
+    (compute_frame_normalization_plan() ya lo garantiza); si no lo
+    fuera, esta función recorta silenciosamente lo que no entra en vez
+    de fallar, documentado acá, no una sorpresa."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(f"compose_on_canvas: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8")
+    if canvas_width <= 0 or canvas_height <= 0:
+        raise ValueError(f"compose_on_canvas: canvas dimensions must be positive, got {canvas_width}x{canvas_height}")
+
+    out = bytearray(canvas_width * canvas_height * 4)  # todo-ceros == completamente transparente
+    x0 = max(0, -offset_x)
+    x1 = min(width, canvas_width - offset_x)
+    if x1 <= x0:
+        return bytes(out)  # el frame cae completamente fuera del canvas en X
+
+    for y in range(height):
+        dst_y = offset_y + y
+        if dst_y < 0 or dst_y >= canvas_height:
+            continue
+        src_row_off = y * width * 4
+        src_start = src_row_off + x0 * 4
+        src_end = src_row_off + x1 * 4
+        dst_start = (dst_y * canvas_width + (offset_x + x0)) * 4
+        out[dst_start : dst_start + (src_end - src_start)] = pixels[src_start:src_end]
+    return bytes(out)
+
+
+def compute_frame_normalization_plan(
+    entries: dict[str, tuple[int, int, bytes]],
+    groups: dict[str, str],
+    reference_group: str,
+    scale_tolerance: float = 0.02,
+) -> dict[str, tuple[float, int, int, int, int]]:
+    """Política genérica de "canvas de trabajo compartido, anclado por
+    contenido" (Block 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y
+    tamaño visual inconsistente entre animaciones"). Corrige el bug de
+    raíz encontrado en QA manual de Nidir: cada frame se estiraba
+    independientemente para llenar el mismo canvas lógico fijo
+    (SpikeApp::RenderFrame(), sin cambios -- sigue siendo un simple
+    stretch-to-fill), así que dos animaciones con distinta cantidad de
+    margen alrededor del personaje dentro de su propio frame nativo
+    (p. ej. el click-fire de Nidir, que necesita espacio extra para el
+    efecto de fuego) terminaban mostrando al personaje a un tamaño y
+    posición distintos en pantalla, sin que el código de render tuviera
+    ningún bug propio -- el problema era que cada animación se
+    escalaba/encuadraba de forma independiente en vez de compartir un
+    marco de referencia común.
+
+    `entries`: cada "entrada compilable" (una animación canónica o un
+    override direccional) mapeada a los pixels de su PRIMER frame
+    (nativo, sin ningún downscale todavía) -- el primer frame es, por
+    convención ya establecida en este proyecto (ver "first/last frame
+    contract", Block 04.2), la pose base/de-reposo, la referencia más
+    estable para anclar el resto de la secuencia.
+    `groups`: entry_key -> nombre de grupo lógico ("idle",
+    "click_reaction", "passive_actions[0]", ...) -- una animación
+    canónica y sus overrides direccionales SIEMPRE comparten grupo, así
+    que right/left de una misma animación terminan con idéntico
+    content_scale (nunca escalas distintas para las dos direcciones de
+    la misma animación).
+    `reference_group`: el grupo cuyo tamaño de contenido define la
+    escala "1.0" contra la que se miden todos los demás -- "idle" por
+    convención de este proyecto (ver DEC-045: idle ya es la referencia
+    para el tamaño de canvas lógico; acá se reusa la misma convención
+    para el tamaño de CONTENIDO).
+
+    Para cada entrada calcula:
+    - content_scale (compartido por grupo): factor de reescalado para
+      que el contenido visible (bounding box de alpha) de este grupo
+      ocupe el mismo tamaño absoluto en pixeles que el del grupo de
+      referencia. Si la diferencia entra dentro de `scale_tolerance`
+      (2% por defecto), se usa 1.0 -- evita un resample innecesario que
+      degradaría calidad sin corregir nada perceptible ("Calidad
+      visual consistente, sin degradación extra innecesaria").
+    - Un canvas de trabajo COMPARTIDO por TODO el pet (mismas
+      dimensiones para todas las entradas, de todos los grupos), lo
+      bastante grande como para contener cada frame completo (post-
+      content_scale) sin recortar nada, calculado alineando el CENTRO
+      del bounding box de contenido del primer frame de cada entrada
+      al centro del canvas de trabajo.
+    - offset_x/offset_y: dónde colocar el frame (post-content_scale,
+      sin recortar) dentro de ese canvas de trabajo compartido, para
+      que su ancla de contenido caiga exactamente en el centro.
+
+    Nunca recorta contenido -- solo agrega margen transparente
+    (compose_on_canvas() nunca resamplea). Sin ninguna rama específica
+    de personaje: cuánto escalar cada grupo y qué tan grande debe ser
+    el canvas de trabajo se derivan enteramente de los pixeles reales,
+    nunca de un valor hardcodeado por pet -- reusable tal cual para
+    cualquier Nimvlet futuro con animaciones de distinto encuadre
+    nativo."""
+    if reference_group not in groups.values():
+        raise ValueError(f"compute_frame_normalization_plan: reference_group '{reference_group}' is not used by any entry")
+
+    def content_bbox_or_full_frame(w: int, h: int, pixels: bytes) -> tuple[int, int, int, int]:
+        bbox = compute_content_bbox(w, h, pixels)
+        if bbox is not None:
+            return bbox
+        # Frame totalmente transparente -- no hay contenido real que
+        # anclar; el centro geométrico del frame es el único fallback
+        # razonable (nunca se inventa contenido que no existe).
+        return 0, 0, w - 1, h - 1
+
+    canonical_of_group: dict[str, str] = {}
+    for entry_key, group_key in groups.items():
+        canonical_of_group.setdefault(group_key, entry_key)
+
+    def group_content_size(group_key: str) -> float:
+        entry_key = canonical_of_group[group_key]
+        w, h, pixels = entries[entry_key]
+        minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
+        return max(maxx - minx + 1, maxy - miny + 1)
+
+    reference_size = group_content_size(reference_group)
+    scale_by_group: dict[str, float] = {}
+    for group_key in set(groups.values()):
+        if group_key == reference_group:
+            scale_by_group[group_key] = 1.0
+            continue
+        this_size = group_content_size(group_key)
+        raw_scale = reference_size / this_size if this_size > 0 else 1.0
+        scale_by_group[group_key] = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+
+    needed_left = needed_right = needed_top = needed_bottom = 0.0
+    scaled_by_entry: dict[str, tuple[float, float, float, float]] = {}  # scaled_w, scaled_h, anchor_x, anchor_y
+    for entry_key, (w, h, pixels) in entries.items():
+        scale = scale_by_group[groups[entry_key]]
+        minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
+        anchor_x = (minx + maxx + 1) / 2.0 * scale
+        anchor_y = (miny + maxy + 1) / 2.0 * scale
+        scaled_w = w * scale
+        scaled_h = h * scale
+        scaled_by_entry[entry_key] = (scaled_w, scaled_h, anchor_x, anchor_y)
+        needed_left = max(needed_left, anchor_x)
+        needed_right = max(needed_right, scaled_w - anchor_x)
+        needed_top = max(needed_top, anchor_y)
+        needed_bottom = max(needed_bottom, scaled_h - anchor_y)
+
+    working_width = max(1, round(needed_left + needed_right))
+    working_height = max(1, round(needed_top + needed_bottom))
+
+    plan: dict[str, tuple[float, int, int, int, int]] = {}
+    for entry_key, (_scaled_w, _scaled_h, anchor_x, anchor_y) in scaled_by_entry.items():
+        offset_x = round(needed_left - anchor_x)
+        offset_y = round(needed_top - anchor_y)
+        plan[entry_key] = (scale_by_group[groups[entry_key]], working_width, working_height, offset_x, offset_y)
+
+    return plan
 
 
 def write_raw_rgba(path: str, width: int, height: int, pixels: bytes) -> None:
