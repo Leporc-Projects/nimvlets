@@ -77,7 +77,7 @@ solo un `cp`).
 Block 04.3 (QA manual del owner encontró clipping, pérdida de calidad
 y tamaño visual inconsistente entre idle y click-fire -- ver
 docs/NIDIR_CONTENT.md, "clipping y tamaño visual inconsistente entre
-animaciones") agrega dos cambios acá:
+animaciones") agrega estos cambios acá:
     - El manifest ahora pide `normalize_visual_scale: true` --
       tools/compile_pet_pack.py deriva, a partir de los pixeles reales
       de idle y click_reaction, un canvas de trabajo compartido que
@@ -91,6 +91,12 @@ animaciones") agrega dos cambios acá:
     - `PASSIVE_INTERVAL_SECONDS_PLACEHOLDER` pasa de 300s (5min) a 60s
       (1min) -- ahora es un valor de producto explícitamente pedido
       por el owner para este bloque, no un placeholder.
+    - `compute_logical_canvas_size()` ahora aplica, por defecto,
+      `prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR` (candidato de QA del
+      owner post-fix: "~5% más grande para todos los Nimvlets") --
+      genérico, no un valor propio de este script; ver
+      docs/NIDIR_CONTENT.md para el tamaño exacto resultante y cómo
+      revertirlo.
 
 Uso:
     python3 tools/generate_nidir_pack.py
@@ -323,7 +329,10 @@ def main() -> int:
         print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
 
     canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
-    print(f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE})")
+    print(
+        f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, "
+        f"referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE} x DISPLAY_SIZE_SCALE_FACTOR={prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR})"
+    )
     print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
 
     right_dir = os.path.join("animations", "idle", "right", "frames")
@@ -352,7 +361,7 @@ def main() -> int:
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
         "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
-        "content_version": "block04.3-nidir-1",
+        "content_version": "block04.3-nidir-2",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         # Canvas de trabajo compartido, anclado por contenido (Block
         # 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y tamaño visual
