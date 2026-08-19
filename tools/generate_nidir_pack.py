@@ -2,16 +2,23 @@
 """Genera el contenido "left" de Nidir a partir de sus frames "right"
 reales, ya importados en este repo (ver docs/NIDIR_CONTENT.md), y
 compila el pack de runtime completo con la semántica real de producto:
-pose base estática + animación de idle esporádica (one-shot) + click
-(one-shot) — ver la corrección de Block 04.2 (segunda pasada,
-"corrección de semántica de animación") en docs/DECISION_LOG.md.
+pose base estática + animación de idle esporádica (one-shot) + click-
+fire real (one-shot) — ver la corrección de Block 04.2 (segunda
+pasada, "corrección de semántica de animación") y la tercera pasada
+("import del click-fire real") en docs/DECISION_LOG.md.
 
 Nidir es el primer Nimvlet con arte real de producción (a diferencia de
 Bunny, que sigue siendo un fixture de QA -- ver AGENTS.md §11). Este
-script NO inventa contenido nuevo: los frames "right" ya existen en
-`assets/source/nimvlets/nidir/animations/idle/right/frames/`
-(importados desde el export real de Ludo.ai del owner). Lo único que
-este script deriva es la dirección "left", por espejado horizontal
+script NO inventa contenido nuevo: tanto los frames "right" de idle
+(`assets/source/nimvlets/nidir/animations/idle/right/frames/`) como
+los de click_reaction
+(`assets/source/nimvlets/nidir/animations/click_reaction/right/frames/`)
+ya existen en este repo, importados desde exports reales de Ludo.ai del
+owner (idle: primera pasada de este bloque; click-fire: tercera pasada,
+copiado desde `local_imports/nidir/nidir-click-fire-right/` una vez que
+el bloqueo de acceso a `~/Downloads` se resolvió -- ver
+docs/NIDIR_CONTENT.md §10). Lo único que este script deriva es la
+dirección "left" de CADA animación, por espejado horizontal
 determinista (block brief §3: "Do not use AI to regenerate the left
 side") -- exactamente el mismo principio de "no depender de arte por
 terminar/generar" que tools/generate_bunny_dev_pack.py estableció en
@@ -39,10 +46,10 @@ bloque -- ver el informe final):
       primera pasada de este bloque lo clasificaba mal (`kind: loop`
       donde debía ser un `passive_action` `one_shot`).
 
-Escribe:
-    assets/source/nimvlets/nidir/animations/idle/left/frames/frame_NNN.png
+Escribe, para CADA animación (idle, click_reaction):
+    assets/source/nimvlets/nidir/animations/<anim>/left/frames/frame_NNN.png
         (espejo horizontal exacto de cada frame "right")
-    assets/source/nimvlets/nidir/animations/idle/left/spritesheet/spritesheet.png
+    assets/source/nimvlets/nidir/animations/<anim>/left/spritesheet/spritesheet.png
         (ensamblado desde los frames "left" ya espejados, en la misma
         grilla 5x5 que el spritesheet "right" original -- NUNCA espejar
         la imagen del spritesheet completo de una sola vez, porque eso
@@ -50,13 +57,22 @@ Escribe:
         el contenido de cada una -- ver block brief §3: "generate a
         mirrored spritesheet only if safe/deterministic; otherwise
         generate it from normalized left frames")
+Y además:
     assets/source/nimvlets/nidir/pack_manifest.json
         (entrada de tools/compile_pet_pack.py para Nidir)
     assets/dev/nidir_pack.nvpack
         (pack de runtime compilado -- lo que src/app carga de verdad)
 
 Determinista: re-correr este script contra los mismos frames "right"
-produce salida byte-idéntica.
+(idle y click_reaction) produce salida byte-idéntica. Este script NO
+toca `local_imports/` -- esa carpeta es staging temporal del owner
+(nunca commiteada, ver .gitignore) y el copiado desde ahí hacia
+`assets/source/nimvlets/nidir/animations/click_reaction/right/` ya se
+hizo una única vez, de forma manual y documentada en el commit que
+importó el click-fire real (mismo patrón que el import original de
+idle -- ver `git log` de ese commit: "zero actual normalization"
+needed, así que no hizo falta ningún script de importación dedicado,
+solo un `cp`).
 
 Uso:
     python3 tools/generate_nidir_pack.py
@@ -82,6 +98,17 @@ RIGHT_FRAMES_DIR = os.path.join(IDLE_ROOT, "right", "frames")
 LEFT_FRAMES_DIR = os.path.join(IDLE_ROOT, "left", "frames")
 RIGHT_SPRITESHEET_PATH = os.path.join(IDLE_ROOT, "right", "spritesheet", "spritesheet.png")
 LEFT_SPRITESHEET_PATH = os.path.join(IDLE_ROOT, "left", "spritesheet", "spritesheet.png")
+
+# Click-fire real (importado en la tercera pasada de este bloque desde
+# local_imports/nidir/nidir-click-fire-right/, ya copiado a estas
+# rutas canónicas -- ver el commit de import). Mismo layout que idle,
+# una animación distinta bajo animations/.
+CLICK_ROOT = os.path.join(NIDIR_ROOT, "animations", "click_reaction")
+CLICK_RIGHT_FRAMES_DIR = os.path.join(CLICK_ROOT, "right", "frames")
+CLICK_LEFT_FRAMES_DIR = os.path.join(CLICK_ROOT, "left", "frames")
+CLICK_RIGHT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "right", "spritesheet", "spritesheet.png")
+CLICK_LEFT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "left", "spritesheet", "spritesheet.png")
+
 MANIFEST_PATH = os.path.join(NIDIR_ROOT, "pack_manifest.json")
 COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "nidir_pack.nvpack")
 
@@ -127,19 +154,32 @@ GRID_COLUMNS = 5
 # donde el umbral realmente importa. Ver docs/NIDIR_CONTENT.md.
 ALPHA_HIT_THRESHOLD = 128
 
-# Duración de generación configurada del lado de Ludo.ai para este
-# export (dato real, provisto por el owner en esta segunda pasada del
-# bloque -- "Our current Ludo generation setup is: 3 seconds, Max
-# Frames 25" -- no una medición ni una suposición de este repo). El fps
-# de reproducción se deriva de esto (frame_count real / 3.0s), NUNCA
-# de un frame_count hardcodeado -- la cantidad real de frames que
-# entrega cada export puede variar (ver validate_frame_sequence.py, que
-# nunca fuerza 24/25 frames). Como la secuencia ahora es un
-# passive_action ESPORÁDICO (no un loop continuo), esta cadencia ya no
-# necesita balancearse contra un costo de CPU permanente -- solo
-# importa mientras el one-shot está efectivamente reproduciéndose, unas
-# pocas veces por hora como mucho.
+# Duración de generación configurada del lado de Ludo.ai para el
+# export de idle (dato real, provisto por el owner en la segunda
+# pasada de este bloque -- "Our current Ludo generation setup is: 3
+# seconds, Max Frames 25" -- no una medición ni una suposición de este
+# repo). El fps de reproducción se deriva de esto (frame_count real /
+# 3.0s), NUNCA de un frame_count hardcodeado -- la cantidad real de
+# frames que entrega cada export puede variar (ver
+# validate_frame_sequence.py, que nunca fuerza 24/25 frames). Como la
+# secuencia es un passive_action/click_reaction ESPORÁDICO (nunca un
+# loop continuo), esta cadencia no necesita balancearse contra un costo
+# de CPU permanente -- solo importa mientras el one-shot está
+# efectivamente reproduciéndose.
+#
+# El export de click-fire (tercera pasada de este bloque) también trae
+# 25 frames -- el mismo conteo que idle bajo la misma configuración de
+# "Max Frames 25" de Ludo. Se reusa esta misma constante para derivar
+# su fps, asumiendo la misma duración de generación de 3s -- una
+# suposición explícita y documentada (el owner no confirmó
+# separadamente la duración de este export puntual), no un dato
+# medido de forma independiente. Si en el futuro se confirma que el
+# click-fire usó una duración distinta, solo hay que ajustar
+# CLICK_EXPORT_DURATION_SECONDS abajo -- ya está desacoplada de
+# EXPORT_DURATION_SECONDS a propósito, aunque hoy compartan el mismo
+# valor.
 EXPORT_DURATION_SECONDS = 3.0
+CLICK_EXPORT_DURATION_SECONDS = 3.0
 
 # Placeholder de producto: cada cuánto se dispara la animación de idle
 # esporádica. La cadencia real (1/3/5 minutos, etc.) es política de
@@ -172,58 +212,90 @@ def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w:
     return sheet_w, sheet_h, bytes(sheet)
 
 
-def main() -> int:
-    right_report = validate_frame_sequence.validate_frame_sequence(RIGHT_FRAMES_DIR, ALPHA_HIT_THRESHOLD)
-    print(f"right frames válidos: {right_report.frame_count} @ {right_report.width}x{right_report.height}")
+def _derive_left_direction(
+    label: str,
+    right_frames_dir: str,
+    left_frames_dir: str,
+    right_spritesheet_path: str,
+    left_spritesheet_path: str,
+) -> tuple[validate_frame_sequence.FrameSequenceReport, validate_frame_sequence.FrameSequenceReport]:
+    """Valida los frames "right" reales ya importados de una animación,
+    deriva su dirección "left" por espejado horizontal determinista, la
+    valida contra el mismo contrato, y ensambla su spritesheet "left"
+    desde los frames ya espejados (nunca espejando la imagen completa
+    del spritesheet -- ver el docstring del módulo). Reusado tanto para
+    `idle` como para `click_reaction` -- misma lógica, dos animaciones
+    distintas."""
+    right_report = validate_frame_sequence.validate_frame_sequence(right_frames_dir, ALPHA_HIT_THRESHOLD)
+    print(f"{label}: right frames válidos: {right_report.frame_count} @ {right_report.width}x{right_report.height}")
 
-    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(right_report.width, right_report.height)
-    print(f"canvas lógico derivado: {canvas_width}x{canvas_height} (nativo {right_report.width}x{right_report.height}, referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE})")
-    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
+    if not os.path.isfile(right_spritesheet_path):
+        raise SystemExit(f"error: falta el spritesheet right importado de {label}: {right_spritesheet_path}")
 
-    if not os.path.isfile(RIGHT_SPRITESHEET_PATH):
-        print(f"error: falta el spritesheet right importado: {RIGHT_SPRITESHEET_PATH}", file=sys.stderr)
-        return 1
-
-    os.makedirs(LEFT_FRAMES_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(LEFT_SPRITESHEET_PATH), exist_ok=True)
+    os.makedirs(left_frames_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(left_spritesheet_path), exist_ok=True)
 
     for index in range(right_report.frame_count):
-        src_path = os.path.join(RIGHT_FRAMES_DIR, f"frame_{index:03d}.png")
+        src_path = os.path.join(right_frames_dir, f"frame_{index:03d}.png")
         w, h, pixels = prep_dev_sprite.read_png_rgba(src_path)
         mirrored = prep_dev_sprite.mirror_rgba_horizontal(w, h, pixels)
-        dst_path = os.path.join(LEFT_FRAMES_DIR, f"frame_{index:03d}.png")
+        dst_path = os.path.join(left_frames_dir, f"frame_{index:03d}.png")
         prep_dev_sprite.write_png_rgba(dst_path, w, h, mirrored)
 
-    left_report = validate_frame_sequence.validate_frame_sequence(LEFT_FRAMES_DIR, ALPHA_HIT_THRESHOLD)
-    print(f"left frames generados y validados: {left_report.frame_count} @ {left_report.width}x{left_report.height}")
+    left_report = validate_frame_sequence.validate_frame_sequence(left_frames_dir, ALPHA_HIT_THRESHOLD)
+    print(f"{label}: left frames generados y validados: {left_report.frame_count} @ {left_report.width}x{left_report.height}")
     # El espejado preserva dimensiones y transparencia exactamente --
     # confirmar que el reporte de left calza con el de right, no solo
     # confiar en que "debería".
     assert left_report.frame_count == right_report.frame_count
     assert (left_report.width, left_report.height) == (right_report.width, right_report.height)
     assert left_report.transparent_fraction_range == right_report.transparent_fraction_range, (
-        "el espejado horizontal no debería alterar la fracción de pixeles transparentes de ningún frame"
+        f"{label}: el espejado horizontal no debería alterar la fracción de pixeles transparentes de ningún frame"
     )
 
     sheet_w, sheet_h, sheet_pixels = _assemble_spritesheet_from_frames(
-        LEFT_FRAMES_DIR, left_report.frame_count, left_report.width, left_report.height
+        left_frames_dir, left_report.frame_count, left_report.width, left_report.height
     )
-    prep_dev_sprite.write_png_rgba(LEFT_SPRITESHEET_PATH, sheet_w, sheet_h, sheet_pixels)
-    print(f"left spritesheet ensamblado: {LEFT_SPRITESHEET_PATH} ({sheet_w}x{sheet_h})")
+    prep_dev_sprite.write_png_rgba(left_spritesheet_path, sheet_w, sheet_h, sheet_pixels)
+    print(f"{label}: left spritesheet ensamblado: {left_spritesheet_path} ({sheet_w}x{sheet_h})")
 
-    def frame_entry(rel_dir: str, index: int) -> dict:
-        return {"source": os.path.join(rel_dir, f"frame_{index:03d}.png"), "duration_ms": 0}
+    return right_report, left_report
+
+
+def _frame_entry(rel_dir: str, index: int) -> dict:
+    return {"source": os.path.join(rel_dir, f"frame_{index:03d}.png"), "duration_ms": 0}
+
+
+def main() -> int:
+    right_report, left_report = _derive_left_direction(
+        "idle", RIGHT_FRAMES_DIR, LEFT_FRAMES_DIR, RIGHT_SPRITESHEET_PATH, LEFT_SPRITESHEET_PATH
+    )
+
+    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(right_report.width, right_report.height)
+    print(f"canvas lógico derivado: {canvas_width}x{canvas_height} (nativo {right_report.width}x{right_report.height}, referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE})")
+    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
+
+    click_right_report, click_left_report = _derive_left_direction(
+        "click_reaction", CLICK_RIGHT_FRAMES_DIR, CLICK_LEFT_FRAMES_DIR, CLICK_RIGHT_SPRITESHEET_PATH, CLICK_LEFT_SPRITESHEET_PATH
+    )
 
     right_dir = os.path.join("animations", "idle", "right", "frames")
     left_dir = os.path.join("animations", "idle", "left", "frames")
-    right_frame_entries = [frame_entry(right_dir, i) for i in range(right_report.frame_count)]
-    left_frame_entries = [frame_entry(left_dir, i) for i in range(left_report.frame_count)]
+    right_frame_entries = [_frame_entry(right_dir, i) for i in range(right_report.frame_count)]
+    left_frame_entries = [_frame_entry(left_dir, i) for i in range(left_report.frame_count)]
+
+    click_right_dir = os.path.join("animations", "click_reaction", "right", "frames")
+    click_left_dir = os.path.join("animations", "click_reaction", "left", "frames")
+    click_right_frame_entries = [_frame_entry(click_right_dir, i) for i in range(click_right_report.frame_count)]
+    click_left_frame_entries = [_frame_entry(click_left_dir, i) for i in range(click_left_report.frame_count)]
 
     # fps derivado de la cantidad REAL de frames entregados / la
     # duración de generación configurada en Ludo.ai -- nunca
     # hardcodeado a 24/25 (ver EXPORT_DURATION_SECONDS arriba y
     # validate_frame_sequence.py).
     idle_playback_fps = right_report.frame_count / EXPORT_DURATION_SECONDS
+    click_playback_fps = click_right_report.frame_count / CLICK_EXPORT_DURATION_SECONDS
+    print(f"click_reaction: {click_right_report.frame_count} frames reales @ {click_right_report.width}x{click_right_report.height}, fps derivado={click_playback_fps:.4f}")
 
     manifest = {
         "id": "nidir",
@@ -233,7 +305,7 @@ def main() -> int:
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
         "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS_PLACEHOLDER,
-        "content_version": "block04.2-nidir-3",
+        "content_version": "block04.2-nidir-4",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         # Pose base: ESTÁTICA, un solo frame (frame_000 -- la misma
         # imagen que también es el último frame lógico de la
@@ -248,7 +320,7 @@ def main() -> int:
             "kind": "static",
             "fps": 0,
             "returns_to_idle": True,
-            "frames": [frame_entry(right_dir, 0)],
+            "frames": [_frame_entry(right_dir, 0)],
         },
         "idle_direction_overrides": [
             {
@@ -257,37 +329,35 @@ def main() -> int:
                 "kind": "static",
                 "fps": 0,
                 "returns_to_idle": True,
-                "frames": [frame_entry(left_dir, 0)],
+                "frames": [_frame_entry(left_dir, 0)],
             }
         ],
-        # Placeholder estructural: Nidir no tiene todavía arte de click
-        # dedicado real (bloqueado en esta sesión -- ver el informe
-        # final, "blocker de acceso a ~/Downloads") -- reutiliza el
-        # primer frame de idle-right/idle-left como un "blip" de un
-        # solo frame que vuelve a Idle casi de inmediato, en vez de
-        # una animación real. Documentado explícitamente como
-        # placeholder, NO removido todavía (removerlo sin el
-        # reemplazo real dejaría click_reaction sin contenido válido,
-        # una regresión peor que mantener el placeholder). Debe ser
-        # one_shot (no static): un click_reaction static dejaría al
-        # AnimationController trabado en ese estado para siempre, ya
-        # que Advance() nunca transiciona de vuelta a Idle para una
-        # animación kStatic.
+        # click-fire real (importado en la tercera pasada de este
+        # bloque, ver docs/NIDIR_CONTENT.md §10/§11) -- reemplaza el
+        # placeholder estructural de un solo frame de las pasadas
+        # anteriores. 25 frames reales exportados de Ludo.ai
+        # ("nidir-click-fire-right"), one_shot, mismo mecanismo de
+        # retorno a la pose base estática que ya usa passive_actions
+        # (returns_to_idle vía AnimationController::TransitionToIdle()).
+        # Debe ser one_shot (no static): un click_reaction static
+        # dejaría al AnimationController trabado en ese estado para
+        # siempre, ya que Advance() nunca transiciona de vuelta a Idle
+        # para una animación kStatic.
         "click_reaction": {
-            "id": "click_reaction_placeholder",
+            "id": "click_fire_right",
             "kind": "one_shot",
-            "fps": 0,
+            "fps": click_playback_fps,
             "returns_to_idle": True,
-            "frames": [frame_entry(right_dir, 0) | {"duration_ms": 100}],
+            "frames": click_right_frame_entries,
         },
         "click_reaction_direction_overrides": [
             {
                 "direction": "left",
-                "id": "click_reaction_placeholder_left",
+                "id": "click_fire_left",
                 "kind": "one_shot",
-                "fps": 0,
+                "fps": click_playback_fps,
                 "returns_to_idle": True,
-                "frames": [frame_entry(left_dir, 0) | {"duration_ms": 100}],
+                "frames": click_left_frame_entries,
             }
         ],
         # La secuencia completa importada, reclasificada como acción
