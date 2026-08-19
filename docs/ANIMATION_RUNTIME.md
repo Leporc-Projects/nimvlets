@@ -343,6 +343,33 @@ runtime with no content to show is a real problem to surface, not paper
 over — consistent with the asset pipeline's own "fail loudly" contract
 (§4 above) applied at the app level too. See DEC-023.
 
+## 9.1 Texture attachment coverage — a silent failure mode `PetPackLoader` can't catch
+
+A pack that fails to *load* fails loudly (§9). A pack that loads fine
+but has one animation collection whose frames never get an SDL texture
+attached does **not** fail loudly by default — `graphics::FrameTexture`
+only turns pixel data into a texture when `SpikeApp::AttachAllTextures()`
+explicitly walks that collection and calls `AttachFrameTexture()` on
+each frame; a collection it doesn't walk simply keeps
+`frame.rendererHandle == nullptr` forever, which `SpikeApp::RenderFrame()`
+renders as fully transparent, with no error unless a frame that
+demonstrably has real pixel data hits that path (`RenderFrame()` logs a
+warning in exactly that case — Block 04.2, third pass). `content::AnimationController`
+has no visibility into this at all: `ResolveClickReaction()`/
+`ResolvePassiveAction()` resolve the right `AnimationDefinition`
+regardless, so the content-model layer looks completely correct even
+when the app layer silently drops a collection.
+
+This happened for real: `clickReactionDirectionOverrides`/
+`passiveActionDirectionOverrides` (added to the content model in
+Block 04.2's second pass) were missing from `AttachAllTextures()`/
+`ReleaseAllTextures()` until the third pass, when Nidir's real
+click-fire content first exercised a non-canonical direction and
+exposed it — see `docs/NIDIR_CONTENT.md` §6 and `docs/DECISION_LOG.md`
+DEC-049. `src/content/AnimationDefinition.h` now carries an explicit
+comment next to `PetDefinition` calling this out for the next animation
+collection someone adds.
+
 ## 10. Running
 
 ```bash

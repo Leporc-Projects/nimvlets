@@ -108,8 +108,9 @@ showing whichever pet the catalog resolves as active (see
 fixture the repository owner supplied in Block 01, *not* final content
 (see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
 [`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). **Nidir**
-(513×525, `assets/dev/nidir_pack.nvpack`) is the catalog's second, real
-entry since Block 04.2 — see
+(156×160 logical canvas, derived from its native 513×525 idle art —
+see `docs/NIDIR_CONTENT.md` §7 — `assets/dev/nidir_pack.nvpack`) is the
+catalog's second, real entry since Block 04.2 — see
 [`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) — reachable today via
 `NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). The catalog
 and the active pet's pack are required, not optional — if either can't

@@ -14,14 +14,19 @@ y `docs/CATALOG.md` para el catálogo en el que Nidir ahora es una
 segunda entrada real.
 
 **Nota de alcance de esta versión del documento:** este bloque tuvo
-dos pasadas. La primera integró a Nidir con una semántica de
+tres pasadas. La primera integró a Nidir con una semántica de
 animación INCORRECTA (idle en loop continuo) y un canvas del tamaño
 nativo del arte fuente (Nidir aparecía mucho más grande que Bunny en
-pantalla). La segunda pasada corrige ambas cosas y agrega el intento
-de importar la animación real de click-fire — bloqueado por falta de
-acceso a `~/Downloads` en esta sesión, ver §10. Este documento describe
-el estado FINAL (corregido); `docs/DECISION_LOG.md` conserva el
-registro histórico de ambas pasadas con sus propias entradas.
+pantalla). La segunda corrige ambas cosas y agrega el intento de
+importar la animación real de click-fire — bloqueado por falta de
+acceso a `~/Downloads` en esa sesión. La tercera pasada, tras
+resolverse el bloqueo de acceso (ver §10), importa el click-fire real
+("blue-fire") y reemplaza el placeholder estructural que las dos
+pasadas anteriores mantuvieron, además de encontrar y corregir un bug
+real de cobertura de texturas descubierto al ejercitar ese contenido
+(ver §6). Este documento describe el estado FINAL (tercera pasada);
+`docs/DECISION_LOG.md` conserva el registro histórico de las tres
+pasadas con sus propias entradas.
 
 ## 1. Convención de asset source (permanente, para todo Nimvlet futuro)
 
@@ -324,21 +329,112 @@ runtime (`docs/CATALOG.md`) no necesitaron ningún cambio de código —
 agregar Nidir fue puramente agregar una fila de manifest + recompilar,
 exactamente la promesa que `docs/CATALOG.md` §4 ya hacía.
 
-`click_reaction` de Nidir sigue siendo, en el estado final de este
-bloque, un **placeholder estructural**: dos frames cortos (reutilizan
-`frame_000` de idle right/left), `one_shot`, ~100ms cada uno,
-`returns_to_idle: true`, con override direccional propio (right/left)
-— NO la animación real de "blue-fire" que el owner terminó de exportar
-durante la segunda pasada de este bloque (`~/Downloads/nidir-click-fire-right`/
-`-spritesheet`). La importación de esa animación real quedó
-**bloqueada** por falta de acceso a `~/Downloads` en esta sesión (ver
-§10) — el placeholder se mantiene exactamente por esa razón: quitarlo
-sin el reemplazo real habría dejado `click_reaction` sin contenido
-válido, una regresión peor que mantenerlo. Debe ser `one_shot`, nunca
-`static`: un `click_reaction` estático dejaría al `AnimationController`
-trabado en `ClickReaction` para siempre, ya que `Advance()` nunca
-transiciona de vuelta a Idle para una animación `kStatic` (solo lo
-hace al terminar naturalmente un one-shot).
+`click_reaction` de Nidir es, desde la tercera pasada de este bloque,
+la animación real de "blue-fire" que el owner exportó
+(`nidir-click-fire-right`/`-spritesheet`, staging temporal en
+`local_imports/nidir/` — nunca commiteado, ya eliminado tras la
+importación). El placeholder estructural de un solo frame de las dos
+primeras pasadas fue reemplazado por completo, no conservado en
+paralelo.
+
+**Estructura real del export, inspeccionada antes de asumir nada**
+(el brief advertía explícitamente: "the frames export may contain one
+additional nested folder"): `nidir-click-fire-right/` sí traía esa
+carpeta anidada extra (`Nidir-a-masculine-b/`, el nombre interno del
+asset en la herramienta de origen) conteniendo los 25 PNG reales
+(`frame_000.png`..`frame_024.png`, ya deterministas, sin necesidad de
+renombrar); `nidir-click-fire-right-spritesheet/` traía un único
+`Nidir-a-masculine-b.png` (3120×3060 = grilla 5×5 de frames de
+624×612, confirma que los 25 frames y el spritesheet son
+consistentes entre sí).
+
+**Import, mismo pipeline que idle:** los 25 frames se copiaron (nunca
+movidos) a
+`assets/source/nimvlets/nidir/animations/click_reaction/right/frames/`
+sin renombrar (ya cumplían la convención `frame_NNN.png`); el
+spritesheet se copió tal cual a
+`.../click_reaction/right/spritesheet/spritesheet.png` (referencia
+secundaria, igual que el de idle); `tools/generate_nidir_pack.py`
+deriva `left` por el mismo espejado horizontal determinista que ya
+usaba para idle (ahora factorizado en una función reusada por ambas
+animaciones — `_derive_left_direction()`), preservando alpha
+exactamente y validado con `tools/validate_frame_sequence.py`
+(dimensiones/orden/sin huecos/alpha no degenerada, igual contrato que
+idle).
+
+**Frame count real: 25** (nativo 624×612 — resolución distinta a la de
+idle, 513×525, porque el efecto de fuego extiende el bounding box
+visible más allá del personaje). No se forzó ningún número — es
+exactamente lo que el export trajo, igual que idle. El fps de
+reproducción se derivó de la misma duración de generación de Ludo.ai
+que idle (3s), asumiendo que el export de click-fire usó la misma
+configuración — una suposición explícita y documentada (el owner no
+confirmó la duración de este export puntual por separado), no medida
+de forma independiente: `25 / 3.0 ≈ 8.33 fps`. El canvas lógico del
+pet (156×160, ver §7) NO cambia por esta importación — se mantiene
+derivado únicamente de idle; los frames de click-fire, con un aspect
+ratio nativo ligeramente distinto (624/612 ≈ 1.020 vs. 156/160 =
+0.975), se estiran ~4.5% al renderizarse en el mismo canvas que
+cualquier otro frame de Nidir (`SDL_RenderTexture` siempre estira el
+texture completo al rect de destino exacto — comportamiento genérico
+preexistente desde Block 02, no nuevo de esta importación, y
+suficientemente sutil para un efecto de fuego que no amerita un canvas
+dedicado solo para esta animación).
+
+**Hallazgo honesto de primer/último frame** (mismo método que idle,
+§6.1): comparando `frame_000` y `frame_024` del click-fire real,
+~94.3% del área coincide (65.0% ambos transparentes + 29.3% visible y
+esencialmente igual), ~5.2% muestra una diferencia visible real
+(probablemente el fuego apagándose hacia el frame final), 0.5% es
+jitter de borde antialiaseado. Documentado, no oculto — y, como con
+idle, irrelevante para la garantía de "vuelve a la pose base": 
+`AnimationController::TransitionToIdle()` siempre re-muestra la
+verdadera pose base estática de Nidir al terminar, nunca el último
+frame de `click_reaction` en sí.
+
+Debe ser `one_shot`, nunca `static`: un `click_reaction` estático
+dejaría al `AnimationController` trabado en `ClickReaction` para
+siempre, ya que `Advance()` nunca transiciona de vuelta a Idle para
+una animación `kStatic` (solo lo hace al terminar naturalmente un
+one-shot).
+
+**Bug real encontrado y corregido al importar este contenido:**
+`SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()` (agregadas en
+Block 02, nunca actualizadas cuando la segunda pasada de este bloque
+agregó `clickReactionDirectionOverrides`/`passiveActionDirectionOverrides`)
+no cubrían esas dos colecciones — `AnimationController` resolvía el
+override "left" correctamente, pero sus frames nunca tenían una
+textura SDL adjunta, así que `RenderFrame()` los dibujaba
+completamente transparentes: el pet "desaparecía" en silencio durante
+cualquier click o idle periódico reproducido en dirección "left" (o
+cualquier dirección no canónica). El hit-mask no se veía afectado
+(usa `frame.pixels` directamente, no la textura), así que el
+click-through seguía siendo correcto — solo el render era el
+problema. Pasó desapercibido en las dos pasadas anteriores porque el
+placeholder de click de un solo frame nunca se verificó visualmente
+(los smoke tests solo revisaban logs, no pixeles) y el idle periódico
+en dirección left tampoco. Se reprodujo deliberadamente (revirtiendo
+temporalmente el fix, confirmando el log de advertencia nuevo — ver
+abajo — y luego restaurando el fix) antes de darlo por corregido, no
+solo se infirió de leer el código. Corregido agregando las dos
+colecciones faltantes a ambas funciones (`src/app/SpikeApp.cpp`), y se
+agregó un log defensivo permanente en `RenderFrame()` que reporta
+cualquier frame con pixels reales pero sin textura adjunta — detecta
+automáticamente cualquier regresión futura de esta misma clase de bug
+sin depender de inspección visual manual. `src/content/AnimationDefinition.h`
+gana un comentario explícito junto a `PetDefinition` advirtiendo que
+cualquier colección de animaciones nueva debe actualizar esas dos
+funciones.
+
+Este bug no se pudo cubrir con un test unitario en `tests/` porque
+`SpikeApp`/`AttachAllTextures` viven en el ejecutable `nimvlets_spike`
+(SDL-dependiente), no en ninguna librería que `nimvlets_tests` enlace
+— consistente con la convención ya establecida de este proyecto de
+mantener `tests/` completamente libre de SDL (ver DEC-022). La
+verificación real fue: reproducir el bug contra el binario compilado
+real (confirmando el log de advertencia), corregirlo, y re-confirmar
+(0 advertencias) — documentado acá en vez de fingir cobertura vía un
+test que no puede existir con la arquitectura actual.
 
 **Nota de organización, no resuelta en este bloque:** el pack
 compilado de Nidir vive en `assets/dev/nidir_pack.nvpack`, la misma
@@ -473,14 +569,32 @@ renderizado real de Nidir puede llegar a mostrar.
 - **Downscale opcional en tiempo de compilación a 320px máximo por
   lado** (§8) — reduce RSS de forma real y medida, sin tocar ningún
   PNG fuente.
-- **`click_reaction` sigue siendo un placeholder** (ahora con override
-  direccional propio) en vez de la animación real de blue-fire —
-  bloqueado por falta de acceso a `~/Downloads`, ver §10.
+- **`click_reaction` real importado en la tercera pasada** (§6) —
+  reemplaza por completo el placeholder de las dos pasadas anteriores,
+  una vez resuelto el bloqueo de acceso a `~/Downloads` (§10).
 - **`ResolveClickReaction()`/`ResolvePassiveAction()` nuevos** — la
   extensión direccional de la primera pasada solo cubría `idle`; la
   segunda pasada la generalizó a `clickReaction`/`passiveActions`
   siguiendo el mismo patrón aditivo exacto, necesario para poder
-  resolver right/left del click-fire real en cuanto se importe.
+  resolver right/left del click-fire real, que se terminó de importar
+  en la tercera pasada.
+- **`SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()` corregidas**
+  (§6) — no cubrían `clickReactionDirectionOverrides`/
+  `passiveActionDirectionOverrides`, un bug real de cobertura de
+  texturas descubierto al ejercitar el click-fire real en dirección
+  "left" por primera vez.
+- **Residencia dual de dirección NO optimizada, a propósito** — ver
+  "Bugs/debt/limitations" del informe final: `AttachAllTextures()`
+  mantiene ambas direcciones (right y left) de TODAS las animaciones
+  residentes en memoria de forma permanente mientras el pet está
+  activo, aunque solo una dirección se muestra a la vez. Es una
+  oportunidad de optimización real e identificada (ahorraría del
+  orden de 15MB de RSS para Nidir), pero implementar carga/descarga de
+  texturas por dirección bajo demanda es un cambio de arquitectura más
+  grande y con más riesgo (manejar una animación en reproducción
+  cuando cambia la dirección activa, etc.) que lo proporcional a esta
+  pasada de corrección puntual — se documenta como hallazgo real,
+  deliberadamente no implementado, no como una omisión no examinada.
 - **`NIMVLETS_DEV_CLICK_TEST_COUNT` nuevo** — mecanismo solo-DEV para
   disparar clicks sintéticos sin necesitar un evento de mouse real,
   mismo patrón que `NIMVLETS_DEV_SWITCH_TEST_COUNT`/
@@ -493,34 +607,51 @@ renderizado real de Nidir puede llegar a mostrar.
 - **Sin `provenance.json` para Nidir** — el brief pide `DESCRIPTION.txt`
   específicamente (rasgos físicos), no procedencia.
 
-## 10. Blocker: sin acceso a `~/Downloads` para importar el click-fire real
+## 10. Blocker de acceso a `~/Downloads`/`~/Documents` — histórico, RESUELTO
 
 Durante la segunda pasada de este bloque, el owner exportó la
 animación real de click-fire de Nidir a `~/Downloads/nidir-click-fire-right`/
 `~/Downloads/nidir-click-fire-right-spritesheet`. **El acceso a
-`~/Downloads` estuvo denegado durante toda esta sesión**
+`~/Downloads` estuvo denegado durante toda esa sesión**
 ("Operation not permitted" — `ls`, `find`, y `osascript`/Finder vía
 Apple Events fallaron todos de la misma forma, consistentemente, en
-más de 6 intentos separados a lo largo de dos turnos de esta
+más de 6 intentos separados a lo largo de dos turnos de esa
 conversación; `~/Documents` y el resto del filesystem del usuario sí
-son accesibles con normalidad, así que es un bloqueo específico de la
-carpeta Downloads — muy probablemente un permiso de privacidad de
-macOS (TCC) para la app/terminal detrás de esta sesión, no un problema
-de este repositorio). No se pudo inspeccionar ni copiar ninguno de los
-dos folders.
+eran accesibles con normalidad en ese momento). No se pudo inspeccionar
+ni copiar ninguno de los dos folders — se documentó el bloqueo
+explícitamente en vez de inventar o asumir contenido.
 
-**Lo que esto significa concretamente:**
-- `click_reaction` de Nidir sigue siendo el placeholder de dos frames
-  (§6), NO la animación real de blue-fire.
-- No existe ningún dato real sobre la cantidad de frames, resolución,
-  o duración del export de click-fire — nada se asumió ni se inventó
-  en su lugar.
-- El mecanismo para importarlo (§11, mismo patrón que idle) está
-  completamente listo y probado (extensión direccional de
-  `clickReaction` ya implementada y testeada — ver §5, §9) — en cuanto
-  el acceso a `~/Downloads` se restablezca, importar el click-fire real
-  es aplicar exactamente los mismos pasos que ya funcionaron para
-  idle, sin ningún cambio de arquitectura adicional.
+**Al retomarse esta pasada (tercera), el bloqueo había empeorado
+temporalmente antes de resolverse:** el acceso vía Bash (la herramienta
+usada para `git`/`cmake`/`ctest`/scripts de Python) se había perdido
+para `~/Documents` COMPLETO (no solo `~/Downloads`) — listar el propio
+directorio del repositorio, `git status`, y cualquier comando que
+necesitara leer el árbol de trabajo fallaban con el mismo
+"Operation not permitted", mientras que lecturas/escrituras a rutas
+YA CONOCIDAS (no un listado de directorio) seguían funcionando. El
+patrón es consistente con la protección de privacidad de macOS (TCC)
+para la categoría "Documentos" — la misma categoría que ya afectaba a
+Downloads —, aplicada esta vez al proceso detrás de la herramienta de
+shell de esta sesión específicamente (las herramientas de
+lectura/escritura de archivo directo NO se vieron afectadas). El owner
+otorgó **Acceso Total al Disco** ("Full Disk Access") a la app Claude
+en Ajustes del Sistema → Privacidad y Seguridad, y reinició la app —
+tras eso, tanto el listado de directorios como `git status` volvieron
+a funcionar con normalidad de inmediato, sin ningún cambio de este
+repositorio.
+
+**Una vez resuelto:** se inspeccionó la estructura real de
+`local_imports/nidir/` (staging temporal que el owner preparó como
+alternativa a `~/Downloads` para esta pasada — nunca commiteado, ver
+`.git/info/exclude`, no modificado por este bloque) y se confirmó
+exactamente la advertencia del brief original: el export de frames
+traía una carpeta anidada adicional
+(`nidir-click-fire-right/Nidir-a-masculine-b/`) antes de los PNG
+reales — inspeccionado, no asumido. El import completo se describe en
+§6. `local_imports/nidir/` se eliminó tras copiar y verificar (checksum
+MD5) los 25 frames + el spritesheet en su ubicación canónica dentro de
+`assets/source/nimvlets/nidir/` — el staging ya no es necesario y
+nunca debía commitearse.
 
 ## 11. Cómo un Nimvlet futuro sigue el mismo patrón
 
@@ -542,3 +673,18 @@ dos folders.
 5. Agregar una entrada a `assets/dev/pet_catalog_manifest.json` y
    recompilar con `tools/compile_pet_catalog.py` — cero cambios en
    `src/catalog`/`src/app`.
+6. El canvas lógico se deriva, no se copia de la resolución nativa —
+   usar `prep_dev_sprite.compute_logical_canvas_size()` (§7); si el
+   pack crece de tamaño (más animaciones/direcciones), considerar
+   `runtime_max_frame_dimension` en el manifest (§8) para acotar RSS,
+   siempre sin tocar los PNG fuente.
+7. **Si el pet agrega una animación/override direccional NUEVO**
+   (algo más allá de `idle`/`clickReaction`/`passiveActions` y sus
+   respectivos overrides ya existentes): confirmar que
+   `SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()` cubran la
+   colección nueva (ver el comentario junto a `PetDefinition` en
+   `src/content/AnimationDefinition.h`) — omitir esto no rompe la
+   resolución de contenido (`AnimationController` sigue funcionando
+   bien), pero hace que esa animación se renderice completamente
+   transparente en silencio. Ver §6 para el caso real que motivó este
+   punto.

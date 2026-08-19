@@ -834,7 +834,11 @@ escribe ni un byte de más, y el pack compilado es idéntico al de antes
 de este bloque.
 
 ### DEC-040 — Placeholder de un solo frame para el click_reaction de Nidir
-**Status:** DECIDIDO · Block 04.2 — ver `docs/NIDIR_CONTENT.md` §6.
+**Status:** SUPERSEDED por DEC-048 — Block 04.2, tercera pasada. El
+click-fire real fue importado, reemplazando el placeholder por
+completo.
+
+<details><summary>Texto original (para contexto histórico)</summary>
 
 El export real que el owner proveyó solo cubre la animación de idle
 -- no existe arte de click dedicado para Nidir todavía. Como
@@ -849,6 +853,8 @@ cuando una animación `kOneShot` termina naturalmente -- una animación
 siempre después del primer click, bloqueando clicks y acciones
 pasivas futuras. Documentado explícitamente como placeholder, no como
 contenido terminado.
+
+</details>
 
 ### DEC-041 — fps del idle loop de Nidir: 6.0, elegido por medición real, no por el export
 **Status:** SUPERSEDED por DEC-044 — Block 04.2, segunda pasada. `idle`
@@ -994,22 +1000,128 @@ mide para Retina desde Block 01). Resultado medido: pack compilado de
 ~58MB a ~21.6MB; RSS en runtime de ~259MB a ~128MB (ver
 `docs/PERFORMANCE_BUDGETS.md`).
 
-### DEC-047 — Blocker de acceso a `~/Downloads`: click-fire real de Nidir no importado en este bloque
+### DEC-047 — Blocker de acceso a `~/Downloads`/`~/Documents`: RESUELTO en la tercera pasada
 **Status:** DECIDIDO (hallazgo, no una elección de diseño) · Block
-04.2, segunda pasada — ver `docs/NIDIR_CONTENT.md` §10.
+04.2 — ver `docs/NIDIR_CONTENT.md` §10 para el registro completo,
+incluida la resolución.
 
 El owner exportó la animación real de click-fire
 (`~/Downloads/nidir-click-fire-right`/`-spritesheet`) durante la
 segunda pasada de este bloque, pero el acceso a `~/Downloads` estuvo
 denegado ("Operation not permitted") de forma consistente en más de 6
 intentos, con `~/Documents` y el resto del filesystem accesibles con
-normalidad -- confirmado como un bloqueo específico de esa carpeta
-(muy probablemente TCC/privacidad de macOS para la sesión detrás de
-este agente), no un problema de este repositorio. Se decidió no seguir
+normalidad en ese momento -- confirmado como un bloqueo específico de
+esa carpeta, no un problema de este repositorio. Se decidió no seguir
 reintentando indefinidamente y, en cambio, dejar `click_reaction` como
-el placeholder existente (DEC-040, ahora con override direccional
-propio agregado) y reportar el blocker explícitamente en vez de
-omitirlo o fabricar una importación. El mecanismo para importarlo en
-cuanto el acceso se restablezca ya está listo y probado (misma
-extensión direccional que ya cubre `idle`, generalizada a
-`clickReaction` en este mismo bloque).
+el placeholder existente (DEC-040) y reportar el blocker explícitamente
+en vez de omitirlo o fabricar una importación.
+
+Al retomarse la tercera pasada, el mismo tipo de bloqueo (TCC de
+macOS, categoría "Documentos") había escalado temporalmente a
+`~/Documents` completo vía la herramienta de shell de esta sesión
+-- `git`/`cmake`/`ctest`/scripts de Python dejaron de poder listar el
+propio repositorio. El owner otorgó Acceso Total al Disco a la app
+Claude (Ajustes del Sistema → Privacidad y Seguridad) y reinició la
+app; el acceso se restableció de inmediato, sin cambios de este
+repositorio. El owner además preparó el export real en
+`local_imports/nidir/` (staging local, nunca commiteado) como vía de
+acceso alternativa mientras tanto. El click-fire real se importó
+exitosamente en esta misma pasada -- ver DEC-048.
+
+---
+
+### DEC-048 — Import del click-fire real de Nidir, reemplazando el placeholder por completo
+**Status:** DECIDIDO · Block 04.2, tercera pasada — ver
+`docs/NIDIR_CONTENT.md` §6. **Supersede DEC-040.**
+
+Import desde `local_imports/nidir/` (staging local del owner, ver
+DEC-047), siguiendo exactamente el mismo pipeline que idle: se
+inspeccionó la estructura real antes de asumir nada (el export sí
+traía una carpeta anidada extra, `Nidir-a-masculine-b/`, exactamente
+como el brief advertía que podía pasar); los 25 frames PNG (ya
+deterministas, `frame_000.png`..`frame_024.png`) se copiaron -- nunca
+movieron -- a
+`assets/source/nimvlets/nidir/animations/click_reaction/right/frames/`;
+el spritesheet (3120×3060, grilla 5×5 de frames de 624×612,
+consistente con los 25 frames) se copió a
+`.../click_reaction/right/spritesheet/spritesheet.png` como referencia
+secundaria; `left` se derivó por el mismo espejado horizontal
+determinista que ya usaba idle, ahora factorizado en una función
+reusada por ambas animaciones (`_derive_left_direction()` en
+`tools/generate_nidir_pack.py`). 25 frames reales, nativo 624×612 --
+distinto de idle (513×525) porque el efecto de fuego extiende el
+bounding box visible. fps derivado de la misma duración de generación
+de Ludo.ai que idle (3s) -- asumiendo que el export de click-fire usó
+la misma configuración, una suposición explícita y documentada, no
+confirmada de forma independiente por el owner para este export
+puntual. `local_imports/nidir/` se eliminó tras copiar y verificar
+(checksum MD5) todo el contenido en su ubicación canónica -- el
+staging ya no era necesario.
+
+### DEC-049 — Fix: `AttachAllTextures()`/`ReleaseAllTextures()` no cubrían los overrides direccionales de click/passive
+**Status:** DECIDIDO (corrección de bug) · Block 04.2, tercera pasada
+— ver `docs/NIDIR_CONTENT.md` §6.
+
+Al ejercitar el click-fire real en dirección "left" por primera vez
+(la primera vez que este código path se ejercita con contenido real
+no-placeholder) se encontró que `SpikeApp::AttachAllTextures()`/
+`ReleaseAllTextures()` -- que adjuntan/liberan las texturas SDL de
+cada frame al cargar/descargar un pet -- nunca fueron actualizadas
+cuando la segunda pasada de este bloque agregó
+`clickReactionDirectionOverrides`/`passiveActionDirectionOverrides`
+al content model. `AnimationController` resolvía el override "left"
+correctamente (`ResolveClickReaction()`/`ResolvePassiveAction()`
+funcionan bien), pero sus frames nunca tenían una textura adjunta --
+`RenderFrame()` los dibujaba completamente transparentes, un bug real
+y silencioso (sin crash, sin error visible) donde el pet "desaparece"
+durante cualquier click o idle periódico en una dirección no
+canónica. El hit-mask no se veía afectado (usa `frame.pixels`
+directamente, no la textura), así que el click-through seguía siendo
+correcto -- solo el render era el problema. Pasó desapercibido en las
+dos pasadas anteriores porque ningún smoke test de ese código
+inspeccionaba pixeles reales, solo logs.
+
+Reproducido deliberadamente (revirtiendo temporalmente el fix,
+confirmando el síntoma contra el binario real, restaurando el fix)
+antes de darlo por corregido -- no solo inferido de leer el código.
+Corregido agregando las dos colecciones faltantes a ambas funciones.
+Se agregó además un log defensivo permanente en `RenderFrame()`
+(`SpikeApp.cpp`) que reporta cualquier frame con pixels reales pero
+sin textura adjunta -- detecta automáticamente cualquier regresión
+futura de esta misma clase de bug. `PetDefinition`
+(`AnimationDefinition.h`) gana un comentario explícito advirtiendo que
+cualquier colección de animaciones nueva debe actualizar esas dos
+funciones. No se pudo cubrir con un test unitario en `tests/` porque
+`SpikeApp` vive en el ejecutable SDL-dependiente `nimvlets_spike`, no
+en ninguna librería que `nimvlets_tests` enlace -- consistente con la
+convención ya establecida de mantener `tests/` completamente libre de
+SDL (DEC-022); la verificación fue reproducir+corregir+re-confirmar
+contra el binario real, documentado explícitamente en vez de fingir
+cobertura de test que la arquitectura actual no permite.
+
+### DEC-050 — Residencia dual de dirección (right+left) NO optimizada, a propósito
+**Status:** DECIDIDO (hallazgo documentado, optimización diferida) ·
+Block 04.2, tercera pasada — ver `docs/PERFORMANCE_BUDGETS.md`.
+
+Con el fix de DEC-049, `AttachAllTextures()` ahora mantiene
+correctamente residentes en memoria las texturas de AMBAS direcciones
+de TODAS las animaciones de Nidir mientras el pet está activo, aunque
+solo una dirección se renderiza a la vez -- esto es "unnecessary
+simultaneous... directions... retained" en el sentido literal que el
+brief de este bloque pide evaluar. RSS estático de Nidir subió de
+~127MB (segunda pasada, click-fire aún placeholder) a ~156MB (tercera
+pasada, 50 frames reales adicionales de click-fire en ambas
+direcciones, correctamente atendidos). Se estima que cargar/descargar
+texturas por dirección bajo demanda (en vez de las dos siempre
+residentes) ahorraría del orden de ~15MB para Nidir -- una
+optimización real, identificada, pero con complejidad/riesgo
+desproporcionados para esta pasada de corrección puntual (requeriría
+manejar el caso de una animación en reproducción activa justo cuando
+cambia la dirección activa, entre otros). Se documenta como hallazgo
+honesto y oportunidad real para un bloque futuro, deliberadamente no
+implementada acá -- no una omisión sin examinar. La mayoría del
+incremento de RSS es contenido real legítimo (50 frames reales
+reemplazando un placeholder de 2 frames), no desperdicio: los frames
+ya están acotados a 320px por lado (mismo `runtime_max_frame_dimension`
+genérico que idle, DEC-046), sin superficies sobredimensionadas ni
+datos duplicados.

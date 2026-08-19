@@ -223,3 +223,73 @@ definición no es reposo — se documenta como el costo real y aceptado
 de reproducir una animación de 25 frames a canvas 156×160, sin
 optimizar más allá de lo que DEC-045/DEC-046 ya hicieron (AGENTS.md:
 "Optimize only where justified by evidence").
+
+## Mediciones reales de Block 04.2, tercera pasada (click-fire real importado)
+
+Mismo método (Release, arm64 nativo, `ps -o rss,%cpu`, procesos
+separados por escenario, `SIGTERM` limpio al final), tras importar el
+click-fire real de 25 frames (DEC-048) y corregir el bug de cobertura
+de texturas (DEC-049) — ver `docs/NIDIR_CONTENT.md` §6.
+
+| Escenario | Cómo se disparó | CPU | RSS (steady state) |
+|---|---|---|---|
+| **(A) Base estática** | `NIMVLETS_DEV_SWITCH_TEST_COUNT=2`, sin overrides adicionales, 15s de muestreo | **0.0%** | **≈156.0–156.5 MB** |
+| **(B) Idle periódico activo** | ídem + `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=15`, 30s de muestreo | pico **≈2.3%** durante la reproducción (~3s), 0.0% el resto | ≈156.0–156.5 MB, plano en los ciclos observados (sin cambio vs. la segunda pasada — el click-fire no afecta este escenario) |
+| **(C) Click-fire activo** | `NIMVLETS_DEV_CLICK_TEST_COUNT=1`, muestreo cada 0.5s desde el arranque | pico inicial ≈14.7% (dominado por arranque: creación de ventana + adjuntar ~102 texturas del pack completo, no por el click en sí), luego **≈1.8–4.3%** durante los ~3s de reproducción real, cae a 0.0% al terminar | ≈155.9–156.4 MB, plano tras el arranque |
+| Ráfaga de 500 clicks sintéticos consecutivos | `NIMVLETS_DEV_CLICK_TEST_COUNT=500` | 0.0% tras el arranque (coalescidos, ver nota) | ≈156.4 MB, sin crecimiento — confirma que disparar `TriggerClick()` repetidamente no acumula recursos (no se crea ninguna textura nueva por click; `AttachAllTextures()` ya adjuntó todo una sola vez al cargar el pet) |
+| Bunny, sin switch (regresión) | proceso separado, sin overrides | 0.0% | ≈73.6 MB — idéntico al baseline histórico |
+
+**Nota sobre el escenario (C):** a diferencia de la segunda pasada
+(placeholder de ~100ms, imposible de medir de forma aislada con
+`ps`), el click-fire real dura ~3s — suficiente para un muestreo
+significativo por primera vez. El pico observado (~1.8–4.3%, excluido
+el primer valor dominado por arranque) es del mismo orden que el pico
+de (B) (~2.3%), consistente con lo esperado: ambas animaciones
+comparten el mismo camino de código de render/hit-mask por frame
+(`docs/ANIMATION_RUNTIME.md` §3). "Ráfaga de 500 clicks" no ejercita
+500 reproducciones reales secuenciales (todas se disparan antes de que
+arranque el loop principal con el mismo timestamp, así que se
+coalescen en la última) — mide "disparar `TriggerClick()`
+repetidamente no acumula recursos", no "reproducir la animación 500
+veces seguidas no acumula recursos"; esto último no es sintetizable
+sin entrada de mouse real en este entorno, pero es un bajo riesgo
+arquitectónico: cada reproducción reutiliza los mismos punteros de
+textura ya adjuntados una vez al cargar el pet, sin ninguna asignación
+nueva por click.
+
+**RSS estático subió de ~127MB (segunda pasada) a ~156MB (tercera
+pasada)** — 50 frames reales de click-fire (25 por dirección) ahora
+correctamente resididos en memoria (antes del fix de DEC-049 estos
+frames técnicamente ocupaban memoria pero se renderizaban rotos/
+invisibles en dirección no canónica — el fix es estrictamente
+necesario, el costo de RSS es la consecuencia correcta de tener
+contenido real y funcional, no una regresión evitable). Investigado
+si el incremento es evitable (block brief: "check for avoidable
+residency... duplicated texture/mask data, oversized surfaces"):
+
+- **Frames sobredimensionados:** NO — los frames de click-fire (nativo
+  624×612) están acotados al mismo límite genérico de 320px por lado
+  que idle (`runtime_max_frame_dimension`, DEC-046), confirmado
+  (320×314 tras el downscale).
+- **Datos duplicados:** NO — a diferencia del placeholder anterior
+  (que reutilizaba los bytes de `idle/frame_000`), el click-fire real
+  es contenido genuinamente distinto por frame; el formato del pack
+  nunca compartía bytes entre animaciones de todos modos (cada
+  entrada de frame se compila con su propia copia), así que esto no
+  introduce ninguna duplicación nueva.
+- **Ambas direcciones residentes simultáneamente, aunque solo una se
+  muestra a la vez:** SÍ — esto es real y evitable en principio (ver
+  DEC-050), estimado en ~15MB de ahorro potencial para Nidir si se
+  implementara carga/descarga de texturas por dirección bajo demanda.
+  Deliberadamente NO implementado en esta pasada: la complejidad/riesgo
+  (manejar una animación en reproducción activa durante un cambio de
+  dirección, entre otros casos borde) es desproporcionada frente al
+  ahorro para una pasada de corrección puntual — documentado como
+  oportunidad real para un bloque futuro, no como omisión sin
+  examinar.
+
+Con esto, el RSS estático de Nidir (~156MB) sigue por encima del
+objetivo de "< 100MB" de la tabla de presupuestos — igual que ya
+ocurría en la segunda pasada (~127MB) — documentado como limitación
+real conocida, no oculta ni forzada a bajar artificialmente
+("Do not pick a resize merely to improve metrics").
