@@ -240,6 +240,51 @@ bool FramesLoadInDeterministicOrder() {
     return true;
 }
 
+// Block 04.2: la sección final opcional de idleDirectionOverrides (ver
+// docs/NIDIR_CONTENT.md). BuildMinimalValidPack() de arriba NO la
+// incluye -- cada test que la usa (todos los de arriba de este
+// comentario) ya ejercita implícitamente "un pack sin la sección
+// nueva carga igual que antes"; el test explícito de abajo lo deja
+// documentado como un caso con nombre, no solo incidental.
+
+bool PackWithoutTrailingSectionLeavesOverridesEmpty() {
+    const std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(LoadPetPackFromMemory(bytes.data(), bytes.size(), pet, error));
+    NIMVLETS_CHECK(pet.idleDirectionOverrides.empty());
+    return true;
+}
+
+bool PackWithDirectionalIdleOverrideLoadsCorrectly() {
+    std::vector<std::uint8_t> buf = BuildMinimalValidPack();  // idle fillByte=0x00, click fillByte=0xFF
+    AppendUint32(buf, 1);  // directionalIdleOverrideCount = 1
+    AppendUint8(buf, 1);   // direction = kLeft
+    AppendAnimation(buf, "idle_left", 1 /*loop*/, 1, 1, 1, 0x42);
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK(pet.idle.frames[0].pixels[0] == 0x00);  // idle canónico (kRight) sin tocar
+    NIMVLETS_CHECK(pet.idleDirectionOverrides.size() == 1);
+    NIMVLETS_CHECK(pet.idleDirectionOverrides[0].direction == nimvlets::content::Direction::kLeft);
+    NIMVLETS_CHECK(pet.idleDirectionOverrides[0].animation.frames[0].pixels[0] == 0x42);
+    return true;
+}
+
+bool InvalidDirectionByteInOverrideIsRejected() {
+    std::vector<std::uint8_t> buf = BuildMinimalValidPack();
+    AppendUint32(buf, 1);   // directionalIdleOverrideCount = 1
+    AppendUint8(buf, 99);   // direction inválida (solo 0/1 son válidos)
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
 bool InvalidCanvasSizeIsRejected() {
     std::vector<std::uint8_t> buf;
     AppendMagic(buf);
@@ -274,6 +319,9 @@ void RegisterPetPackLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetPackLoader/InvalidPlaybackKindByteIsRejected", InvalidPlaybackKindByteIsRejected);
     runner.Add("PetPackLoader/FramesLoadInDeterministicOrder", FramesLoadInDeterministicOrder);
     runner.Add("PetPackLoader/InvalidCanvasSizeIsRejected", InvalidCanvasSizeIsRejected);
+    runner.Add("PetPackLoader/PackWithoutTrailingSectionLeavesOverridesEmpty", PackWithoutTrailingSectionLeavesOverridesEmpty);
+    runner.Add("PetPackLoader/PackWithDirectionalIdleOverrideLoadsCorrectly", PackWithDirectionalIdleOverrideLoadsCorrectly);
+    runner.Add("PetPackLoader/InvalidDirectionByteInOverrideIsRejected", InvalidDirectionByteInOverrideIsRejected);
 }
 
 }  // namespace nimvlets::tests

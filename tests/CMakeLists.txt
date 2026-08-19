@@ -39,6 +39,8 @@ add_executable(nimvlets_tests
   PetSwitchingTest.cpp
   LinuxBackendPolicyTest.h
   LinuxBackendPolicyTest.cpp
+  DirectionTest.h
+  DirectionTest.cpp
   main.cpp
 )
 

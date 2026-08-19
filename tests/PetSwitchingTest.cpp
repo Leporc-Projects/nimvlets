@@ -132,6 +132,34 @@ std::vector<std::uint8_t> BuildMinimalPackBytes(const std::string& id, std::uint
     return buf;
 }
 
+// Variante "forma Nidir" de BuildMinimalPackBytes(): agrega la sección
+// final opcional de idleDirectionOverrides (Block 04.2 -- ver
+// docs/NIDIR_CONTENT.md) con una única entrada kLeft, distinguible por
+// su propio fillByte. Usado para probar que switchear entre un pack NO
+// direccional (forma Bunny) y uno SÍ direccional (forma Nidir) -- en
+// cualquier orden -- nunca deja campos/estado del pet anterior
+// filtrándose al nuevo.
+std::vector<std::uint8_t> BuildDirectionalPackBytes(const std::string& id, std::uint8_t rightFillByte, std::uint8_t leftFillByte) {
+    std::vector<std::uint8_t> buf = BuildMinimalPackBytes(id, rightFillByte);
+
+    AppendUint32(buf, 1);  // directionalIdleOverrideCount = 1
+    AppendUint8(buf, 1);   // direction = kLeft
+    AppendString(buf, "idle_left");
+    AppendUint8(buf, 1);  // kLoop
+    AppendFloat64(buf, 0.0);
+    AppendUint8(buf, 1);
+    AppendUint32(buf, 1);  // frameCount
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendFloat64(buf, 0.0);
+    AppendFloat64(buf, 0.0);
+    AppendFloat64(buf, 0.0);
+    const std::vector<std::uint8_t> px = {leftFillByte, leftFillByte, leftFillByte, 255};
+    AppendBytes(buf, px.data(), px.size());
+
+    return buf;
+}
+
 std::string WritePackFile(const std::string& dir, const std::string& fileName, const std::vector<std::uint8_t>& bytes) {
     const std::filesystem::path path = std::filesystem::path(dir) / fileName;
     std::ofstream file(path, std::ios::binary);
@@ -290,6 +318,48 @@ bool TestPersistenceMarkedDirtyOnlyAfterSuccessfulSwitch() {
     return true;
 }
 
+// "switching Bunny -> Nidir -> Bunny" (block brief 04.2 §9): un pack
+// no direccional (forma Bunny) y uno direccional (forma Nidir) pueden
+// alternarse libremente en cualquier orden -- ninguno deja
+// idleDirectionOverrides del otro filtrándose, y cada carga nueva
+// resuelve kRight/kLeft correctamente contra SU PROPIO contenido.
+bool TestSwitchingBetweenNonDirectionalAndDirectionalPetsRoundTrips() {
+    TempTestDirectory dir;
+    WritePackFile(dir.path(), "bunny_like.nvpack", BuildMinimalPackBytes("bunny_like", 0xB0));
+    WritePackFile(dir.path(), "nidir_like.nvpack", BuildDirectionalPackBytes("nidir_like", 0xD0, 0xD1));
+
+    std::vector<CatalogEntry> entries;
+    CatalogEntry bunnyLike;
+    bunnyLike.identity = PetIdentity{"bunny_like", ""};
+    bunnyLike.packPath = (std::filesystem::path(dir.path()) / "bunny_like.nvpack").string();
+    bunnyLike.isDefault = true;
+    entries.push_back(bunnyLike);
+    CatalogEntry nidirLike;
+    nidirLike.identity = PetIdentity{"nidir_like", ""};
+    nidirLike.packPath = (std::filesystem::path(dir.path()) / "nidir_like.nvpack").string();
+    nidirLike.isDefault = false;
+    entries.push_back(nidirLike);
+    const PetCatalog catalog(std::move(entries));
+
+    PetDefinition pet;
+    std::string error;
+
+    // Bunny -> Nidir
+    NIMVLETS_CHECK(LoadPetForIdentity(catalog, PetIdentity{"bunny_like", ""}, pet, error));
+    NIMVLETS_CHECK(pet.idleDirectionOverrides.empty());  // forma Bunny: nunca tuvo overrides
+    NIMVLETS_CHECK(LoadPetForIdentity(catalog, PetIdentity{"nidir_like", ""}, pet, error));
+    NIMVLETS_CHECK(pet.idleDirectionOverrides.size() == 1);
+    NIMVLETS_CHECK(pet.idle.frames[0].pixels[0] == 0xD0);  // kRight canónico
+    NIMVLETS_CHECK(pet.idleDirectionOverrides[0].animation.frames[0].pixels[0] == 0xD1);  // kLeft
+
+    // Nidir -> Bunny: los overrides de Nidir no deben sobrevivir al switch.
+    NIMVLETS_CHECK(LoadPetForIdentity(catalog, PetIdentity{"bunny_like", ""}, pet, error));
+    NIMVLETS_CHECK(pet.idleDirectionOverrides.empty());
+    NIMVLETS_CHECK(pet.idle.frames[0].pixels[0] == 0xB0);
+
+    return true;
+}
+
 }  // namespace
 
 void RegisterPetSwitchingTests(testing::TestRunner& runner) {
@@ -298,6 +368,7 @@ void RegisterPetSwitchingTests(testing::TestRunner& runner) {
     runner.Add("PetSwitching/FailedSwitchWithMissingPackFilePreservesPriorPet", TestFailedSwitchWithMissingPackFilePreservesPriorPet);
     runner.Add("PetSwitching/RepeatedSwitchingDoesNotAccumulateLoadedPetState", TestRepeatedSwitchingDoesNotAccumulateLoadedPetState);
     runner.Add("PetSwitching/PersistenceMarkedDirtyOnlyAfterSuccessfulSwitch", TestPersistenceMarkedDirtyOnlyAfterSuccessfulSwitch);
+    runner.Add("PetSwitching/SwitchingBetweenNonDirectionalAndDirectionalPetsRoundTrips", TestSwitchingBetweenNonDirectionalAndDirectionalPetsRoundTrips);
 }
 
 }  // namespace nimvlets::tests

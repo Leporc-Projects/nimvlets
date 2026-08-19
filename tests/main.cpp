@@ -4,6 +4,7 @@
 #include "AppStateSerializerTest.h"
 #include "AppStateStoreTest.h"
 #include "ClickAccountingTest.h"
+#include "DirectionTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
 #include "LinuxBackendPolicyTest.h"
@@ -35,6 +36,7 @@ int main() {
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
+    nimvlets::tests::RegisterDirectionTests(runner);
 
     return runner.RunAll();
 }
