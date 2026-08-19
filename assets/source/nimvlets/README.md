@@ -15,7 +15,12 @@ spritesheet) are the canonical animation source, directional
 (`right`/`left`) asset sets are explicit subfolders, and
 `DESCRIPTION.txt` (not `provenance.json`) is what a real pet actually
 ships with today — see "Provenance record" below for how the two
-relate.
+relate. **Block 04.3 populated the second real entry** (`bunny/`, see
+`docs/BUNNY_CONTENT.md`) — Bunny's real production art (idle + click)
+migrated it off the Block 01/02 QA-fixture path described lower in
+this file; see that note for what stayed the same (catalog identity,
+compiled pack path) and what changed (this directory now has a real
+`bunny/` entry, same shape as `nidir/`).
 
 ## Target layout
 
@@ -33,7 +38,20 @@ assets/source/nimvlets/
         left/
           frames/frame_000.png .. frame_NNN.png   -- deterministic horizontal mirror
           spritesheet/spritesheet.png              -- assembled from the mirrored frames
-  bunny/           -- not populated (Bunny stays a Block 01 QA fixture under assets/dev/, not here)
+  bunny/                          -- Block 04.3, real, see docs/BUNNY_CONTENT.md
+    DESCRIPTION.txt
+    master.png
+    pack_manifest.json
+    animations/
+      idle/
+        left/    -- canonical direction for THIS export (owner-named; not the same as Nidir's "right")
+          frames/frame_000.png .. frame_NNN.png
+          spritesheet/spritesheet.png
+        right/   -- deterministic horizontal mirror
+          frames/frame_000.png .. frame_NNN.png
+          spritesheet/spritesheet.png
+      click_reaction/
+        left/ ... right/          -- same shape as idle
   rato/            -- not populated yet
   rin-rin/         -- not populated yet
   frin/
@@ -77,9 +95,11 @@ assets/source/nimvlets/
   reads. If the spritesheet and the individual frames ever disagree,
   the frames win.
 - `pack_manifest.json` — the `tools/compile_pet_pack.py` input for this
-  pet, living next to its own source frames (unlike Bunny's manifest,
-  which lives under `assets/dev/bunny_pack/` since Bunny's frames are
-  themselves dev-generated, not a hand-authored source tree).
+  pet, living next to its own source frames. Bunny's manifest follows
+  this exact pattern since Block 04.3; the OLD synthetic dev-fixture
+  manifest (`assets/dev/bunny_pack/manifest.json`, dev-generated, not
+  hand-authored source art) is superseded — see
+  `tools/generate_bunny_dev_pack.py`'s own docstring.
 
 ## `click` / `passive` are categories, not a hard limit
 
@@ -133,12 +153,14 @@ assets/source/nimvlets/frin/male/provenance.json   (per-variant, for Frin)
 | `transformation_notes` | string | What was done to get from the raw source to `master.png` (resize, cleanup, alpha fix, ...). Empty string if none. |
 | `alpha_hit_threshold_override` | integer or `null` | Only set when this pet needs a different hit-test threshold than `PetDefinition::alphaHitThreshold`'s default (128) — see `docs/DECISION_LOG.md` DEC-018 for why a threshold might need tuning per asset. `null`/omitted means "use the default." |
 
-**Illustrative example** (not a real content record — Bunny is a QA
-fixture living in `assets/dev/`, not a Nimvlet, and is not stored under
-this contract; these are simply Bunny's own real, already-documented
-facts — see `docs/DECISION_LOG.md` DEC-018 — reused here because they're
-the one real, truthful example this repository has, not because Bunny
-belongs under `assets/source/nimvlets/`):
+**Illustrative example, historical** (Bunny's ORIGINAL Block 01 QA
+fixture, before Block 04.3 migrated it to real production art living
+here under `assets/source/nimvlets/bunny/` — kept as the illustrative
+example since it's a real, already-documented fact, not because the
+`bunny_dev` id or these specific values are current; `bunny/`'s CURRENT
+real content has no `provenance.json` either, same as Nidir's, since
+no pet has one yet — see `alpha_hit_threshold_override` below for the
+one place per-pet tuning is expected to matter):
 
 ```json
 {

@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Generates the Bunny DEV animation pack (Block 02) from the existing
+"""SUPERSEDED since Block 04.3 -- see tools/generate_bunny_pack.py.
+
+Bunny migrated from this synthetic QA fixture to the owner's real
+production art (idle + click) in Block 04.3 (ver docs/BUNNY_CONTENT.md,
+docs/DECISION_LOG.md). `assets/dev/bunny_pack.nvpack` -- the exact same
+compiled path this script writes below -- now holds REAL content
+compiled by tools/generate_bunny_pack.py, not the synthetic derivation
+this script produces.
+
+**Do NOT run this script against the current repository state**: doing
+so would silently overwrite the real compiled Bunny pack with the
+synthetic squash/stretch/lean placeholder content described below,
+regressing Bunny back to Block 02's QA fixture. It is kept, unmodified,
+purely as a historical/reference artifact (see docs/DECISION_LOG.md
+DEC-018/DEC-022 for the block-01/02 context it documents) -- not
+because anything in the current pipeline depends on it.
+
+Generates the Bunny DEV animation pack (Block 02) from the existing
 Block 01 Bunny QA fixture (assets/dev/bunny_source.png).
 
 This block must not depend on finishing AI-generated animations (see

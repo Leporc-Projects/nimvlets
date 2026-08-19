@@ -1,0 +1,72 @@
+BUNNY — Descripción física de referencia
+=========================================
+
+Este documento registra únicamente los rasgos físicos ESTABLES de
+Bunny: lo que debe preservarse sin cambios accidentales en cualquier
+generación, edición o extensión futura de su arte (nuevas poses,
+nuevas animaciones, nuevas direcciones). No es una ficha de producto
+ni de personalidad — ver docs/PET_CONTENT_SPEC.md y docs/PRD_V1.md
+para eso. No documenta procedencia/herramientas (ver
+assets/source/nimvlets/README.md, sección "Provenance record", si
+algún día se agrega un provenance.json para Bunny).
+
+Nota de continuidad: Bunny fue el fixture de QA de Block 01
+(ilustración real usada solo para validar hit-testing/click-through
+sobre alpha real — ver docs/DECISION_LOG.md DEC-018) y siguió siendo
+la entrada "dev" por defecto del catálogo hasta Block 04.3, cuando el
+owner exportó su arte real de producción (idle + click) y Bunny pasó
+a ser una segunda validación real del pipeline direccional/de
+normalización visual que Block 04.2/04.3 construyeron para Nidir — ver
+docs/BUNNY_CONTENT.md.
+
+Especie / identidad
+--------------------
+- Conejo (rabbit), diseño de estilo "chibi": proporciones compactas,
+  cabeza grande relativa al cuerpo, postura sentada/en cuclillas —
+  mismo lenguaje de diseño general que Nidir, no una coincidencia de
+  este documento sino del propio material de referencia.
+
+Rasgos físicos estables (no deben cambiar entre generaciones/ediciones)
+------------------------------------------------------------------------
+- Pelaje color crema/beige claro, con un tono ligeramente más oscuro
+  (durazno/beige) usado como sombreado interior en orejas, mejillas y
+  zonas de volumen — nunca blanco puro ni un tono saturado distinto.
+- Contorno delgado en marrón oscuro/casi negro alrededor de toda la
+  silueta — un rasgo de estilo consistente en las tres fuentes de arte
+  disponibles (master, idle, click).
+- Dos orejas largas y erguidas, con el interior de la oreja en un tono
+  rosado/durazno más saturado que el resto del pelaje — visibles y
+  levantadas en todas las poses de referencia.
+- Cara redonda, ojos ovalados oscuros (sin iris de color distintivo,
+  a diferencia de Nidir), nariz pequeña triangular oscura.
+- Mejillas con un rubor rosado/durazno suave, un rasgo expresivo
+  recurrente en el material de referencia.
+- Patitas delanteras pequeñas y redondeadas, frecuentemente sostenidas
+  juntas cerca del pecho en la pose de reposo.
+- Cuerpo redondeado/rechoncho, cola corta y esponjosa visible desde
+  atrás/al costado según la pose.
+- Patas traseras cortas, pies pequeños y redondeados.
+
+Dirección canónica actual en el material real
+------------------------------------------------
+A diferencia de Nidir (donde el export real trajo "right" como
+dirección canónica), el export real de Bunny que el owner proveyó en
+Block 04.3 nombra su propia dirección canónica "left"
+(`bunny-idle-left`, `bunny-click-left`) — se adoptó tal cual, sin
+reinterpretar visualmente cuál lado "debería" ser canónico; la
+convención direccional es una decisión del export/owner, no algo que
+este documento infiera. `animations/*/right/` (generado en este mismo
+bloque por espejado horizontal determinista) es exactamente el
+reflejo de esas mismas poses, nunca una generación nueva.
+
+Invariantes visuales que nunca deben cambiar por accidente
+-------------------------------------------------------------
+- La paleta crema/beige + contorno oscuro delgado no debe derivar a
+  otro esquema de color.
+- El rubor de mejillas rosado/durazno es un rasgo expresivo estable,
+  no debe eliminarse en generaciones futuras.
+- Las proporciones "chibi" (cabeza grande, cuerpo compacto, orejas
+  largas) deben preservarse.
+- Las orejas erguidas con interior rosado/durazno son el rasgo más
+  distintivo de Bunny — no deben caer/doblarse en la pose base ni
+  perder el contraste de color interior.
