@@ -7,6 +7,13 @@
       "display_name": "Bunny (dev fixture)",
       "pack_path": "assets/dev/bunny_pack.nvpack",
       "is_default": true
+    },
+    {
+      "pet_id": "nidir",
+      "variant_id": "",
+      "display_name": "Nidir",
+      "pack_path": "assets/dev/nidir_pack.nvpack",
+      "is_default": false
     }
   ]
 }
