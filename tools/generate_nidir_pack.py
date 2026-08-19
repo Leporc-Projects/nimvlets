@@ -74,6 +74,24 @@ idle -- ver `git log` de ese commit: "zero actual normalization"
 needed, así que no hizo falta ningún script de importación dedicado,
 solo un `cp`).
 
+Block 04.3 (QA manual del owner encontró clipping, pérdida de calidad
+y tamaño visual inconsistente entre idle y click-fire -- ver
+docs/NIDIR_CONTENT.md, "clipping y tamaño visual inconsistente entre
+animaciones") agrega dos cambios acá:
+    - El manifest ahora pide `normalize_visual_scale: true` --
+      tools/compile_pet_pack.py deriva, a partir de los pixeles reales
+      de idle y click_reaction, un canvas de trabajo compartido que
+      alinea el personaje al mismo tamaño/posición en ambas
+      animaciones (ver prep_dev_sprite.compute_frame_normalization_plan()).
+      `canvas_width`/`canvas_height` (el tamaño LÓGICO en pantalla) se
+      derivan de ESE canvas de trabajo compartido, no solo de la
+      resolución nativa de idle como en la segunda pasada -- así el
+      canvas lógico ya contempla el encuadre más ancho que necesita el
+      efecto de fuego.
+    - `PASSIVE_INTERVAL_SECONDS_PLACEHOLDER` pasa de 300s (5min) a 60s
+      (1min) -- ahora es un valor de producto explícitamente pedido
+      por el owner para este bloque, no un placeholder.
+
 Uso:
     python3 tools/generate_nidir_pack.py
 
@@ -181,12 +199,12 @@ ALPHA_HIT_THRESHOLD = 128
 EXPORT_DURATION_SECONDS = 3.0
 CLICK_EXPORT_DURATION_SECONDS = 3.0
 
-# Placeholder de producto: cada cuánto se dispara la animación de idle
-# esporádica. La cadencia real (1/3/5 minutos, etc.) es política de
-# producto, NO decidida en este bloque -- se deja el mismo default de
-# 300s (5 min) que el esquema de PetDefinition ya usaba, documentado
-# explícitamente como no-final.
-PASSIVE_INTERVAL_SECONDS_PLACEHOLDER = 300.0
+# Cada cuánto se dispara la animación de idle esporádica. Block 04.2
+# lo dejaba en 300s (5min, el default del esquema de PetDefinition) de
+# forma explícita como no-final -- Block 04.3 lo fija a 60s (1 minuto)
+# por pedido directo del owner ("El idle periódico queremos dejarlo en
+# 1 minuto"), ya no un placeholder sino un valor de producto real.
+PASSIVE_INTERVAL_SECONDS = 60.0
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
@@ -270,14 +288,43 @@ def main() -> int:
     right_report, left_report = _derive_left_direction(
         "idle", RIGHT_FRAMES_DIR, LEFT_FRAMES_DIR, RIGHT_SPRITESHEET_PATH, LEFT_SPRITESHEET_PATH
     )
-
-    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(right_report.width, right_report.height)
-    print(f"canvas lógico derivado: {canvas_width}x{canvas_height} (nativo {right_report.width}x{right_report.height}, referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE})")
-    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
-
     click_right_report, click_left_report = _derive_left_direction(
         "click_reaction", CLICK_RIGHT_FRAMES_DIR, CLICK_LEFT_FRAMES_DIR, CLICK_RIGHT_SPRITESHEET_PATH, CLICK_LEFT_SPRITESHEET_PATH
     )
+
+    # Canvas lógico derivado del canvas de TRABAJO compartido (Block
+    # 04.3), no de la resolución nativa cruda de idle (eso era la
+    # segunda pasada) -- ver prep_dev_sprite.compute_frame_normalization_plan()
+    # y su uso idéntico dentro de tools/compile_pet_pack.py
+    # (`normalize_visual_scale`, más abajo en el manifest). Se computa
+    # acá SOLO para derivar canvas_width/canvas_height con el aspect
+    # ratio correcto -- compile_pet_pack.py vuelve a calcular el mismo
+    # plan de forma independiente a partir de los mismos PNG fuente
+    # (no se pasa ningún estado entre los dos scripts), así que ambos
+    # SIEMPRE coinciden sin necesidad de sincronizar nada.
+    normalization_entries = {
+        "idle": prep_dev_sprite.read_png_rgba(os.path.join(RIGHT_FRAMES_DIR, "frame_000.png")),
+        "idle_left": prep_dev_sprite.read_png_rgba(os.path.join(LEFT_FRAMES_DIR, "frame_000.png")),
+        "click_reaction": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_RIGHT_FRAMES_DIR, "frame_000.png")),
+        "click_reaction_left": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_LEFT_FRAMES_DIR, "frame_000.png")),
+    }
+    normalization_groups = {
+        "idle": "idle",
+        "idle_left": "idle",
+        "click_reaction": "click_reaction",
+        "click_reaction_left": "click_reaction",
+    }
+    normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
+        normalization_entries, normalization_groups, reference_group="idle"
+    )
+    _, working_width, working_height, _, _ = normalization_plan["idle"]
+    print(f"canvas de trabajo compartido (idle + click_reaction, contenido alineado): {working_width}x{working_height}")
+    for key, (scale, _, _, offset_x, offset_y) in normalization_plan.items():
+        print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
+
+    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
+    print(f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE})")
+    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
 
     right_dir = os.path.join("animations", "idle", "right", "frames")
     left_dir = os.path.join("animations", "idle", "left", "frames")
@@ -304,9 +351,17 @@ def main() -> int:
         "canvas_width": canvas_width,
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
-        "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS_PLACEHOLDER,
-        "content_version": "block04.2-nidir-4",
+        "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
+        "content_version": "block04.3-nidir-1",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
+        # Canvas de trabajo compartido, anclado por contenido (Block
+        # 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y tamaño visual
+        # inconsistente entre animaciones", y el docstring de
+        # tools/compile_pet_pack.py). Sin esto, idle y click_reaction
+        # se estiraban cada uno de forma independiente al mismo canvas
+        # lógico fijo, mostrando al personaje a tamaños/posiciones
+        # distintos según qué animación estuviera activa.
+        "normalize_visual_scale": True,
         # Pose base: ESTÁTICA, un solo frame (frame_000 -- la misma
         # imagen que también es el último frame lógico de la
         # animación esporádica de abajo, ver "first/last frame

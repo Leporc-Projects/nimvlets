@@ -406,6 +406,17 @@ bool SpikeApp::Init() {
 
     animController_.emplace(pet_);
 
+    // Política de dirección por mitad de pantalla (Block 04.3),
+    // aplicada acá -- después de que animController_ ya existe, antes
+    // del primer RenderFrame()/ApplyCurrentHitMask() de más abajo --
+    // para que el primer frame mostrado ya refleje la dirección
+    // correcta según dónde quedó posicionada la ventana, en vez de
+    // arrancar siempre en kRight (el default de AnimationController)
+    // y corregirse recién en el primer SDL_EVENT_WINDOW_MOVED que
+    // llegue. Movimientos posteriores de la ventana quedan cubiertos
+    // por el mismo hook en HandleEvent().
+    UpdateDirectionFromWindowPosition();
+
     // Hand click-through hit-testing to the platform's own native
     // mechanism where it's safe to do so (see
     // platform::NativeShapeHitTestIsRenderSafe()'s doc comment — this
@@ -509,6 +520,15 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
     AttachAllTextures();
     animController_.emplace(pet_);  // arranca en Idle del pet nuevo -- justo lo requerido
 
+    // animController_.emplace() de arriba reconstruye el controller
+    // con su dirección por defecto (kRight) sin importar cuál estaba
+    // activa antes del switch -- reaplicar la política de mitad de
+    // pantalla acá (Block 04.3) evita que un pet recién activado
+    // arranque mostrando el lado equivocado hasta el próximo
+    // SDL_EVENT_WINDOW_MOVED, cuando la ventana ya está posicionada de
+    // un lado concreto de la pantalla en este mismo instante.
+    UpdateDirectionFromWindowPosition();
+
     // El tamaño lógico del canvas puede diferir entre pets -- se
     // reaplican ambas llamadas incondicionalmente tras cada switch
     // (baratas, sin costo real cuando el tamaño no cambió) en vez de
@@ -565,6 +585,40 @@ void SpikeApp::SetActiveDirection(content::Direction direction) {
     if (changed) {
         needsRedraw_ = true;  // el loop principal se encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima vuelta
     }
+}
+
+void SpikeApp::UpdateDirectionFromWindowPosition() {
+    int winX = 0;
+    int winY = 0;
+    int winW = 0;
+    int winH = 0;
+    SDL_GetWindowPosition(window_, &winX, &winY);
+    SDL_GetWindowSize(window_, &winW, &winH);
+    const double windowCenterX = static_cast<double>(winX) + static_cast<double>(winW) / 2.0;
+
+    const SDL_DisplayID displayId = SDL_GetDisplayForWindow(window_);
+    if (displayId == 0) {
+        // No se pudo determinar el display (ver SDL_GetDisplayForWindow()
+        // -- 0 es su valor documentado de fallo). No tocar la dirección
+        // actual: mejor conservar lo que ya había que asumir un lado
+        // arbitrario sin evidencia.
+        SDL_Log("nimvlets: UpdateDirectionFromWindowPosition: SDL_GetDisplayForWindow failed: %s", SDL_GetError());
+        return;
+    }
+    SDL_Rect displayBounds{};
+    if (!SDL_GetDisplayBounds(displayId, &displayBounds)) {
+        SDL_Log("nimvlets: UpdateDirectionFromWindowPosition: SDL_GetDisplayBounds failed: %s", SDL_GetError());
+        return;
+    }
+
+    const double displayCenterX = static_cast<double>(displayBounds.x) + static_cast<double>(displayBounds.w) / 2.0;
+    const content::Direction target =
+        (windowCenterX < displayCenterX) ? content::Direction::kLeft : content::Direction::kRight;
+    SDL_Log(
+        "nimvlets: screen-half direction check: windowCenterX=%.1f displayBounds=(%d,%d,%dx%d) displayCenterX=%.1f -> %s",
+        windowCenterX, displayBounds.x, displayBounds.y, displayBounds.w, displayBounds.h, displayCenterX,
+        content::ToString(target));
+    SetActiveDirection(target);
 }
 
 void SpikeApp::RunDevDirectionSmokeTestIfRequested() {
@@ -811,6 +865,20 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
         // needsRedraw_'s doc comment.
         case SDL_EVENT_WINDOW_EXPOSED:
             needsRedraw_ = true;
+            break;
+
+        // Dispara ante CUALQUIER cambio de posición de la ventana --
+        // drag del usuario o una llamada programática a
+        // SDL_SetWindowPosition() (incluida la que hace el propio
+        // drag de arriba, frame a frame) -- así que este único hook
+        // cubre la política de "mitad de pantalla" (Block 04.3) sin
+        // necesidad de instrumentar cada sitio que mueve la ventana.
+        // UpdateDirectionFromWindowPosition() ya es barato/idempotente
+        // (SetActiveDirection() es un no-op si la dirección no
+        // cambió), así que no hace falta ningún throttling adicional
+        // aunque el evento llegue muy seguido durante un drag activo.
+        case SDL_EVENT_WINDOW_MOVED:
+            UpdateDirectionFromWindowPosition();
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {

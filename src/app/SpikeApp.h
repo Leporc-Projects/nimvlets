@@ -137,6 +137,30 @@ private:
     // dirección no se persiste en este bloque.
     void SetActiveDirection(content::Direction direction);
 
+    // Política automática de dirección por mitad de pantalla (Block
+    // 04.3 — corrige la ausencia total de un disparador real para
+    // SetActiveDirection() que el brief de Block 04.2 dejaba
+    // explícitamente fuera de alcance). Calcula en qué mitad del
+    // display que contiene la ventana cae el CENTRO de la ventana
+    // (SDL_GetDisplayForWindow()/SDL_GetDisplayBounds()) y llama a
+    // SetActiveDirection() con el resultado — mitad derecha de la
+    // pantalla -> Direction::kRight, mitad izquierda -> kLeft. No
+    // depende de ningún estado propio del pet (funciona igual para
+    // cualquier pet futuro, direccional o no — SetActiveDirection() ya
+    // es un no-op seguro sin contenido direccional). Si no se puede
+    // determinar el display de la ventana (SDL_GetDisplayForWindow()
+    // devuelve 0), no toca la dirección actual — nunca asume un valor
+    // por defecto silenciosamente. Se llama una vez explícitamente
+    // justo después de posicionar la ventana en Init() (por si el
+    // evento SDL_EVENT_WINDOW_MOVED no llega para ese posicionamiento
+    // inicial en alguna plataforma) y de nuevo cada vez que
+    // HandleEvent() recibe SDL_EVENT_WINDOW_MOVED — que SDL dispara
+    // ante CUALQUIER cambio de posición, sea por drag del usuario o
+    // por una llamada programática a SDL_SetWindowPosition(), así que
+    // un único hook cubre ambos casos sin necesidad de instrumentar
+    // cada sitio que mueve la ventana por separado.
+    void UpdateDirectionFromWindowPosition();
+
     // Mecanismo solo-DEV para smoke-testear cambios de dirección de
     // forma no interactiva contra el binario real, reflejando
     // exactamente el patrón ya establecido de
