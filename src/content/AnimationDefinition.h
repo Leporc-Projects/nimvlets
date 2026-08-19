@@ -104,6 +104,16 @@ struct DirectionalAnimationOverride {
     AnimationDefinition animation;
 };
 
+// Igual que DirectionalAnimationOverride, pero para una entrada
+// específica de `PetDefinition::passiveActions` (una lista, a
+// diferencia de `idle`/`clickReaction`) — `passiveActionIndex` dice a
+// cuál. Ver ResolvePassiveAction().
+struct PassiveActionDirectionalOverride {
+    std::size_t passiveActionIndex = 0;
+    Direction direction = Direction::kRight;
+    AnimationDefinition animation;
+};
+
 // Everything needed to run one kind of Nimvlet: its idle look, its
 // click reaction, its passive actions, and the thresholds/timing that
 // govern them. One logical Nimvlet — `variantGroup` exists so a future
@@ -141,11 +151,31 @@ struct PetDefinition {
     // usar ResolveIdleAnimation().
     std::vector<DirectionalAnimationOverride> idleDirectionOverrides;
 
+    // El click reaction canónico del pet (Direction::kRight por
+    // convención, igual que `idle`). Ver clickReactionDirectionOverrides
+    // y ResolveClickReaction().
     AnimationDefinition clickReaction;
+
+    // Variantes de clickReaction para direcciones distintas de la
+    // canónica (Block 04.2 — ver docs/NIDIR_CONTENT.md). Vacío para un
+    // pet no direccional, o mientras no exista arte de click
+    // direccional real. Nunca indexar directamente — usar
+    // ResolveClickReaction().
+    std::vector<DirectionalAnimationOverride> clickReactionDirectionOverrides;
 
     // Zero or more sparse autonomous actions; AnimationController picks
     // which one to play by index (see TriggerPassiveAction()).
     std::vector<AnimationDefinition> passiveActions;
+
+    // Variantes direccionales de entradas específicas de
+    // `passiveActions` (Block 04.2 — ver docs/NIDIR_CONTENT.md). Lista
+    // plana en vez de anidada dentro de `passiveActions` a propósito:
+    // mantiene el formato binario NVPACK1 puramente aditivo/al final
+    // (ver PetPackLoader.cpp) en vez de tener que intercalar bytes
+    // nuevos en medio del layout ya existente. Vacío para un pet no
+    // direccional. Nunca indexar directamente — usar
+    // ResolvePassiveAction().
+    std::vector<PassiveActionDirectionalOverride> passiveActionDirectionOverrides;
 
     // Target average seconds between passive actions. A scheduling
     // target, not a hard guarantee — see docs/ANIMATION_RUNTIME.md.
@@ -171,5 +201,21 @@ struct PetDefinition {
 // Nunca falla — todo PetDefinition válido (impuesto por
 // PetPackLoader/PetDefinition's ctor implícito) tiene al menos `idle`.
 const AnimationDefinition& ResolveIdleAnimation(const PetDefinition& pet, Direction direction);
+
+// Igual que ResolveIdleAnimation() pero para clickReaction: retorna la
+// entrada de `pet.clickReactionDirectionOverrides` que calza con
+// `direction` si existe una, si no cae a `pet.clickReaction`. Mismo
+// contrato de "nunca falla, fallback documentado".
+const AnimationDefinition& ResolveClickReaction(const PetDefinition& pet, Direction direction);
+
+// Igual que ResolveIdleAnimation() pero para
+// `pet.passiveActions[passiveActionIndex]`: retorna la entrada de
+// `pet.passiveActionDirectionOverrides` que calza con
+// (passiveActionIndex, direction) si existe una, si no cae a
+// `pet.passiveActions[passiveActionIndex]`. Precondición: `passiveActionIndex`
+// es un índice válido de `pet.passiveActions` — a diferencia de
+// AnimationController::TriggerPassiveAction() (que valida el índice
+// antes de llegar acá), esta función no revalida el rango.
+const AnimationDefinition& ResolvePassiveAction(const PetDefinition& pet, std::size_t passiveActionIndex, Direction direction);
 
 }  // namespace nimvlets::content

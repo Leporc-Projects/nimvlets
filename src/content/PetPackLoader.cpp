@@ -175,6 +175,53 @@ bool ReadAnimation(ByteReader& reader, AnimationDefinition& anim) {
     return true;
 }
 
+bool ReadDirectionByte(ByteReader& reader, const std::string& context, Direction& outDirection, std::string& outError) {
+    std::uint8_t directionByte = 0;
+    if (!reader.ReadUint8(directionByte)) {
+        outError = reader.Error();
+        return false;
+    }
+    if (directionByte > static_cast<std::uint8_t>(Direction::kLeft)) {
+        outError = context + ": invalid direction byte " + std::to_string(static_cast<int>(directionByte));
+        return false;
+    }
+    outDirection = static_cast<Direction>(directionByte);
+    return true;
+}
+
+// Lee una sección final opcional con forma "DirectionalAnimationOverride[]"
+// (usada tanto por idleDirectionOverrides como por
+// clickReactionDirectionOverrides — mismo layout: direction + AnimationBlock,
+// repetido `count` veces). Ver el comentario grande en
+// LoadPetPackFromMemory() sobre por qué esto es seguro de leer solo
+// cuando reader.HasMoreData() ya dio true.
+bool ReadDirectionalAnimationOverrides(
+    ByteReader& reader,
+    const std::string& sectionName,
+    std::vector<DirectionalAnimationOverride>& out,
+    std::string& outError) {
+    std::uint32_t count = 0;
+    if (!reader.ReadUint32(count)) {
+        outError = reader.Error();
+        return false;
+    }
+    out.clear();
+    out.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const std::string context = sectionName + "[" + std::to_string(i) + "]";
+        DirectionalAnimationOverride override_;
+        if (!ReadDirectionByte(reader, context, override_.direction, outError)) {
+            return false;
+        }
+        if (!ReadAnimation(reader, override_.animation)) {
+            outError = reader.Error();
+            return false;
+        }
+        out.push_back(std::move(override_));
+    }
+    return true;
+}
+
 }  // namespace
 
 bool LoadPetPackFromMemory(const std::uint8_t* data, std::size_t size, PetDefinition& outPet, std::string& outError) {
@@ -237,41 +284,64 @@ bool LoadPetPackFromMemory(const std::uint8_t* data, std::size_t size, PetDefini
         pet.passiveActions.push_back(std::move(anim));
     }
 
-    // Sección final, opcional y aditiva (Block 04.2 — ver
-    // docs/NIDIR_CONTENT.md): un pack compilado antes de este bloque
-    // (p. ej. el bunny_pack.nvpack ya comiteado, nunca recompilado para
-    // este bloque) simplemente termina acá, sin ningún byte más — eso
-    // es válido y deja idleDirectionOverrides vacío, exactamente el
-    // comportamiento no-direccional que ya tenía. Si SÍ quedan bytes,
-    // se interpretan como esta sección — y, una vez que se sabe que
-    // existe, cada campo adentro sigue siendo obligatorio (falla
-    // ruidosamente igual que cualquier otro campo truncado/inválido).
+    // Tres secciones finales, opcionales y aditivas (Block 04.2 — ver
+    // docs/NIDIR_CONTENT.md), en orden fijo: idle, clickReaction, y
+    // passiveAction overrides direccionales. Un pack compilado antes de
+    // este bloque (p. ej. el bunny_pack.nvpack ya comiteado) simplemente
+    // termina justo después de passiveActions, sin ningún byte más —
+    // eso es válido y deja las tres listas vacías, exactamente el
+    // comportamiento no-direccional que ya tenía. Cada sección solo se
+    // intenta leer si `HasMoreData()` sigue siendo true DESPUÉS de la
+    // anterior -- así un pack que solo tiene, por ejemplo, la sección de
+    // idle (sin clickReaction ni passiveAction) sigue siendo válido. Una
+    // vez que se sabe que una sección existe, cada campo adentro sigue
+    // siendo obligatorio (falla ruidosamente igual que cualquier otro
+    // campo truncado/inválido).
     pet.idleDirectionOverrides.clear();
     if (reader.HasMoreData()) {
-        std::uint32_t overrideCount = 0;
-        if (!reader.ReadUint32(overrideCount)) {
+        if (!ReadDirectionalAnimationOverrides(reader, "idleDirectionOverrides", pet.idleDirectionOverrides, outError)) {
+            return false;
+        }
+    }
+
+    pet.clickReactionDirectionOverrides.clear();
+    if (reader.HasMoreData()) {
+        if (!ReadDirectionalAnimationOverrides(reader, "clickReactionDirectionOverrides", pet.clickReactionDirectionOverrides, outError)) {
+            return false;
+        }
+    }
+
+    pet.passiveActionDirectionOverrides.clear();
+    if (reader.HasMoreData()) {
+        std::uint32_t count = 0;
+        if (!reader.ReadUint32(count)) {
             outError = reader.Error();
             return false;
         }
-        pet.idleDirectionOverrides.reserve(overrideCount);
-        for (std::uint32_t i = 0; i < overrideCount; ++i) {
-            std::uint8_t directionByte = 0;
-            if (!reader.ReadUint8(directionByte)) {
+        pet.passiveActionDirectionOverrides.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const std::string context = "passiveActionDirectionOverrides[" + std::to_string(i) + "]";
+            std::uint32_t passiveActionIndex = 0;
+            if (!reader.ReadUint32(passiveActionIndex)) {
                 outError = reader.Error();
                 return false;
             }
-            if (directionByte > static_cast<std::uint8_t>(Direction::kLeft)) {
-                outError = "idleDirectionOverrides[" + std::to_string(i) + "]: invalid direction byte " + std::to_string(static_cast<int>(directionByte));
+            if (passiveActionIndex >= pet.passiveActions.size()) {
+                outError = context + ": passiveActionIndex " + std::to_string(passiveActionIndex) +
+                           " is out of range (pet has " + std::to_string(pet.passiveActions.size()) + " passive action(s))";
                 return false;
             }
 
-            DirectionalAnimationOverride override_;
-            override_.direction = static_cast<Direction>(directionByte);
+            PassiveActionDirectionalOverride override_;
+            override_.passiveActionIndex = passiveActionIndex;
+            if (!ReadDirectionByte(reader, context, override_.direction, outError)) {
+                return false;
+            }
             if (!ReadAnimation(reader, override_.animation)) {
                 outError = reader.Error();
                 return false;
             }
-            pet.idleDirectionOverrides.push_back(std::move(override_));
+            pet.passiveActionDirectionOverrides.push_back(std::move(override_));
         }
     }
 

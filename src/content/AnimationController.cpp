@@ -59,7 +59,7 @@ void AnimationController::TriggerClick(double nowMs) {
         return;  // already playing — coalesce, do not restart (block brief §2B/§6)
     }
     state_ = ControllerState::kClickReaction;
-    currentAnimation_ = &pet_.clickReaction;
+    currentAnimation_ = &ResolveClickReaction(pet_, direction_);
     currentFrameIndex_ = 0;
     currentFrameStartMs_ = nowMs;
 }
@@ -91,7 +91,7 @@ void AnimationController::TriggerPassiveAction(std::size_t passiveActionIndex, d
         return;
     }
     state_ = ControllerState::kPassiveAction;
-    currentAnimation_ = &pet_.passiveActions[passiveActionIndex];
+    currentAnimation_ = &ResolvePassiveAction(pet_, passiveActionIndex, direction_);
     currentFrameIndex_ = 0;
     currentFrameStartMs_ = nowMs;
 }

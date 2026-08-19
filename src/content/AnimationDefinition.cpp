@@ -26,6 +26,28 @@ const AnimationDefinition& ResolveIdleAnimation(const PetDefinition& pet, Direct
     return pet.idle;
 }
 
+const AnimationDefinition& ResolveClickReaction(const PetDefinition& pet, Direction direction) {
+    if (direction != Direction::kRight) {
+        for (const DirectionalAnimationOverride& override_ : pet.clickReactionDirectionOverrides) {
+            if (override_.direction == direction) {
+                return override_.animation;
+            }
+        }
+    }
+    return pet.clickReaction;
+}
+
+const AnimationDefinition& ResolvePassiveAction(const PetDefinition& pet, std::size_t passiveActionIndex, Direction direction) {
+    if (direction != Direction::kRight) {
+        for (const PassiveActionDirectionalOverride& override_ : pet.passiveActionDirectionOverrides) {
+            if (override_.passiveActionIndex == passiveActionIndex && override_.direction == direction) {
+                return override_.animation;
+            }
+        }
+    }
+    return pet.passiveActions[passiveActionIndex];
+}
+
 double AnimationDefinition::FrameDurationMs(std::size_t frameIndex) const {
     if (frameIndex >= frames.size()) {
         return 0.0;
