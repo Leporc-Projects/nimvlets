@@ -27,8 +27,25 @@ Manifest schema (JSON):
       "content_version": "block02-dev-1",       # optional, default ""
       "idle": { ...AnimationManifest... },
       "click_reaction": { ...AnimationManifest... },
-      "passive_actions": [ {...AnimationManifest...}, ... ]  # optional, default []
+      "passive_actions": [ {...AnimationManifest...}, ... ],  # optional, default []
+      "idle_direction_overrides": [                            # optional, default: field absent entirely
+        {"direction": "left", ...AnimationManifest...}, ...
+      ]
     }
+
+`idle_direction_overrides` (Block 04.2, see docs/NIDIR_CONTENT.md) is a
+backward-compatible, purely ADDITIVE extension to the "NVPACK1" format:
+if this key is absent from the manifest (as in every pack compiled
+before Block 04.2, e.g. Bunny's), the compiled output is byte-for-byte
+identical to before -- no existing pack needs recompiling. Each entry
+names a `direction` ("right"/"left") other than the pet's canonical
+`idle` above and provides a full AnimationManifest for that direction
+-- see content::ResolveIdleAnimation() (src/content/AnimationDefinition.h)
+for how the C++ runtime picks between `idle` and an override at
+runtime, and content::PetPackLoader.cpp's ByteReader::BytesRemaining()
+for how the loader tells an old-format pack (no trailing section at
+all) apart from a new one (a trailing section, however small) without
+needing a schema-version bump.
 
 AnimationManifest:
     {
@@ -72,6 +89,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import prep_dev_sprite  # noqa: E402  (reused for its PNG decoder, not reimplemented)
 
 _KIND_TO_BYTE = {"static": 0, "loop": 1, "one_shot": 2}
+_DIRECTION_TO_BYTE = {"right": 0, "left": 1}
 
 
 class PackCompileError(Exception):
@@ -188,6 +206,22 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
     out += struct.pack("<I", len(passive_manifests))
     for i, pm in enumerate(passive_manifests):
         out += _compile_animation(pm, manifest_dir, f"passive_actions[{i}]")
+
+    # Sección final, opcional y aditiva (Block 04.2) -- solo se escribe
+    # un solo byte de esta sección si el manifest la pide
+    # explícitamente. Un manifest que no la menciona (todo pack
+    # compilado antes de Block 04.2) produce exactamente los mismos
+    # bytes que antes -- ver el docstring del módulo.
+    if "idle_direction_overrides" in manifest:
+        override_manifests = manifest["idle_direction_overrides"]
+        out += struct.pack("<I", len(override_manifests))
+        for i, om in enumerate(override_manifests):
+            context = f"idle_direction_overrides[{i}]"
+            direction_str = _require(om, "direction", context)
+            if direction_str not in _DIRECTION_TO_BYTE:
+                raise PackCompileError(f"{context}: invalid direction '{direction_str}' (expected right/left)")
+            out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
+            out += _compile_animation(om, manifest_dir, context)
 
     with open(output_path, "wb") as f:
         f.write(out)

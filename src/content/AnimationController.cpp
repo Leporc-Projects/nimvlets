@@ -3,7 +3,7 @@
 namespace nimvlets::content {
 
 AnimationController::AnimationController(const PetDefinition& pet)
-    : pet_(pet), currentAnimation_(&pet_.idle) {}
+    : pet_(pet), currentAnimation_(&ResolveIdleAnimation(pet_, direction_)) {}
 
 bool AnimationController::Advance(double nowMs) {
     bool changed = false;
@@ -64,6 +64,25 @@ void AnimationController::TriggerClick(double nowMs) {
     currentFrameStartMs_ = nowMs;
 }
 
+bool AnimationController::SetDirection(Direction direction, double nowMs) {
+    if (direction == direction_) {
+        return false;  // ya era la dirección activa -- nada que hacer
+    }
+    direction_ = direction;
+
+    if (state_ != ControllerState::kIdle) {
+        // Guardado para cuando el controller vuelva a Idle
+        // (TransitionToIdle() ya consulta direction_) -- nunca
+        // interrumpe un ClickReaction/PassiveAction en curso.
+        return false;
+    }
+
+    currentAnimation_ = &ResolveIdleAnimation(pet_, direction_);
+    currentFrameIndex_ = 0;
+    currentFrameStartMs_ = nowMs;
+    return true;
+}
+
 void AnimationController::TriggerPassiveAction(std::size_t passiveActionIndex, double nowMs) {
     if (state_ != ControllerState::kIdle) {
         return;  // lower priority than click reaction and than an already-running passive action
@@ -94,7 +113,7 @@ std::optional<double> AnimationController::NextFrameDeadlineMs() const {
 
 void AnimationController::TransitionToIdle(double nowMs) {
     state_ = ControllerState::kIdle;
-    currentAnimation_ = &pet_.idle;
+    currentAnimation_ = &ResolveIdleAnimation(pet_, direction_);
     currentFrameIndex_ = 0;
     currentFrameStartMs_ = nowMs;
 }

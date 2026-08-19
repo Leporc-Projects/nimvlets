@@ -26,7 +26,11 @@ enum class ControllerState {
 //
 // Behavioral contract (see docs/ANIMATION_RUNTIME.md for the full
 // writeup):
-// - Idle plays `pet.idle`. If it's PlaybackKind::kStatic (one frame),
+// - Idle plays ResolveIdleAnimation(pet, direction) — `pet.idle` for
+//   Direction::kRight or any direction without a dedicated override
+//   (see AnimationDefinition.h), otherwise the matching entry in
+//   `pet.idleDirectionOverrides` (Block 04.2 — see
+//   docs/NIDIR_CONTENT.md). If it's PlaybackKind::kStatic (one frame),
 //   NextFrameDeadlineMs() returns nullopt forever — there is never a
 //   reason to wake up just to re-check idle's animation.
 // - TriggerClick() starts `pet.clickReaction` from frame 0, unless a
@@ -68,6 +72,26 @@ public:
     // a non-empty pet.passiveActions).
     void TriggerPassiveAction(std::size_t passiveActionIndex, double nowMs);
 
+    // Cambia la dirección activa (Block 04.2 — ver
+    // docs/NIDIR_CONTENT.md). Dirección es metadata genérica, no un
+    // gesto: nunca interrumpe un ClickReaction/PassiveAction en curso.
+    // Si el controller está actualmente Idle, el frame mostrado se
+    // actualiza de inmediato a ResolveIdleAnimation(pet, direction),
+    // frame 0 (misma semántica de "reiniciar en frame 0" que
+    // TriggerClick()/TriggerPassiveAction() ya usan al empezar una
+    // animación nueva). Si NO está Idle, la nueva dirección queda
+    // guardada y se aplica recién la próxima vez que
+    // TransitionToIdle() corra — nunca se pierde, nunca se aplica a
+    // medias.
+    //
+    // Retorna true si el frame mostrado cambió de verdad (para que el
+    // llamador sepa si hace falta un redraw) — false si `direction` ya
+    // era la activa, o si el controller no está Idle ahora mismo (el
+    // cambio quedó guardado pero no hay nada nuevo que dibujar todavía).
+    bool SetDirection(Direction direction, double nowMs);
+
+    Direction CurrentDirection() const { return direction_; }
+
     ControllerState State() const { return state_; }
     const FrameDefinition& CurrentFrame() const;
 
@@ -83,6 +107,17 @@ private:
     void TransitionToIdle(double nowMs);
 
     const PetDefinition& pet_;
+
+    // Dirección activa — ver SetDirection(). Default kRight, igual que
+    // el runtime entero (block brief 04.2 §7: "default Nidir direction
+    // = right"). Declarado ANTES que currentAnimation_ a propósito: el
+    // constructor inicializa currentAnimation_ leyendo direction_ (vía
+    // ResolveIdleAnimation()), y el orden real de inicialización de
+    // miembros sigue el orden de DECLARACIÓN, no el orden escrito en la
+    // lista de inicialización — si direction_ se declarara después,
+    // currentAnimation_ leería un direction_ todavía sin inicializar.
+    Direction direction_ = Direction::kRight;
+
     ControllerState state_ = ControllerState::kIdle;
     const AnimationDefinition* currentAnimation_;
     std::size_t currentFrameIndex_ = 0;

@@ -48,6 +48,18 @@ public:
     bool ReadUint32(std::uint32_t& out) { return ReadBytes(&out, sizeof(out)); }
     bool ReadFloat64(double& out) { return ReadBytes(&out, sizeof(out)); }
 
+    // True si queda al menos un byte sin leer. Usado únicamente para
+    // distinguir, sin ambigüedad, un pack "NVPACK1" pre-Block-04.2 (que
+    // termina exactamente después de passiveActions, sin ningún byte
+    // más) de uno que sí incluye la sección final opcional de
+    // idleDirectionOverrides (Block 04.2) — ver
+    // tools/compile_pet_pack.py, que solo escribe esa sección cuando el
+    // manifest la pide explícitamente. Nunca se usa para nada más: cada
+    // campo dentro de esa sección, una vez que se sabe que existe,
+    // sigue siendo obligatorio y falla ruidosamente igual que el resto
+    // del formato si está truncado.
+    bool HasMoreData() const { return pos_ < size_; }
+
     bool ReadString(std::string& out) {
         std::uint32_t len = 0;
         if (!ReadUint32(len)) {
@@ -223,6 +235,44 @@ bool LoadPetPackFromMemory(const std::uint8_t* data, std::size_t size, PetDefini
             return false;
         }
         pet.passiveActions.push_back(std::move(anim));
+    }
+
+    // Sección final, opcional y aditiva (Block 04.2 — ver
+    // docs/NIDIR_CONTENT.md): un pack compilado antes de este bloque
+    // (p. ej. el bunny_pack.nvpack ya comiteado, nunca recompilado para
+    // este bloque) simplemente termina acá, sin ningún byte más — eso
+    // es válido y deja idleDirectionOverrides vacío, exactamente el
+    // comportamiento no-direccional que ya tenía. Si SÍ quedan bytes,
+    // se interpretan como esta sección — y, una vez que se sabe que
+    // existe, cada campo adentro sigue siendo obligatorio (falla
+    // ruidosamente igual que cualquier otro campo truncado/inválido).
+    pet.idleDirectionOverrides.clear();
+    if (reader.HasMoreData()) {
+        std::uint32_t overrideCount = 0;
+        if (!reader.ReadUint32(overrideCount)) {
+            outError = reader.Error();
+            return false;
+        }
+        pet.idleDirectionOverrides.reserve(overrideCount);
+        for (std::uint32_t i = 0; i < overrideCount; ++i) {
+            std::uint8_t directionByte = 0;
+            if (!reader.ReadUint8(directionByte)) {
+                outError = reader.Error();
+                return false;
+            }
+            if (directionByte > static_cast<std::uint8_t>(Direction::kLeft)) {
+                outError = "idleDirectionOverrides[" + std::to_string(i) + "]: invalid direction byte " + std::to_string(static_cast<int>(directionByte));
+                return false;
+            }
+
+            DirectionalAnimationOverride override_;
+            override_.direction = static_cast<Direction>(directionByte);
+            if (!ReadAnimation(reader, override_.animation)) {
+                outError = reader.Error();
+                return false;
+            }
+            pet.idleDirectionOverrides.push_back(std::move(override_));
+        }
     }
 
     if (pet.canvasWidth <= 0 || pet.canvasHeight <= 0) {
