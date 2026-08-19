@@ -1125,3 +1125,96 @@ reemplazando un placeholder de 2 frames), no desperdicio: los frames
 ya están acotados a 320px por lado (mismo `runtime_max_frame_dimension`
 genérico que idle, DEC-046), sin superficies sobredimensionadas ni
 datos duplicados.
+
+---
+
+### DEC-051 — Canvas de trabajo compartido, anclado por contenido (`normalize_visual_scale`)
+**Status:** DECIDIDO · Block 04.3 — ver `docs/NIDIR_CONTENT.md` §12.
+
+QA manual real del owner sobre Block 04.2 (todavía sin mergear a main)
+encontró clipping, pérdida de calidad, y tamaño visual inconsistente
+entre idle y click-fire. Investigado con evidencia de pixel, no
+supuesto: (1) el "clipping" de la animación de click-fire es real y
+está BAKEADO en el export original de Ludo.ai -- 18 de 25 frames
+tienen contenido que toca/excede su propio borde nativo (el bounding
+box unión de la secuencia completa abarca el 100% del ancho del frame)
+-- este pipeline no le agrega ningún recorte adicional
+(`SDL_RenderTexture` nunca recorta, siempre pasa el texture completo);
+no hay forma de corregir esto sin un nuevo export con más margen, así
+que se documenta como limitación real, no se inventa contenido de
+reemplazo. (2) El tamaño/calidad inconsistente SÍ era un bug real de
+este pipeline: cada animación se estiraba de forma independiente al
+mismo canvas lógico fijo vía `SDL_RenderTexture`, y como
+click_reaction (frame nativo 624×612) tiene más margen alrededor del
+personaje que idle (513×525) -- necesario para el efecto de fuego --
+el personaje aparecía visiblemente más chico durante click-fire.
+Medido: el personaje en sí ocupa casi el mismo tamaño ABSOLUTO en
+pixeles en ambas animaciones (434×498 vs. 435×498) -- el problema era
+puramente de encuadre relativo, no de escala real de la ilustración.
+
+Corrección genérica (sin ninguna rama por pet), en
+`tools/prep_dev_sprite.py` (`compute_content_bbox()`,
+`compose_on_canvas()`, `compute_frame_normalization_plan()`) y
+`tools/compile_pet_pack.py` (campo de manifest opcional
+`normalize_visual_scale`, default `false` -- verificado byte-a-byte
+que el pack de Bunny no cambia): deriva, a partir de los pixeles
+reales de cada animación, un `content_scale` por grupo lógico (right/
+left de una misma animación SIEMPRE comparten escala) y un canvas de
+trabajo COMPARTIDO por todo el pet, alineando el centro del bounding
+box de contenido de cada animación al centro de ese canvas -- nunca
+recorta, solo agrega margen transparente. `compute_logical_canvas_size()`
+(sin cambios, DEC-045) pasa a operar sobre ese canvas de trabajo en
+vez de la resolución nativa cruda de idle sola. Para Nidir: canvas de
+trabajo 624×612 (dominado por click_reaction), canvas lógico final
+160×157 (antes: 156×160), y — resultado directo, no buscado a
+propósito — idle y click_reaction ahora compilan a EXACTAMENTE las
+mismas dimensiones de runtime (320×314 ambas, antes distintas).
+Verificado visualmente (frames compuestos manualmente e inspeccionados
+lado a lado) antes de integrar, no solo por diseño teórico.
+
+Trade-off documentado: el presupuesto de `runtime_max_frame_dimension`
+(320px, sin cambios) ahora se reparte sobre un canvas de trabajo más
+grande para idle, reduciendo su resolución compilada efectiva
+(~265×304 -> ~222×255 pixeles de personaje) -- no es una pérdida real
+frente a lo que la pantalla necesita (el canvas lógico final a 2x
+Retina es exactamente 320×314, lo que ambas animaciones ahora ocupan
+con precisión), así que no se cambió `RUNTIME_MAX_FRAME_DIMENSION`.
+
+### DEC-052 — Dirección automática por mitad de pantalla
+**Status:** DECIDIDO · Block 04.3 — ver `docs/NIDIR_CONTENT.md` §13.
+
+Requisito nuevo del owner, explícitamente fuera de alcance del brief
+original de Block 04.2 ("todavía sin ningún control de UI que lo
+dispare"). `SpikeApp::UpdateDirectionFromWindowPosition()` (nueva):
+compara el centro de la ventana contra el centro del display que la
+contiene (`SDL_GetDisplayForWindow()`/`SDL_GetDisplayBounds()` --
+funciona correctamente en multi-monitor, ya que usa los límites del
+display específico, no de "la pantalla" genérica) y llama
+`SetActiveDirection()` con el resultado; si no se puede determinar el
+display (valor de fallo documentado 0), no toca la dirección actual --
+nunca asume un lado sin evidencia. Se dispara desde `Init()`
+(posicionamiento inicial), `HandleEvent()` ante `SDL_EVENT_WINDOW_MOVED`
+(cubre drag en vivo Y reposicionamiento programático con un solo hook,
+ya que SDL dispara ese evento ante cualquier cambio de posición sin
+importar la causa), y `TrySwitchActivePet()` (el `animController_.emplace()`
+de un switch reinicia la dirección a su default `kRight`, así que hay
+que reaplicar la política tras cada switch para no mostrar el lado
+equivocado hasta el próximo movimiento). Estable por diseño:
+`SetActiveDirection()` (sin cambios) ya es un no-op si la dirección no
+cambió y nunca interrumpe una animación en curso. Verificado contra el
+binario real con posiciones de ventana fabricadas en ambos extremos de
+la pantalla (no solo por lectura de código) -- ver el log dedicado
+`screen-half direction check`. No cubierto por un test unitario en
+`tests/` por la misma razón que DEC-049 (vive en el ejecutable
+SDL-dependiente `nimvlets_spike`, fuera del alcance de `nimvlets_tests`).
+
+### DEC-053 — Idle periódico de Nidir: 60 segundos
+**Status:** DECIDIDO · Block 04.3 — ver `docs/NIDIR_CONTENT.md` §14.
+
+`passive_interval_seconds` de Nidir pasa de 300s (el placeholder
+explícito de Block 04.2, documentado como "no final") a 60s, por
+pedido directo del owner -- ya no es un placeholder, es un valor de
+producto real para este pet específico. Cambio de un solo valor en
+`tools/generate_nidir_pack.py`; ningún mecanismo nuevo (el campo, su
+override solo-DEV, y el scheduler que lo lee vienen sin cambios desde
+Block 02/04.2). Bunny no se ve afectado (manifest independiente).

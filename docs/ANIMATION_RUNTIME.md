@@ -87,7 +87,13 @@ resuelve a la canónica sin importar la dirección pedida.
 `content::AnimationController::SetDirection()`/`TriggerClick()`/
 `TriggerPassiveAction()` consultan esto. Ver `docs/NIDIR_CONTENT.md` §5
 para el diseño completo y por qué es una extensión aditiva del modelo
-anterior, no un reemplazo de los campos canónicos.
+anterior, no un reemplazo de los campos canónicos. Quién LLAMA a
+`SetDirection()` en producción es una decisión de capa de app, fuera
+de este módulo: hasta Block 04.2 solo existía un mecanismo solo-DEV
+(`NIMVLETS_DEV_DIRECTION_TEST_COUNT`); Block 04.3 agrega
+`SpikeApp::UpdateDirectionFromWindowPosition()`, que resuelve la
+dirección automáticamente según en qué mitad del display cae el
+centro de la ventana — ver `docs/NIDIR_CONTENT.md` §13.
 
 No pet identity ever appears as a C++ enum value or `if (petId ==
 "bunny_dev")` branch anywhere in `src/content` or `src/app`. Swapping

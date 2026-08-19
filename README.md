@@ -5,8 +5,13 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está actualmente en **Block 04.2 — Nidir: Assets
-Reales + Pipeline de Animación Direccional**, construido sobre Block
+Este repositorio está actualmente en **Block 04.3 — Nidir: Calidad
+Visual y Tamaño**, un bloque CORRECTIVO abierto sobre Block 04.2 —
+Nidir: Assets Reales + Pipeline de Animación Direccional (todavía sin
+mergear a main) tras encontrar problemas visuales reales en QA manual
+del owner (clipping, tamaño inconsistente entre animaciones, "sprites
+incompletos" al volver a idle) — ver `docs/NIDIR_CONTENT.md` §12–§14
+para el diagnóstico y la corrección. Construido, a su vez, sobre Block
 04.1 — Habilitación de Linux como Plataforma de Escritorio (ver
 [`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04 —
 Catálogo de Pets + Switching en Runtime (ver
@@ -96,7 +101,11 @@ NIMVLETS_DEV_SWITCH_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 
 # conveniencia de QA: alterna N veces entre Direction::kRight/kLeft
 # justo después de arrancar (Block 04.2 — no es comportamiento de
-# producto, ver docs/NIDIR_CONTENT.md §5)
+# producto, ver docs/NIDIR_CONTENT.md §5). En producción, la dirección
+# ya se resuelve sola: mitad derecha de la pantalla -> right, mitad
+# izquierda -> left (Block 04.3, ver docs/NIDIR_CONTENT.md §13) --
+# esta variable sigue sirviendo para forzar alternancias rápidas sin
+# mover la ventana de verdad.
 NIMVLETS_DEV_DIRECTION_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 ```
 
@@ -108,9 +117,11 @@ showing whichever pet the catalog resolves as active (see
 fixture the repository owner supplied in Block 01, *not* final content
 (see [`docs/PET_CONTENT_SPEC.md`](docs/PET_CONTENT_SPEC.md) and
 [`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)). **Nidir**
-(156×160 logical canvas, derived from its native 513×525 idle art —
-see `docs/NIDIR_CONTENT.md` §7 — `assets/dev/nidir_pack.nvpack`) is the
-catalog's second, real entry since Block 04.2 — see
+(160×157 logical canvas, derived from a shared content-anchored
+working canvas across its idle and click-fire animations, not just
+idle's native 513×525 art alone — see `docs/NIDIR_CONTENT.md` §12 —
+`assets/dev/nidir_pack.nvpack`) is the catalog's second, real entry
+since Block 04.2 — see
 [`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) — reachable today via
 `NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). The catalog
 and the active pet's pack are required, not optional — if either can't

@@ -293,3 +293,35 @@ objetivo de "< 100MB" de la tabla de presupuestos — igual que ya
 ocurría en la segunda pasada (~127MB) — documentado como limitación
 real conocida, no oculta ni forzada a bajar artificialmente
 ("Do not pick a resize merely to improve metrics").
+
+## Mediciones reales de Block 04.3 (canvas de trabajo compartido)
+
+Re-medido con el mismo método (Release, arm64 nativo, `ps -o rss,%cpu`,
+procesos separados por escenario) tras la política de canvas de
+trabajo compartido/anclado por contenido (DEC-051) y la dirección
+automática por mitad de pantalla (DEC-052) — ver
+`docs/NIDIR_CONTENT.md` §12/§13. El canvas lógico de Nidir cambió de
+156×160 a 160×157 (área prácticamente idéntica: 24,960 vs. 25,120
+puntos²), así que no se esperaba ningún cambio de recursos real, y
+eso fue justo lo que se confirmó:
+
+| Escenario | CPU | RSS (steady state) |
+|---|---|---|
+| Base estática | 0.0% | ≈156.1–156.4 MB (sin cambio vs. la tercera pasada de Block 04.2, ~156.0–156.5 MB) |
+| Idle periódico activo (forzado c/15s vía override DEV) | pico ≈2.2–2.4% durante la reproducción (~3s) en la mayoría de las corridas; una corrida aislada mostró un pico de ~6.9% no reproducido en una repetición inmediata — tratado como ruido de medición del entorno, no una regresión real (ver "Methodology rules": ninguna conclusión de una sola muestra) | ≈156.0–156.7 MB, plano |
+| Click-fire activo | pico inicial ≈19.8% dominado por arranque (creación de ventana + adjuntar texturas), luego ≈1.8–3.9% durante los ~3s de reproducción real, cae a 0.0% al terminar | ≈156.4–156.5 MB, plano |
+| Bunny (regresión) | 0.0% | ≈73.6–73.7 MB — idéntico al baseline histórico |
+
+Sin cambios de presupuesto respecto a la tercera pasada de Block 04.2
+— el canvas de trabajo compartido reorganiza CÓMO se distribuyen los
+pixeles dentro del mismo límite de `runtime_max_frame_dimension`
+(320px), no cuántos bytes totales terminan en el pack compilado ni en
+RSS; el tamaño del pack compilado se mantuvo en el mismo orden de
+magnitud (~41.0MB, un cambio de +0.16% frente a los ~40.9MB de la
+tercera pasada de Block 04.2, dentro del ruido de redondeo de
+downscale por frame). La política de dirección automática
+(`UpdateDirectionFromWindowPosition()`) no agrega ningún polling —
+se dispara solo ante eventos reales (`SDL_EVENT_WINDOW_MOVED`) o una
+vez en `Init()`/tras un switch, así que no se esperaba ni se midió
+ningún impacto de CPU en reposo, confirmado por el 0.0% de la fila
+"Base estática" de arriba.
