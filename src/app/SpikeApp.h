@@ -238,6 +238,21 @@ private:
     // Starts true so the very first frame renders.
     bool needsRedraw_ = true;
 
+    // Redraw de confirmación programado, con separación real de
+    // wall-clock (Block 04.3, corrección post-QA del bug de "sprite
+    // parcial tras un cambio de dirección"). Además del doble-present
+    // inmediato que RenderFrame() ya hace, un cambio de dirección
+    // mientras el pet está Idle también arma este deadline (ver
+    // SetActiveDirection()) para forzar un SEGUNDO redraw completo
+    // ~120ms más tarde -- una separación temporal real, más parecida a
+    // cómo una animación en reproducción (que ya se sabía que
+    // "arreglaba" el problema) naturalmente presenta varias veces
+    // separadas en el tiempo, en vez de depender de que el usuario
+    // dispare una animación por casualidad. `nullopt` la mayor parte
+    // del tiempo (sin costo real): el event loop nunca despierta por
+    // esto salvo que un cambio de dirección real lo haya armado.
+    std::optional<double> confirmRedrawDeadlineMs_;
+
     // Effective seconds between sparse passive actions for this run —
     // see ComputeEffectivePassiveIntervalSeconds(). Computed once in
     // Init(); pet_.passiveIntervalSeconds (the pack's authored default)

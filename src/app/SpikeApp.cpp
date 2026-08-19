@@ -40,6 +40,15 @@ constexpr const char* kDevDirectionTestCountEnvVar = "NIMVLETS_DEV_DIRECTION_TES
 // SpikeApp::RunDevClickSmokeTestIfRequested().
 constexpr const char* kDevClickTestCountEnvVar = "NIMVLETS_DEV_CLICK_TEST_COUNT";
 
+// Separación de wall-clock del redraw de confirmación (Block 04.3 --
+// ver el comentario de confirmRedrawDeadlineMs_ en SpikeApp.h). 120ms
+// es perceptualmente instantáneo para quien mira la pantalla, pero
+// suficiente separación real de tiempo como para que el compositor/
+// GPU tenga una oportunidad genuina de asentarse entre presents,
+// distinta del doble-present inmediato de RenderFrame() (que ocurre
+// en microsegundos, no milisegundos).
+constexpr double kConfirmRedrawDelayMs = 120.0;
+
 // Identifica el directorio de app-data por usuario que resuelve
 // SDL_GetPrefPath() (ver docs/PERSISTENCE.md, "política de ubicación
 // de almacenamiento"). "org" coincide con el "built by Leporc
@@ -584,6 +593,12 @@ void SpikeApp::SetActiveDirection(content::Direction direction) {
         content::ToString(direction), changed ? "" : " (no visual change -- already active, or a gesture is in progress)");
     if (changed) {
         needsRedraw_ = true;  // el loop principal se encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima vuelta
+        // Ver el comentario de confirmRedrawDeadlineMs_ en SpikeApp.h:
+        // arma un segundo redraw completo, con separación real de
+        // tiempo, ~120ms después de este cambio de dirección -- no
+        // depende de que una animación futura llegue a "arreglar" el
+        // estado por casualidad.
+        confirmRedrawDeadlineMs_ = nowMs + kConfirmRedrawDelayMs;
     }
 }
 
@@ -714,26 +729,55 @@ void SpikeApp::RenderFrame() {
     const content::FrameDefinition& frame = animController_->CurrentFrame();
     SDL_Texture* texture = static_cast<SDL_Texture*>(frame.rendererHandle);
 
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
-    SDL_RenderClear(renderer_);
-    if (texture != nullptr) {
-        const SDL_FRect dst{0.0f, 0.0f, static_cast<float>(pet_.canvasWidth), static_cast<float>(pet_.canvasHeight)};
-        SDL_RenderTexture(renderer_, texture, nullptr, &dst);
-    } else if (!frame.pixels.empty()) {
-        // Diagnóstico defensivo (Block 04.2, tercera pasada): un frame
-        // con pixels reales pero sin textura adjunta es siempre un bug
-        // de cobertura en AttachAllTextures() (ver su comentario), no
-        // un estado válido -- se renderizaría completamente
-        // transparente en silencio si no se loguea. No es spam en la
-        // práctica: RenderFrame() solo corre cuando needsRedraw_ está
-        // activo (event-driven, ver el loop principal), nunca en un
-        // tick fijo.
-        SDL_Log(
-            "nimvlets: RenderFrame: current frame (%dx%d) has pixel data but no attached texture -- "
-            "rendering fully transparent; check AttachAllTextures() coverage",
-            frame.width, frame.height);
+    // Se presenta el mismo contenido DOS veces seguidas (ver el loop
+    // de abajo) -- corrige un bug real de QA manual (Block 04.3,
+    // pasada de corrección post-QA): tras un cambio de dirección
+    // automático por mitad de pantalla mientras el pet está estático,
+    // el sprite recién mostrado a veces aparecía parcial/corrupto
+    // (p. ej. el hocico faltante), y reproducir cualquier animación
+    // (idle/click) después "arreglaba" la vista. El contenido lógico
+    // ya es correcto en el primer present -- el frame resuelto, su
+    // textura, y el hit-mask corresponden todos a la MISMA dirección
+    // coherente antes de llegar acá (ver AnimationController::
+    // SetDirection()/ResolveIdleAnimation(), sin cambios en este fix,
+    // y ApplyCurrentHitMask(), que sigue corriendo una sola vez
+    // después de RenderFrame(), no dentro de este loop). El patrón
+    // encaja con una clase de problema conocida de macOS/Metal: un
+    // SDL_RenderPresent() "frío" (el primero después de un período sin
+    // presentar nada -- exactamente lo que pasa acá, ya que el loop es
+    // deliberadamente event/deadline-driven y puede estar bloqueado en
+    // SDL_WaitEventTimeout por minutos, ver docs/ANIMATION_RUNTIME.md
+    // §6) puede mostrar un drawable todavía no completamente asentado
+    // en la rotación de buffers de CAMetalLayer; presentar el MISMO
+    // contenido una segunda vez inmediatamente después fuerza un
+    // segundo drawable ya asentado, sin depender de que una animación
+    // futura "repare" el estado por casualidad -- exactamente lo que
+    // pedía la corrección (no confiar en una animación posterior). No
+    // se pudo confirmar visualmente en este entorno (sin display
+    // interactivo real) -- ver docs/NIDIR_CONTENT.md, sección de
+    // Block 04.3 sobre este fix, para el diagnóstico completo y esta
+    // limitación documentada honestamente.
+    for (int presentPass = 0; presentPass < 2; ++presentPass) {
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+        SDL_RenderClear(renderer_);
+        if (texture != nullptr) {
+            const SDL_FRect dst{0.0f, 0.0f, static_cast<float>(pet_.canvasWidth), static_cast<float>(pet_.canvasHeight)};
+            SDL_RenderTexture(renderer_, texture, nullptr, &dst);
+        } else if (!frame.pixels.empty() && presentPass == 0) {
+            // Diagnóstico defensivo (Block 04.2, tercera pasada): un frame
+            // con pixels reales pero sin textura adjunta es siempre un bug
+            // de cobertura en AttachAllTextures() (ver su comentario), no
+            // un estado válido -- se renderizaría completamente
+            // transparente en silencio si no se loguea. Logueado una sola
+            // vez por redraw (presentPass == 0), no dos, para no duplicar
+            // el mensaje sin agregar información nueva.
+            SDL_Log(
+                "nimvlets: RenderFrame: current frame (%dx%d) has pixel data but no attached texture -- "
+                "rendering fully transparent; check AttachAllTextures() coverage",
+                frame.width, frame.height);
+        }
+        SDL_RenderPresent(renderer_);
     }
-    SDL_RenderPresent(renderer_);
 }
 
 void SpikeApp::ApplyCurrentHitMask() {
@@ -1046,6 +1090,9 @@ int SpikeApp::Run() {
         if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs()) {
             waitMs = std::min(waitMs, *flushDeadline - nowMs);
         }
+        if (confirmRedrawDeadlineMs_) {
+            waitMs = std::min(waitMs, *confirmRedrawDeadlineMs_ - nowMs);
+        }
         if (usingPollDrivenClickThrough_) {
             waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
         }
@@ -1113,6 +1160,16 @@ int SpikeApp::Run() {
         if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs();
             flushDeadline && afterMs >= *flushDeadline) {
             FlushPersistedState();
+        }
+
+        if (confirmRedrawDeadlineMs_ && afterMs >= *confirmRedrawDeadlineMs_) {
+            // Ver el comentario de confirmRedrawDeadlineMs_ en
+            // SpikeApp.h -- fuerza un segundo redraw completo, con
+            // separación real de tiempo respecto del que ya disparó el
+            // cambio de dirección, sin depender de ninguna animación
+            // futura.
+            needsRedraw_ = true;
+            confirmRedrawDeadlineMs_.reset();
         }
 
         if (needsRedraw_) {
