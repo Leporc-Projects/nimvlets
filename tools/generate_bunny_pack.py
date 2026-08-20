@@ -1,87 +1,41 @@
 #!/usr/bin/env python3
 """Genera el contenido "right" de Bunny a partir de sus frames "left"
 reales, ya importados en este repo (ver docs/BUNNY_CONTENT.md), y
-compila el pack de runtime completo con la MISMA semántica de
-producto ya establecida y corregida para Nidir en Block 04.2/04.3:
-pose base estática + idle periódico esporádico (one-shot) + click
-(one-shot) + política de canvas de trabajo compartido anclado por
-contenido — ver docs/DECISION_LOG.md.
+compila el pack de runtime completo con el grafo de comportamiento de
+un solo estado ("default") que todo pet normal usa (Block 05 -- ver
+docs/ANIMATION_RUNTIME.md): pose base estática + click self-loop +
+ambient self-loop ponderado 70/30 (grooming incluido) + hover
+compartiendo el mismo pool ambient -- política de canvas de trabajo
+compartido anclado por contenido sin cambios desde Block 04.3.
 
-Block 04.3 migra a Bunny de fixture de QA sintético (Block 01/02, ver
-tools/generate_bunny_dev_pack.py -- SUPERSEDED, ver su docstring) a
-contenido real de producción: el owner exportó su idle y click real
-(`local_imports/bunny/bunny-idle-left/`,
-`local_imports/bunny/bunny-click-left/`), ya copiados una única vez a
-sus rutas canónicas en `assets/source/nimvlets/bunny/animations/`
-(ver el commit que importó estos assets). Esta importación fue el
-segundo caso REAL (después de Nidir) de este pipeline, sirviendo como
-segunda validación genuina de la política de normalización visual/
-canvas de trabajo compartido y de la extensión direccional del
-content model -- ambas ya genéricas desde que se implementaron para
-Nidir, sin ningún cambio necesario para que funcionen con un pet
-distinto.
+Bunny es canónicamente "left" (a diferencia de Nidir, "right") -- el
+export real nombra su propia dirección canónica así (ver
+assets/source/nimvlets/bunny/DESCRIPTION.txt). Este script deriva
+"right" por espejado horizontal determinista de los frames "left"
+reales, y wirea el campo CANÓNICO del manifest (resuelto para
+Direction::kRight por content::ResolveAnimation()) con los frames
+DERIVADOS, y el override "left" con los frames REALES -- inverso de
+dónde vive cada uno en disco, pero lo que el runtime necesita para que
+kRight/kLeft resuelvan al contenido visualmente correcto.
 
-A diferencia de Nidir (cuyo export real trae "right" como dirección
-canónica), el export real de Bunny nombra su propia dirección
-canónica "left" -- adoptado tal cual (ver
-assets/source/nimvlets/bunny/DESCRIPTION.txt, "dirección canónica").
-Este script deriva "right" por el mismo espejado horizontal
-determinista que ya usa tools/generate_nidir_pack.py, solo que en la
-dirección opuesta -- la lógica en sí es genérica (una función que
-recibe "cuál carpeta es la canónica importada" y "cuál hay que
-derivar", sin asumir cuál lado es cuál).
-
-Primera pasada de Block 04.3 (arriba): solo static/base master, un
-idle periódico, un click_reaction -- por instrucción explícita del
-brief original. La corrección post-QA de este mismo bloque agrega
-AHORA la segunda animación de idle real ("groom" -- el owner exportó
-`local_imports/bunny/bunny-idle-groom-left/`, ya copiado a
-`assets/source/nimvlets/bunny/animations/groom/left/`, mismo patrón
-de import manual documentado que idle/click_reaction), la selección
-ponderada 70/30 entre las dos (ver `passive_action_weights` en
-tools/compile_pet_pack.py y content::ChooseWeightedPassiveActionIndex()),
-y el disparo por hover (ver src/app/SpikeApp.cpp,
-MaybeTriggerHoverPassiveAction()) -- exactamente el mismo patrón
-"generic, no per-pet C++" que este bloque ya demostró para Nidir: el
-scheduler de acciones pasivas ya soportaba una LISTA de
-`passive_actions` (ver content::PetDefinition::passiveActions) desde
-antes de que existiera este arte nuevo, así que agregar la segunda
-entrada real no requirió ningún cambio de arquitectura, solo este
-script.
-
-Escribe, para CADA animación (idle, click_reaction, groom):
-    assets/source/nimvlets/bunny/animations/<anim>/right/frames/frame_NNN.png
-        (espejo horizontal exacto de cada frame "left")
-    assets/source/nimvlets/bunny/animations/<anim>/right/spritesheet/spritesheet.png
-        (ensamblado desde los frames "right" ya espejados, en la misma
-        grilla 5x5 que el spritesheet "left" original -- nunca espejar
-        la imagen del spritesheet completo de una sola vez)
-Y además:
-    assets/source/nimvlets/bunny/pack_manifest.json
-    assets/dev/bunny_pack.nvpack
-        (mismo path que el fixture sintético anterior -- ver
-        "identidad de catálogo" más abajo)
-
-Determinista: re-correr este script contra los mismos frames "left"
-produce salida byte-idéntica. Este script NO toca `local_imports/` --
-staging temporal del owner, nunca commiteado (ver .git/info/exclude);
-el copiado desde ahí hacia `assets/source/nimvlets/bunny/animations/`
-ya se hizo una única vez, de forma manual y documentada en el commit
-que importó estos assets (mismo patrón que el import de Nidir: los
-frames ya venían correctamente nombrados/normalizados, "zero actual
-normalization" needed, así que un `cp` directo bastó).
-
-Identidad de catálogo (migración cuidadosa, sin romper contratos):
-`id` se mantiene como "bunny_dev" (NO se renombra a "bunny") y
-`assets/dev/bunny_pack.nvpack` se mantiene como el mismo path exacto
-que el fixture sintético anterior -- así, cualquier estado persistido
-existente (`AppState.activePetId == "bunny_dev"`,
-`assets/dev/pet_catalog_manifest.json`'s `pet_id`/`pack_path`) sigue
-resolviendo correctamente sin ningún cambio, aunque el CONTENIDO real
-del pack ya no sea sintético. `display_name` sí se actualiza (de
-"Bunny (dev fixture)" a "Bunny") -- eso es solo una etiqueta legible,
-no una clave de identidad, y ya no es honesto llamarlo "fixture" una
-vez que el contenido es real.
+Block 05 (corrección de comportamiento + escala visual, ver el informe
+de este bloque):
+    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0 --
+      política de producto vigente ("target interval is now 15
+      seconds"), un único valor para Bunny y Nidir.
+    - `visual_scale` nuevo (por-pet, runtime -- ver
+      content::PetDefinition::visualScale): Bunny queda en el default
+      1.0 ("Bunny's current size is approved", sin cambio) -- ver
+      VISUAL_SCALE abajo y tools/generate_nidir_pack.py para el
+      contraste con Nidir (1.10).
+    - Diagnóstico raíz de "pixel/body-part loss during playback":
+      NINGUNA etapa de este pipeline (fuente -> compose -> compilación
+      -> render) demostró pérdida real de contenido medible -- ver el
+      informe de este bloque. El hallazgo de "clipping real" de
+      docs/BUNNY_CONTENT.md §3.1 queda CORREGIDO/retractado con
+      evidencia de gradiente de alpha real (un borde antialiaseado
+      normal de 2-3px, no un corte plano). Este script no cambia por
+      eso -- no había ningún bug de compilación que corregir acá.
 
 Uso:
     python3 tools/generate_bunny_pack.py
@@ -115,12 +69,6 @@ CLICK_DERIVED_FRAMES_DIR = os.path.join(CLICK_ROOT, "right", "frames")
 CLICK_CANONICAL_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "left", "spritesheet", "spritesheet.png")
 CLICK_DERIVED_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "right", "spritesheet", "spritesheet.png")
 
-# Segunda animación de idle real (Block 04.3, corrección post-QA -- ver
-# el docstring del módulo). Importada desde
-# local_imports/bunny/bunny-idle-groom-left/, ya copiada a esta ruta
-# canónica en un commit dedicado -- mismo patrón exacto que idle/
-# click_reaction: "left" es la dirección REAL importada (canónica para
-# Bunny), "right" se deriva acá por el mismo espejado determinista.
 GROOM_ROOT = os.path.join(BUNNY_ROOT, "animations", "groom")
 GROOM_CANONICAL_FRAMES_DIR = os.path.join(GROOM_ROOT, "left", "frames")
 GROOM_DERIVED_FRAMES_DIR = os.path.join(GROOM_ROOT, "right", "frames")
@@ -130,58 +78,42 @@ GROOM_DERIVED_SPRITESHEET_PATH = os.path.join(GROOM_ROOT, "right", "spritesheet"
 MANIFEST_PATH = os.path.join(BUNNY_ROOT, "pack_manifest.json")
 COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "bunny_pack.nvpack")
 
-# Mismo margen "2x densidad de pixel de referencia" que Nidir usa (ver
-# tools/generate_nidir_pack.py) -- genérico, no un valor propio de
-# Bunny.
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
-# Grilla del spritesheet: 5 columnas -- confirmado inspeccionando las
-# dimensiones reales de los tres spritesheets importados (idle:
-# 1920x2685 == 5*384 x 5*537; click: 2095x2935 == 5*419 x 5*587; groom:
-# 2230x3010 == 5*446 x 5*602, los tres exactos), no asumido.
 GRID_COLUMNS = 5
 
-# 128: mismo punto medio estándar de borde antialiaseado que Nidir/la
-# convención original de Bunny (DEC-018) -- confirmado con el
-# histograma real del frame_000 de idle de este export: fondo en
-# alpha=0 (45.5%), interior en alpha>=250 (53.3%), solo 1.2% de
-# pixeles en la banda de borde antialiaseado entre medio, donde el
-# umbral realmente importa.
 ALPHA_HIT_THRESHOLD = 128
 
-# Misma configuración de Ludo.ai que Nidir usó ("3 seconds, Max Frames
-# 25") -- el owner no proveyó un dato separado para estos exports de
-# Bunny específicamente, pero idle/click_reaction/groom traen los tres
-# 25 frames, consistente con esa misma configuración. Suposición
-# explícita y documentada, no confirmada por separado -- si se
-# confirma un valor distinto en el futuro, ajustar acá.
 EXPORT_DURATION_SECONDS = 3.0
 
-# 10 segundos -- pedido explícito del owner en la corrección post-QA de
-# este bloque ("intervalo pasivo de 10 segundos para ambos Nimvlets"),
-# reemplazando el default sin-cambios de PetDefinition (300s) que la
-# primera pasada de este bloque todavía usaba para Bunny. Mismo valor
-# que Nidir (ver tools/generate_nidir_pack.py) -- un único intervalo de
+# 15 segundos -- política de producto vigente para Block 05 ("target
+# interval is now 15 seconds"), reemplaza el 10.0 de la corrección
+# post-QA de Block 04.3. Mismo valor que Nidir -- un único intervalo de
 # producto para los dos, no un ajuste por-pet.
-PASSIVE_INTERVAL_SECONDS = 10.0
+AMBIENT_INTERVAL_SECONDS = 15.0
 
-# Selección ponderada 70/30 entre las DOS acciones pasivas de Bunny
-# (Block 04.3, corrección post-QA -- pedido explícito del owner) --
-# ver content::ChooseWeightedPassiveActionIndex() y el índice 0 = idle
-# periódico (breathing), índice 1 = groom (nueva). El orden de esta
-# lista debe calzar exactamente con el orden de `passive_actions` en el
-# manifest más abajo -- ver main().
-PASSIVE_ACTION_WEIGHTS = [0.7, 0.3]
+# Selección ponderada 70/30 entre las DOS acciones ambient de Bunny --
+# índice 0 = idle periódico (breathing), índice 1 = groom.
+AMBIENT_ACTION_WEIGHTS = [0.7, 0.3]
+
+# Escala visual por-pet (Block 05 -- ver content::PetDefinition::
+# visualScale). "Bunny's current size is approved" -- 1.0 preserva
+# exactamente el tamaño en pantalla que ya tenía (134x176, derivado del
+# canvas de trabajo compartido de abajo con el factor de referencia
+# global existente, sin cambios). Contraste: tools/generate_nidir_pack.py
+# usa 1.10 -- ver el informe de este bloque para el resultado exacto de
+# cada uno.
+VISUAL_SCALE = 1.0
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
     """Ensambla un spritesheet 5xN (row-major) a partir de frames ya
     normalizados en disco -- nunca espeja/transforma el spritesheet
-    como imagen completa (ver el docstring del módulo)."""
+    como imagen completa."""
     rows = (frame_count + GRID_COLUMNS - 1) // GRID_COLUMNS
     sheet_w = GRID_COLUMNS * frame_w
     sheet_h = rows * frame_h
-    sheet = bytearray(sheet_w * sheet_h * 4)  # transparente por defecto (todo-ceros == alpha 0)
+    sheet = bytearray(sheet_w * sheet_h * 4)
 
     for index in range(frame_count):
         _, _, pixels = prep_dev_sprite.read_png_rgba(os.path.join(frame_dir, f"frame_{index:03d}.png"))
@@ -204,13 +136,6 @@ def _derive_mirrored_direction(
     canonical_spritesheet_path: str,
     derived_spritesheet_path: str,
 ) -> tuple[validate_frame_sequence.FrameSequenceReport, validate_frame_sequence.FrameSequenceReport]:
-    """Valida los frames de la dirección CANÓNICA reales ya importados
-    de una animación, deriva la dirección OPUESTA por espejado
-    horizontal determinista, la valida contra el mismo contrato, y
-    ensambla su spritesheet desde los frames ya espejados. Genérico
-    respecto de cuál dirección es la canónica -- para Nidir es
-    "right"; para Bunny, este mismo patrón corre con "left" como
-    canónica y deriva "right" -- la función en sí no lo asume."""
     canonical_report = validate_frame_sequence.validate_frame_sequence(canonical_frames_dir, ALPHA_HIT_THRESHOLD)
     print(f"{label}: frames canónicos válidos: {canonical_report.frame_count} @ {canonical_report.width}x{canonical_report.height}")
 
@@ -259,19 +184,6 @@ def main() -> int:
         "groom", GROOM_CANONICAL_FRAMES_DIR, GROOM_DERIVED_FRAMES_DIR, GROOM_CANONICAL_SPRITESHEET_PATH, GROOM_DERIVED_SPRITESHEET_PATH
     )
 
-    # Misma política de canvas de trabajo compartido/anclado por
-    # contenido que Nidir ya usa (Block 04.3) -- ver
-    # prep_dev_sprite.compute_frame_normalization_plan() y el
-    # docstring de tools/compile_pet_pack.py. "idle" es el grupo de
-    # referencia por la misma convención que Nidir (DEC-045). "groom"
-    # se agrega acá como un tercer grupo (corrección post-QA) -- el
-    # canvas de trabajo compartido debe ser lo bastante grande como
-    # para contener también su contenido nativo, o el canvas lógico
-    # que este script deriva más abajo (a partir de ESTE mismo plan)
-    # quedaría desalineado con el que tools/compile_pet_pack.py
-    # recalcula de forma independiente al compilar (que SÍ incluye
-    # "groom" automáticamente, en cuanto aparece en
-    # manifest["passive_actions"] -- ver su _build_normalization_plan()).
     normalization_entries = {
         "idle": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png")),
         "idle_right": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_DERIVED_FRAMES_DIR, "frame_000.png")),
@@ -301,6 +213,8 @@ def main() -> int:
         f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, "
         f"referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE} x DISPLAY_SIZE_SCALE_FACTOR={prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR})"
     )
+    print(f"visual_scale (Block 05, por-pet, runtime): {VISUAL_SCALE} -> tamaño efectivo en pantalla "
+          f"{round(canvas_width * VISUAL_SCALE)}x{round(canvas_height * VISUAL_SCALE)}")
     print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
 
     left_dir = os.path.join("animations", "idle", "left", "frames")
@@ -325,125 +239,111 @@ def main() -> int:
     print(f"click_reaction: {click_left_report.frame_count} frames reales, fps derivado={click_playback_fps:.4f}")
     print(f"groom: {groom_left_report.frame_count} frames reales, fps derivado={groom_playback_fps:.4f}")
 
+    # IMPORTANTE -- Bunny es canónicamente "left" (a diferencia de
+    # Nidir): el campo canónico (kRight) de cada animación usa los
+    # frames DERIVADOS (espejados, "right"); el override "left" usa los
+    # frames REALES importados -- ver el docstring del módulo.
     manifest = {
-        # Se mantiene "bunny_dev" -- ver "Identidad de catálogo" en el
-        # docstring del módulo.
         "id": "bunny_dev",
         "display_name": "Bunny",
         "variant_group": "",
         "canvas_width": canvas_width,
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
-        "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
-        "content_version": "block04.3-bunny-2",
+        "visual_scale": VISUAL_SCALE,
+        "content_version": "block05-bunny-1",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         "normalize_visual_scale": True,
-        # IMPORTANTE -- content::ResolveIdleAnimation()/
-        # ResolveClickReaction()/ResolvePassiveAction() (sin cambios,
-        # Block 04.2) SIEMPRE resuelven el campo CANÓNICO (este de
-        # acá, sin override) para Direction::kRight -- un override
-        # direccional solo se consulta para direcciones DISTINTAS de
-        # kRight. Como el export real de Bunny es canónicamente
-        # "left" (no "right", a diferencia de Nidir), el campo
-        # canónico de abajo usa los frames DERIVADOS (espejados,
-        # "right") y el override "left" usa los frames REALES
-        # importados -- exactamente al revés de dónde vive cada uno en
-        # disco (assets/source/.../left/ es la fuente real,
-        # .../right/ es la derivada), pero es lo que el runtime
-        # necesita para que Direction::kRight/kLeft resuelvan al
-        # contenido visualmente correcto. Poner esto al revés sería un
-        # bug real (Bunny se vería con la dirección equivocada en
-        # kRight, el default inicial del controller) -- confirmado
-        # contra el binario real antes de dar esto por bueno, ver el
-        # informe de este bloque.
-        #
-        # Pose base: ESTÁTICA, un solo frame (frame_000 de idle) --
-        # misma semántica que Nidir (Block 04.2, segunda pasada):
-        # ningún deadline de frame mientras está en reposo.
-        "idle": {
-            "id": "idle_base_right",
-            "kind": "static",
-            "fps": 0,
-            "returns_to_idle": True,
-            "frames": [_frame_entry(right_dir, 0)],
-        },
-        "idle_direction_overrides": [
+        "states": [
             {
-                "direction": "left",
-                "id": "idle_base_left",
-                "kind": "static",
-                "fps": 0,
-                "returns_to_idle": True,
-                "frames": [_frame_entry(left_dir, 0)],
+                "id": "default",
+                "base_animation": {
+                    "id": "idle_base_right",
+                    "kind": "static",
+                    "fps": 0,
+                    "returns_to_idle": True,
+                    "frames": [_frame_entry(right_dir, 0)],
+                },
+                "base_animation_direction_overrides": [
+                    {
+                        "direction": "left",
+                        "id": "idle_base_left",
+                        "kind": "static",
+                        "fps": 0,
+                        "returns_to_idle": True,
+                        "frames": [_frame_entry(left_dir, 0)],
+                    }
+                ],
+                "ambient_interval_seconds": AMBIENT_INTERVAL_SECONDS,
+                "ambient_actions": [
+                    {
+                        "id": "idle_breathing",
+                        "weight": AMBIENT_ACTION_WEIGHTS[0],
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": idle_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": idle_right_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "idle_breathing_left",
+                                "kind": "one_shot",
+                                "fps": idle_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": idle_left_entries,
+                            }
+                        ],
+                    },
+                    {
+                        "id": "groom",
+                        "weight": AMBIENT_ACTION_WEIGHTS[1],
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": groom_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": groom_right_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "groom_left",
+                                "kind": "one_shot",
+                                "fps": groom_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": groom_left_entries,
+                            }
+                        ],
+                    },
+                ],
+                # "hover uses the same available passive-action pool
+                # unless content says otherwise" -- Bunny no dice
+                # otherwise, así que hover comparte el pool ambient de
+                # arriba (sin duplicar frames en el pack compilado).
+                "hover_uses_ambient_actions": True,
+                "hover_actions": [],
+                "click_actions": [
+                    {
+                        "id": "click",
+                        "weight": 1.0,
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": click_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": click_right_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "click_left",
+                                "kind": "one_shot",
+                                "fps": click_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": click_left_entries,
+                            }
+                        ],
+                    }
+                ],
             }
         ],
-        # click real (importado en este bloque) -- one_shot, vuelve a
-        # la pose base estática al terminar
-        # (AnimationController::TransitionToIdle()).
-        "click_reaction": {
-            "id": "click_right",
-            "kind": "one_shot",
-            "fps": click_playback_fps,
-            "returns_to_idle": True,
-            "frames": click_right_entries,
-        },
-        "click_reaction_direction_overrides": [
-            {
-                "direction": "left",
-                "id": "click_left",
-                "kind": "one_shot",
-                "fps": click_playback_fps,
-                "returns_to_idle": True,
-                "frames": click_left_entries,
-            }
-        ],
-        # DOS acciones pasivas (Block 04.3, corrección post-QA -- antes
-        # solo existía el idle periódico "breathing"; "groom" es la
-        # segunda, real, importada en esta misma corrección). Mismo
-        # cuidado de inversión canónica que idle/click_reaction arriba:
-        # el índice 1 (groom) usa los frames DERIVADOS ("right") en su
-        # entrada canónica y los REALES ("left") en su override --
-        # nunca al revés.
-        "passive_actions": [
-            {
-                "id": "idle_breathing_right",
-                "kind": "one_shot",
-                "fps": idle_playback_fps,
-                "returns_to_idle": True,
-                "frames": idle_right_entries,
-            },
-            {
-                "id": "groom_right",
-                "kind": "one_shot",
-                "fps": groom_playback_fps,
-                "returns_to_idle": True,
-                "frames": groom_right_entries,
-            },
-        ],
-        "passive_action_direction_overrides": [
-            {
-                "passive_action_index": 0,
-                "direction": "left",
-                "id": "idle_breathing_left",
-                "kind": "one_shot",
-                "fps": idle_playback_fps,
-                "returns_to_idle": True,
-                "frames": idle_left_entries,
-            },
-            {
-                "passive_action_index": 1,
-                "direction": "left",
-                "id": "groom_left",
-                "kind": "one_shot",
-                "fps": groom_playback_fps,
-                "returns_to_idle": True,
-                "frames": groom_left_entries,
-            },
-        ],
-        # 70/30 entre las dos entradas de arriba, en el mismo orden --
-        # ver PASSIVE_ACTION_WEIGHTS y
-        # content::ChooseWeightedPassiveActionIndex().
-        "passive_action_weights": PASSIVE_ACTION_WEIGHTS,
     }
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

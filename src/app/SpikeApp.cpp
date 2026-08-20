@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -433,17 +434,20 @@ bool SpikeApp::Init() {
         static_cast<double>(SDL_GetWindowDisplayScale(window_)));
 
     const content::BehaviorState& startupState = animController_->CurrentState();
+    std::string ambientDescription = "no ambient action for this state";
+    if (!startupState.ambientActions.empty()) {
+        char ambientBuf[96];
+        std::snprintf(
+            ambientBuf, sizeof(ambientBuf), "ambient action every ~%.0fs", ComputeEffectiveAmbientIntervalSeconds(startupState));
+        ambientDescription = ambientBuf;
+    }
     SDL_Log(
         "nimvlets: pet '%s' (%s) ready — native canvas %dx%d x visualScale=%.3f = %dx%d on screen, "
-        "alpha hit threshold=%d/255, state='%s'%s. Click the shape; drag to move; close the window to "
+        "alpha hit threshold=%d/255, state='%s' (%s). Click the shape; drag to move; close the window to "
         "quit. Click balance: %llu (%s).",
         pet_.id.c_str(), pet_.displayName.c_str(), pet_.canvasWidth, pet_.canvasHeight, pet_.visualScale,
         EffectiveCanvasWidth(), EffectiveCanvasHeight(), static_cast<int>(pet_.alphaHitThreshold),
-        startupState.id.c_str(),
-        startupState.ambientActions.empty() ? ", no ambient action for this state"
-                                             : (" , ambient action every ~" +
-                                                std::to_string(ComputeEffectiveAmbientIntervalSeconds(startupState)) + "s")
-                                                   .c_str(),
+        startupState.id.c_str(), ambientDescription.c_str(),
         static_cast<unsigned long long>(appState_.clickBalance),
         appStateStore_.has_value() ? "persisted locally" : "persistence unavailable this run");
 

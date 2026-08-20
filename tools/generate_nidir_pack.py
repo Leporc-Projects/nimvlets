@@ -1,119 +1,32 @@
 #!/usr/bin/env python3
 """Genera el contenido "left" de Nidir a partir de sus frames "right"
 reales, ya importados en este repo (ver docs/NIDIR_CONTENT.md), y
-compila el pack de runtime completo con la semántica real de producto:
-pose base estática + animación de idle esporádica (one-shot) + click-
-fire real (one-shot) — ver la corrección de Block 04.2 (segunda
-pasada, "corrección de semántica de animación") y la tercera pasada
-("import del click-fire real") en docs/DECISION_LOG.md.
+compila el pack de runtime completo con el grafo de comportamiento de
+un solo estado ("default") que todo pet normal usa (Block 05 -- ver
+docs/ANIMATION_RUNTIME.md): pose base estática + click self-loop
+(click-fire real) + ambient self-loop ponderado 70/30 (breathing +
+wing_stretch) + hover compartiendo el mismo pool ambient -- política de
+canvas de trabajo compartido anclado por contenido sin cambios desde
+Block 04.3.
 
-Nidir es el primer Nimvlet con arte real de producción (a diferencia de
-Bunny, que sigue siendo un fixture de QA -- ver AGENTS.md §11). Este
-script NO inventa contenido nuevo: tanto los frames "right" de idle
-(`assets/source/nimvlets/nidir/animations/idle/right/frames/`) como
-los de click_reaction
-(`assets/source/nimvlets/nidir/animations/click_reaction/right/frames/`)
-ya existen en este repo, importados desde exports reales de Ludo.ai del
-owner (idle: primera pasada de este bloque; click-fire: tercera pasada,
-copiado desde `local_imports/nidir/nidir-click-fire-right/` una vez que
-el bloqueo de acceso a `~/Downloads` se resolvió -- ver
-docs/NIDIR_CONTENT.md §10). Lo único que este script deriva es la
-dirección "left" de CADA animación, por espejado horizontal
-determinista (block brief §3: "Do not use AI to regenerate the left
-side") -- exactamente el mismo principio de "no depender de arte por
-terminar/generar" que tools/generate_bunny_dev_pack.py estableció en
-Block 02, aplicado acá a una dirección en vez de a una animación
-completa.
+Nidir es canónicamente "right" (a diferencia de Bunny, "left") -- su
+export real ya viene nombrado así. Este script deriva "left" por
+espejado horizontal determinista.
 
-Semántica real de producto (corregida en la segunda pasada de este
-bloque -- ver el informe final):
-    - `idle` (PetDefinition.idle) es la pose base ESTÁTICA (un solo
-      frame, frame_000 de la secuencia importada) — lo que se muestra
-      la mayor parte del tiempo, sin ningún deadline de frame (mismo
-      comportamiento event-driven que Bunny ya demuestra desde
-      Block 02).
-    - La secuencia completa importada (todos los frames reales) pasa a
-      ser un `passive_action` ONE-SHOT -- se dispara esporádicamente
-      (reusa el scheduler de acciones pasivas ya existente desde
-      Block 02, `passiveIntervalSeconds`/`TriggerPassiveAction`) y,
-      al terminar, vuelve a la pose base estática exactamente por el
-      mismo mecanismo que ya usan el click reaction de Bunny y de
-      Nidir (`AnimationController::TransitionToIdle()`).
-    - NUNCA se reproduce en loop continuo. No hay ningún cambio de
-      arquitectura en `content::AnimationController` para lograr
-      esto -- Bunny ya probaba exactamente este patrón
-      (estático + one-shot) desde Block 02; el pack de Nidir de la
-      primera pasada de este bloque lo clasificaba mal (`kind: loop`
-      donde debía ser un `passive_action` `one_shot`).
-
-Escribe, para CADA animación (idle, click_reaction):
-    assets/source/nimvlets/nidir/animations/<anim>/left/frames/frame_NNN.png
-        (espejo horizontal exacto de cada frame "right")
-    assets/source/nimvlets/nidir/animations/<anim>/left/spritesheet/spritesheet.png
-        (ensamblado desde los frames "left" ya espejados, en la misma
-        grilla 5x5 que el spritesheet "right" original -- NUNCA espejar
-        la imagen del spritesheet completo de una sola vez, porque eso
-        invertiría también el ORDEN de las celdas en la grilla, no solo
-        el contenido de cada una -- ver block brief §3: "generate a
-        mirrored spritesheet only if safe/deterministic; otherwise
-        generate it from normalized left frames")
-Y además:
-    assets/source/nimvlets/nidir/pack_manifest.json
-        (entrada de tools/compile_pet_pack.py para Nidir)
-    assets/dev/nidir_pack.nvpack
-        (pack de runtime compilado -- lo que src/app carga de verdad)
-
-Determinista: re-correr este script contra los mismos frames "right"
-(idle y click_reaction) produce salida byte-idéntica. Este script NO
-toca `local_imports/` -- esa carpeta es staging temporal del owner
-(nunca commiteada, ver .gitignore) y el copiado desde ahí hacia
-`assets/source/nimvlets/nidir/animations/click_reaction/right/` ya se
-hizo una única vez, de forma manual y documentada en el commit que
-importó el click-fire real (mismo patrón que el import original de
-idle -- ver `git log` de ese commit: "zero actual normalization"
-needed, así que no hizo falta ningún script de importación dedicado,
-solo un `cp`).
-
-Block 04.3 (QA manual del owner encontró clipping, pérdida de calidad
-y tamaño visual inconsistente entre idle y click-fire -- ver
-docs/NIDIR_CONTENT.md, "clipping y tamaño visual inconsistente entre
-animaciones") agrega estos cambios acá:
-    - El manifest ahora pide `normalize_visual_scale: true` --
-      tools/compile_pet_pack.py deriva, a partir de los pixeles reales
-      de idle y click_reaction, un canvas de trabajo compartido que
-      alinea el personaje al mismo tamaño/posición en ambas
-      animaciones (ver prep_dev_sprite.compute_frame_normalization_plan()).
-      `canvas_width`/`canvas_height` (el tamaño LÓGICO en pantalla) se
-      derivan de ESE canvas de trabajo compartido, no solo de la
-      resolución nativa de idle como en la segunda pasada -- así el
-      canvas lógico ya contempla el encuadre más ancho que necesita el
-      efecto de fuego.
-    - `PASSIVE_INTERVAL_SECONDS_PLACEHOLDER` pasa de 300s (5min) a 60s
-      (1min) -- ahora es un valor de producto explícitamente pedido
-      por el owner para este bloque, no un placeholder.
-    - `compute_logical_canvas_size()` ahora aplica, por defecto,
-      `prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR` (candidato de QA del
-      owner post-fix: "~5% más grande para todos los Nimvlets") --
-      genérico, no un valor propio de este script; ver
-      docs/NIDIR_CONTENT.md para el tamaño exacto resultante y cómo
-      revertirlo.
-
-La CORRECCIÓN post-QA de este mismo bloque (segunda pasada) agrega,
-además, la segunda animación de idle real de Nidir ("wing_stretch" --
-el owner exportó
-`local_imports/nidir/nidir-idle-wing-stretch-right/`, ya copiado a
-`assets/source/nimvlets/nidir/animations/wing_stretch/right/`, mismo
-patrón de import manual documentado que idle/click_reaction), la
-selección ponderada 70/30 entre las dos (ver `passive_action_weights`
-en tools/compile_pet_pack.py), el intervalo pasivo de 10 segundos
-(reemplazando el valor de producto de 60s de la pasada anterior -- el
-owner pidió explícitamente 10s para ambos Nimvlets en esta
-corrección), y +5 puntos porcentuales adicionales de
-DISPLAY_SIZE_SCALE_FACTOR (de 1.05 a 1.10, ~+10% total respecto del
-baseline original de 160 -- ver tools/prep_dev_sprite.py). El disparo
-por hover (ver src/app/SpikeApp.cpp, MaybeTriggerHoverPassiveAction())
-también aplica a Nidir sin ningún cambio en este script -- es
-enteramente lógica de runtime, no de contenido.
+Block 05 (corrección de comportamiento + escala visual, ver el informe
+de este bloque):
+    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0 --
+      política de producto vigente, un único valor para Bunny y Nidir.
+    - `visual_scale` nuevo (por-pet, runtime -- ver
+      content::PetDefinition::visualScale): Nidir queda en 1.10 --
+      "Nidir currently feels visually smaller than Bunny; it should be
+      somewhat larger" -- un +10% adicional sobre su canvas ya
+      calculado (176x173 -> ver VISUAL_SCALE abajo para el resultado
+      exacto reportado). Contraste: tools/generate_bunny_pack.py usa
+      el default 1.0 ("Bunny's current size is approved", sin cambio).
+      Puramente runtime: los PNG fuente y el pack compilado no
+      cambian por esto -- solo cuánto se estira al dibujar (ver
+      SpikeApp::EffectiveCanvasWidth()/Height()).
 
 Uso:
     python3 tools/generate_nidir_pack.py
@@ -140,22 +53,12 @@ LEFT_FRAMES_DIR = os.path.join(IDLE_ROOT, "left", "frames")
 RIGHT_SPRITESHEET_PATH = os.path.join(IDLE_ROOT, "right", "spritesheet", "spritesheet.png")
 LEFT_SPRITESHEET_PATH = os.path.join(IDLE_ROOT, "left", "spritesheet", "spritesheet.png")
 
-# Click-fire real (importado en la tercera pasada de este bloque desde
-# local_imports/nidir/nidir-click-fire-right/, ya copiado a estas
-# rutas canónicas -- ver el commit de import). Mismo layout que idle,
-# una animación distinta bajo animations/.
 CLICK_ROOT = os.path.join(NIDIR_ROOT, "animations", "click_reaction")
 CLICK_RIGHT_FRAMES_DIR = os.path.join(CLICK_ROOT, "right", "frames")
 CLICK_LEFT_FRAMES_DIR = os.path.join(CLICK_ROOT, "left", "frames")
 CLICK_RIGHT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "right", "spritesheet", "spritesheet.png")
 CLICK_LEFT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "left", "spritesheet", "spritesheet.png")
 
-# Segunda animación de idle real (Block 04.3, corrección post-QA -- ver
-# el docstring del módulo). Importada desde
-# local_imports/nidir/nidir-idle-wing-stretch-right/, ya copiada a esta
-# ruta canónica en un commit dedicado -- mismo patrón exacto que idle/
-# click_reaction: "right" es la dirección REAL importada (canónica
-# para Nidir), "left" se deriva acá por el mismo espejado determinista.
 WING_STRETCH_ROOT = os.path.join(NIDIR_ROOT, "animations", "wing_stretch")
 WING_STRETCH_RIGHT_FRAMES_DIR = os.path.join(WING_STRETCH_ROOT, "right", "frames")
 WING_STRETCH_LEFT_FRAMES_DIR = os.path.join(WING_STRETCH_ROOT, "left", "frames")
@@ -165,110 +68,36 @@ WING_STRETCH_LEFT_SPRITESHEET_PATH = os.path.join(WING_STRETCH_ROOT, "left", "sp
 MANIFEST_PATH = os.path.join(NIDIR_ROOT, "pack_manifest.json")
 COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "nidir_pack.nvpack")
 
-# Tamaño de canvas LÓGICO (puntos en pantalla, ver SDL_CreateWindow en
-# src/app/SpikeApp.cpp) vs. resolución de PIXELES almacenada en el pack
-# compilado -- dos preocupaciones deliberadamente separadas (política
-# genérica, ver tools/prep_dev_sprite.py's compute_logical_canvas_size()/
-# resize_rgba_nearest() y docs/NIDIR_CONTENT.md, "tamaño de canvas
-# lógico vs. resolución de frame"):
-#   - El canvas lógico se deriva del aspect ratio nativo de Nidir
-#     (513x525) escalado a la misma clase "160" que Bunny ya usa desde
-#     Block 02 -- NO la resolución nativa 1:1 (ese fue el bug real de
-#     la primera pasada de este bloque: Nidir aparecía mucho más
-#     grande que Bunny en pantalla).
-#   - `RUNTIME_MAX_FRAME_DIMENSION` limita la resolución de pixeles que
-#     efectivamente termina en el pack compilado (y por lo tanto en
-#     RAM/textura en runtime) -- independiente del canvas lógico, pero
-#     con margen suficiente para verse nítido a 2x densidad de pixel
-#     (Retina) sin almacenar muchísimo más detalle del que cualquier
-#     pantalla real puede mostrar. 2x el tamaño de referencia (160) es
-#     ese margen. Los PNG fuente en assets/source/ NUNCA se tocan --
-#     esto solo afecta los bytes que van al .nvpack.
-#
-# CANVAS_WIDTH/CANVAS_HEIGHT se calculan más abajo, dentro de main(),
-# a partir de la resolución nativa REAL medida de los frames right
-# (right_report.width/height) -- nunca hardcodeados acá, para no
-# repetir "513x525" como constante mágica separada de lo que
-# validate_frame_sequence.py efectivamente encontró.
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
-# Grilla del spritesheet: 5 columnas x 5 filas, orden row-major
-# (frame 0 arriba-izquierda, avanzando por fila) -- confirmado
-# inspeccionando visualmente assets/source/nimvlets/nidir/animations/idle/right/spritesheet/spritesheet.png
-# (2565x2625 == 5*513 x 5*525 exacto) antes de escribir este código, no
-# asumido. wing_stretch (corrección post-QA) también calza esta misma
-# grilla (3120x2595 == 5*624 x 5*519 exacto).
 GRID_COLUMNS = 5
 
-# 128: mismo punto medio estándar de borde antialiaseado que Bunny usa
-# (docs/DECISION_LOG.md DEC-018) -- confirmado con el histograma real
-# de frame_000 de Nidir, no reusado a ciegas: fondo en alpha=0 exacto
-# (50.84%), interior agrupado en alpha 254-255 (47.41%), y solo un
-# 1.75% de pixeles en la banda de borde antialiaseado entre medio,
-# donde el umbral realmente importa. Ver docs/NIDIR_CONTENT.md.
 ALPHA_HIT_THRESHOLD = 128
 
-# Duración de generación configurada del lado de Ludo.ai para el
-# export de idle (dato real, provisto por el owner en la segunda
-# pasada de este bloque -- "Our current Ludo generation setup is: 3
-# seconds, Max Frames 25" -- no una medición ni una suposición de este
-# repo). El fps de reproducción se deriva de esto (frame_count real /
-# 3.0s), NUNCA de un frame_count hardcodeado -- la cantidad real de
-# frames que entrega cada export puede variar (ver
-# validate_frame_sequence.py, que nunca fuerza 24/25 frames). Como la
-# secuencia es un passive_action/click_reaction ESPORÁDICO (nunca un
-# loop continuo), esta cadencia no necesita balancearse contra un costo
-# de CPU permanente -- solo importa mientras el one-shot está
-# efectivamente reproduciéndose.
-#
-# El export de click-fire (tercera pasada de este bloque) también trae
-# 25 frames -- el mismo conteo que idle bajo la misma configuración de
-# "Max Frames 25" de Ludo. Se reusa esta misma constante para derivar
-# su fps, asumiendo la misma duración de generación de 3s -- una
-# suposición explícita y documentada (el owner no confirmó
-# separadamente la duración de este export puntual), no un dato
-# medido de forma independiente. Si en el futuro se confirma que el
-# click-fire usó una duración distinta, solo hay que ajustar
-# CLICK_EXPORT_DURATION_SECONDS abajo -- ya está desacoplada de
-# EXPORT_DURATION_SECONDS a propósito, aunque hoy compartan el mismo
-# valor.
 EXPORT_DURATION_SECONDS = 3.0
 CLICK_EXPORT_DURATION_SECONDS = 3.0
-
-# wing_stretch (corrección post-QA de este mismo bloque) también trae
-# 25 frames -- misma suposición explícita que click-fire ya documenta
-# arriba: no confirmada por separado con el owner, pero consistente con
-# la misma configuración de Ludo ("3 seconds, Max Frames 25").
 WING_STRETCH_EXPORT_DURATION_SECONDS = 3.0
 
-# Cada cuánto se dispara una acción pasiva esporádica. Block 04.2 lo
-# dejaba en 300s (5min, el default del esquema de PetDefinition) de
-# forma explícita como no-final; Block 04.3 lo fijó a 60s (1 minuto)
-# por pedido directo del owner. La corrección post-QA de este mismo
-# bloque lo vuelve a bajar a 10 segundos -- pedido explícito y
-# posterior del owner ("intervalo pasivo de 10 segundos para ambos
-# Nimvlets"), mismo valor que Bunny (ver
-# tools/generate_bunny_pack.py) -- un único intervalo de producto para
-# los dos, no un ajuste por-pet.
-PASSIVE_INTERVAL_SECONDS = 10.0
+# 15 segundos -- ver el docstring del módulo y tools/generate_bunny_pack.py.
+AMBIENT_INTERVAL_SECONDS = 15.0
 
-# Selección ponderada 70/30 entre las DOS acciones pasivas de Nidir
-# (Block 04.3, corrección post-QA -- pedido explícito del owner) --
-# ver content::ChooseWeightedPassiveActionIndex() y el índice 0 = idle
-# periódico (breathing/fuego), índice 1 = wing_stretch (nueva). El
-# orden de esta lista debe calzar exactamente con el orden de
-# `passive_actions` en el manifest más abajo -- ver main().
-PASSIVE_ACTION_WEIGHTS = [0.7, 0.3]
+# Selección ponderada 70/30 -- índice 0 = idle periódico (breathing/
+# fuego), índice 1 = wing_stretch.
+AMBIENT_ACTION_WEIGHTS = [0.7, 0.3]
+
+# Escala visual por-pet (Block 05 -- ver el docstring del módulo y
+# content::PetDefinition::visualScale). Candidato de QA conservador
+# pedido por el owner ("approximately +10% relative to its current
+# result") -- trivial de ajustar: cambiar este único número y volver a
+# correr este script.
+VISUAL_SCALE = 1.10
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
-    """Ensambla un spritesheet 5xN (row-major) a partir de frames ya
-    normalizados en disco -- nunca espeja/transforma el spritesheet
-    como imagen completa (ver el docstring del módulo)."""
     rows = (frame_count + GRID_COLUMNS - 1) // GRID_COLUMNS
     sheet_w = GRID_COLUMNS * frame_w
     sheet_h = rows * frame_h
-    sheet = bytearray(sheet_w * sheet_h * 4)  # transparente por defecto (todo-ceros == alpha 0)
+    sheet = bytearray(sheet_w * sheet_h * 4)
 
     for index in range(frame_count):
         _, _, pixels = prep_dev_sprite.read_png_rgba(os.path.join(frame_dir, f"frame_{index:03d}.png"))
@@ -291,13 +120,6 @@ def _derive_left_direction(
     right_spritesheet_path: str,
     left_spritesheet_path: str,
 ) -> tuple[validate_frame_sequence.FrameSequenceReport, validate_frame_sequence.FrameSequenceReport]:
-    """Valida los frames "right" reales ya importados de una animación,
-    deriva su dirección "left" por espejado horizontal determinista, la
-    valida contra el mismo contrato, y ensambla su spritesheet "left"
-    desde los frames ya espejados (nunca espejando la imagen completa
-    del spritesheet -- ver el docstring del módulo). Reusado tanto para
-    `idle` como para `click_reaction` -- misma lógica, dos animaciones
-    distintas."""
     right_report = validate_frame_sequence.validate_frame_sequence(right_frames_dir, ALPHA_HIT_THRESHOLD)
     print(f"{label}: right frames válidos: {right_report.frame_count} @ {right_report.width}x{right_report.height}")
 
@@ -316,9 +138,6 @@ def _derive_left_direction(
 
     left_report = validate_frame_sequence.validate_frame_sequence(left_frames_dir, ALPHA_HIT_THRESHOLD)
     print(f"{label}: left frames generados y validados: {left_report.frame_count} @ {left_report.width}x{left_report.height}")
-    # El espejado preserva dimensiones y transparencia exactamente --
-    # confirmar que el reporte de left calza con el de right, no solo
-    # confiar en que "debería".
     assert left_report.frame_count == right_report.frame_count
     assert (left_report.width, left_report.height) == (right_report.width, right_report.height)
     assert left_report.transparent_fraction_range == right_report.transparent_fraction_range, (
@@ -350,21 +169,6 @@ def main() -> int:
         WING_STRETCH_RIGHT_SPRITESHEET_PATH, WING_STRETCH_LEFT_SPRITESHEET_PATH
     )
 
-    # Canvas lógico derivado del canvas de TRABAJO compartido (Block
-    # 04.3), no de la resolución nativa cruda de idle (eso era la
-    # segunda pasada) -- ver prep_dev_sprite.compute_frame_normalization_plan()
-    # y su uso idéntico dentro de tools/compile_pet_pack.py
-    # (`normalize_visual_scale`, más abajo en el manifest). Se computa
-    # acá SOLO para derivar canvas_width/canvas_height con el aspect
-    # ratio correcto -- compile_pet_pack.py vuelve a calcular el mismo
-    # plan de forma independiente a partir de los mismos PNG fuente
-    # (no se pasa ningún estado entre los dos scripts), así que ambos
-    # SIEMPRE coinciden sin necesidad de sincronizar nada. "wing_stretch"
-    # se agrega acá como un tercer grupo (corrección post-QA) -- mismo
-    # motivo que groom en tools/generate_bunny_pack.py: el canvas de
-    # trabajo compartido debe contemplar también su contenido nativo,
-    # o quedaría desalineado con el que compile_pet_pack.py recalcula
-    # de forma independiente al compilar.
     normalization_entries = {
         "idle": prep_dev_sprite.read_png_rgba(os.path.join(RIGHT_FRAMES_DIR, "frame_000.png")),
         "idle_left": prep_dev_sprite.read_png_rgba(os.path.join(LEFT_FRAMES_DIR, "frame_000.png")),
@@ -394,6 +198,8 @@ def main() -> int:
         f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, "
         f"referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE} x DISPLAY_SIZE_SCALE_FACTOR={prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR})"
     )
+    print(f"visual_scale (Block 05, por-pet, runtime): {VISUAL_SCALE} -> tamaño efectivo en pantalla "
+          f"{round(canvas_width * VISUAL_SCALE)}x{round(canvas_height * VISUAL_SCALE)}")
     print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
 
     right_dir = os.path.join("animations", "idle", "right", "frames")
@@ -411,10 +217,6 @@ def main() -> int:
     wing_stretch_right_frame_entries = [_frame_entry(wing_stretch_right_dir, i) for i in range(wing_stretch_right_report.frame_count)]
     wing_stretch_left_frame_entries = [_frame_entry(wing_stretch_left_dir, i) for i in range(wing_stretch_left_report.frame_count)]
 
-    # fps derivado de la cantidad REAL de frames entregados / la
-    # duración de generación configurada en Ludo.ai -- nunca
-    # hardcodeado a 24/25 (ver EXPORT_DURATION_SECONDS arriba y
-    # validate_frame_sequence.py).
     idle_playback_fps = right_report.frame_count / EXPORT_DURATION_SECONDS
     click_playback_fps = click_right_report.frame_count / CLICK_EXPORT_DURATION_SECONDS
     wing_stretch_playback_fps = wing_stretch_right_report.frame_count / WING_STRETCH_EXPORT_DURATION_SECONDS
@@ -428,124 +230,96 @@ def main() -> int:
         "canvas_width": canvas_width,
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
-        "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
-        "content_version": "block04.3-nidir-3",
+        "visual_scale": VISUAL_SCALE,
+        "content_version": "block05-nidir-1",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
-        # Canvas de trabajo compartido, anclado por contenido (Block
-        # 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y tamaño visual
-        # inconsistente entre animaciones", y el docstring de
-        # tools/compile_pet_pack.py). Sin esto, idle y click_reaction
-        # se estiraban cada uno de forma independiente al mismo canvas
-        # lógico fijo, mostrando al personaje a tamaños/posiciones
-        # distintos según qué animación estuviera activa.
         "normalize_visual_scale": True,
-        # Pose base: ESTÁTICA, un solo frame (frame_000 -- la misma
-        # imagen que también es el último frame lógico de la
-        # animación esporádica de abajo, ver "first/last frame
-        # contract" en el informe final para el hallazgo real sobre
-        # qué tan parecidos son frame_000 y el último frame
-        # efectivamente exportado). Sin esto, PlaybackKind::kStatic
-        # nunca tiene ningún deadline de frame -- exactamente el
-        # comportamiento event-driven que Bunny ya demuestra.
-        "idle": {
-            "id": "idle_base",
-            "kind": "static",
-            "fps": 0,
-            "returns_to_idle": True,
-            "frames": [_frame_entry(right_dir, 0)],
-        },
-        "idle_direction_overrides": [
+        "states": [
             {
-                "direction": "left",
-                "id": "idle_base_left",
-                "kind": "static",
-                "fps": 0,
-                "returns_to_idle": True,
-                "frames": [_frame_entry(left_dir, 0)],
+                "id": "default",
+                "base_animation": {
+                    "id": "idle_base",
+                    "kind": "static",
+                    "fps": 0,
+                    "returns_to_idle": True,
+                    "frames": [_frame_entry(right_dir, 0)],
+                },
+                "base_animation_direction_overrides": [
+                    {
+                        "direction": "left",
+                        "id": "idle_base_left",
+                        "kind": "static",
+                        "fps": 0,
+                        "returns_to_idle": True,
+                        "frames": [_frame_entry(left_dir, 0)],
+                    }
+                ],
+                "ambient_interval_seconds": AMBIENT_INTERVAL_SECONDS,
+                "ambient_actions": [
+                    {
+                        "id": "idle_breathing",
+                        "weight": AMBIENT_ACTION_WEIGHTS[0],
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": idle_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": right_frame_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "idle_breathing_left",
+                                "kind": "one_shot",
+                                "fps": idle_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": left_frame_entries,
+                            }
+                        ],
+                    },
+                    {
+                        "id": "wing_stretch",
+                        "weight": AMBIENT_ACTION_WEIGHTS[1],
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": wing_stretch_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": wing_stretch_right_frame_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "wing_stretch_left",
+                                "kind": "one_shot",
+                                "fps": wing_stretch_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": wing_stretch_left_frame_entries,
+                            }
+                        ],
+                    },
+                ],
+                "hover_uses_ambient_actions": True,
+                "hover_actions": [],
+                "click_actions": [
+                    {
+                        "id": "click_fire",
+                        "weight": 1.0,
+                        "target_state_id": "default",
+                        "kind": "one_shot",
+                        "fps": click_playback_fps,
+                        "returns_to_idle": True,
+                        "frames": click_right_frame_entries,
+                        "direction_overrides": [
+                            {
+                                "direction": "left",
+                                "id": "click_fire_left",
+                                "kind": "one_shot",
+                                "fps": click_playback_fps,
+                                "returns_to_idle": True,
+                                "frames": click_left_frame_entries,
+                            }
+                        ],
+                    }
+                ],
             }
         ],
-        # click-fire real (importado en la tercera pasada de este
-        # bloque, ver docs/NIDIR_CONTENT.md §10/§11) -- reemplaza el
-        # placeholder estructural de un solo frame de las pasadas
-        # anteriores. 25 frames reales exportados de Ludo.ai
-        # ("nidir-click-fire-right"), one_shot, mismo mecanismo de
-        # retorno a la pose base estática que ya usa passive_actions
-        # (returns_to_idle vía AnimationController::TransitionToIdle()).
-        # Debe ser one_shot (no static): un click_reaction static
-        # dejaría al AnimationController trabado en ese estado para
-        # siempre, ya que Advance() nunca transiciona de vuelta a Idle
-        # para una animación kStatic.
-        "click_reaction": {
-            "id": "click_fire_right",
-            "kind": "one_shot",
-            "fps": click_playback_fps,
-            "returns_to_idle": True,
-            "frames": click_right_frame_entries,
-        },
-        "click_reaction_direction_overrides": [
-            {
-                "direction": "left",
-                "id": "click_fire_left",
-                "kind": "one_shot",
-                "fps": click_playback_fps,
-                "returns_to_idle": True,
-                "frames": click_left_frame_entries,
-            }
-        ],
-        # DOS acciones pasivas (Block 04.3, corrección post-QA -- antes
-        # solo existía el idle periódico "breathing"; "wing_stretch" es
-        # la segunda, real, importada en esta misma corrección). La
-        # secuencia completa importada de cada una, reclasificada como
-        # acción pasiva ESPORÁDICA (one_shot) -- nunca un loop continuo.
-        # Se disparan vía el scheduler de acciones pasivas ya existente
-        # desde Block 02 (SpikeApp::nextPassiveDeadlineMs_ /
-        # AnimationController::TriggerPassiveAction()), ponderadas 70/30
-        # (ver PASSIVE_ACTION_WEIGHTS), y al terminar vuelven a la pose
-        # base estática por el mismo mecanismo que ya usa cualquier
-        # click_reaction (returnsToIdle). Nidir es canónicamente "right"
-        # (a diferencia de Bunny) -- sin inversión: la entrada canónica
-        # de wing_stretch usa los frames REALES ("right"), el override
-        # usa los DERIVADOS ("left"), igual que idle/click_reaction.
-        "passive_actions": [
-            {
-                "id": "idle_breathing_right",
-                "kind": "one_shot",
-                "fps": idle_playback_fps,
-                "returns_to_idle": True,
-                "frames": right_frame_entries,
-            },
-            {
-                "id": "wing_stretch_right",
-                "kind": "one_shot",
-                "fps": wing_stretch_playback_fps,
-                "returns_to_idle": True,
-                "frames": wing_stretch_right_frame_entries,
-            },
-        ],
-        "passive_action_direction_overrides": [
-            {
-                "passive_action_index": 0,
-                "direction": "left",
-                "id": "idle_breathing_left",
-                "kind": "one_shot",
-                "fps": idle_playback_fps,
-                "returns_to_idle": True,
-                "frames": left_frame_entries,
-            },
-            {
-                "passive_action_index": 1,
-                "direction": "left",
-                "id": "wing_stretch_left",
-                "kind": "one_shot",
-                "fps": wing_stretch_playback_fps,
-                "returns_to_idle": True,
-                "frames": wing_stretch_left_frame_entries,
-            },
-        ],
-        # 70/30 entre las dos entradas de arriba, en el mismo orden --
-        # ver PASSIVE_ACTION_WEIGHTS y
-        # content::ChooseWeightedPassiveActionIndex().
-        "passive_action_weights": PASSIVE_ACTION_WEIGHTS,
     }
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

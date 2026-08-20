@@ -5,698 +5,710 @@
   "canvas_width": 134,
   "canvas_height": 176,
   "alpha_hit_threshold": 128,
-  "passive_interval_seconds": 10.0,
-  "content_version": "block04.3-bunny-2",
+  "visual_scale": 1.0,
+  "content_version": "block05-bunny-1",
   "runtime_max_frame_dimension": 320,
   "normalize_visual_scale": true,
-  "idle": {
-    "id": "idle_base_right",
-    "kind": "static",
-    "fps": 0,
-    "returns_to_idle": true,
-    "frames": [
-      {
-        "source": "animations/idle/right/frames/frame_000.png",
-        "duration_ms": 0
-      }
-    ]
-  },
-  "idle_direction_overrides": [
+  "states": [
     {
-      "direction": "left",
-      "id": "idle_base_left",
-      "kind": "static",
-      "fps": 0,
-      "returns_to_idle": true,
-      "frames": [
+      "id": "default",
+      "base_animation": {
+        "id": "idle_base_right",
+        "kind": "static",
+        "fps": 0,
+        "returns_to_idle": true,
+        "frames": [
+          {
+            "source": "animations/idle/right/frames/frame_000.png",
+            "duration_ms": 0
+          }
+        ]
+      },
+      "base_animation_direction_overrides": [
         {
-          "source": "animations/idle/left/frames/frame_000.png",
-          "duration_ms": 0
+          "direction": "left",
+          "id": "idle_base_left",
+          "kind": "static",
+          "fps": 0,
+          "returns_to_idle": true,
+          "frames": [
+            {
+              "source": "animations/idle/left/frames/frame_000.png",
+              "duration_ms": 0
+            }
+          ]
+        }
+      ],
+      "ambient_interval_seconds": 15.0,
+      "ambient_actions": [
+        {
+          "id": "idle_breathing",
+          "weight": 0.7,
+          "target_state_id": "default",
+          "kind": "one_shot",
+          "fps": 8.333333333333334,
+          "returns_to_idle": true,
+          "frames": [
+            {
+              "source": "animations/idle/right/frames/frame_000.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_001.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_002.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_003.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_004.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_005.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_006.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_007.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_008.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_009.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_010.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_011.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_012.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_013.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_014.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_015.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_016.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_017.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_018.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_019.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_020.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_021.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_022.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_023.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/idle/right/frames/frame_024.png",
+              "duration_ms": 0
+            }
+          ],
+          "direction_overrides": [
+            {
+              "direction": "left",
+              "id": "idle_breathing_left",
+              "kind": "one_shot",
+              "fps": 8.333333333333334,
+              "returns_to_idle": true,
+              "frames": [
+                {
+                  "source": "animations/idle/left/frames/frame_000.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_001.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_002.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_003.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_004.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_005.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_006.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_007.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_008.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_009.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_010.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_011.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_012.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_013.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_014.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_015.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_016.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_017.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_018.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_019.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_020.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_021.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_022.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_023.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/idle/left/frames/frame_024.png",
+                  "duration_ms": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "groom",
+          "weight": 0.3,
+          "target_state_id": "default",
+          "kind": "one_shot",
+          "fps": 8.333333333333334,
+          "returns_to_idle": true,
+          "frames": [
+            {
+              "source": "animations/groom/right/frames/frame_000.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_001.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_002.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_003.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_004.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_005.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_006.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_007.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_008.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_009.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_010.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_011.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_012.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_013.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_014.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_015.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_016.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_017.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_018.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_019.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_020.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_021.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_022.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_023.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/groom/right/frames/frame_024.png",
+              "duration_ms": 0
+            }
+          ],
+          "direction_overrides": [
+            {
+              "direction": "left",
+              "id": "groom_left",
+              "kind": "one_shot",
+              "fps": 8.333333333333334,
+              "returns_to_idle": true,
+              "frames": [
+                {
+                  "source": "animations/groom/left/frames/frame_000.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_001.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_002.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_003.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_004.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_005.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_006.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_007.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_008.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_009.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_010.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_011.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_012.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_013.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_014.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_015.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_016.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_017.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_018.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_019.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_020.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_021.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_022.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_023.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/groom/left/frames/frame_024.png",
+                  "duration_ms": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "hover_uses_ambient_actions": true,
+      "hover_actions": [],
+      "click_actions": [
+        {
+          "id": "click",
+          "weight": 1.0,
+          "target_state_id": "default",
+          "kind": "one_shot",
+          "fps": 8.333333333333334,
+          "returns_to_idle": true,
+          "frames": [
+            {
+              "source": "animations/click_reaction/right/frames/frame_000.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_001.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_002.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_003.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_004.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_005.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_006.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_007.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_008.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_009.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_010.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_011.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_012.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_013.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_014.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_015.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_016.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_017.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_018.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_019.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_020.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_021.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_022.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_023.png",
+              "duration_ms": 0
+            },
+            {
+              "source": "animations/click_reaction/right/frames/frame_024.png",
+              "duration_ms": 0
+            }
+          ],
+          "direction_overrides": [
+            {
+              "direction": "left",
+              "id": "click_left",
+              "kind": "one_shot",
+              "fps": 8.333333333333334,
+              "returns_to_idle": true,
+              "frames": [
+                {
+                  "source": "animations/click_reaction/left/frames/frame_000.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_001.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_002.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_003.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_004.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_005.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_006.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_007.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_008.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_009.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_010.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_011.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_012.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_013.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_014.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_015.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_016.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_017.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_018.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_019.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_020.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_021.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_022.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_023.png",
+                  "duration_ms": 0
+                },
+                {
+                  "source": "animations/click_reaction/left/frames/frame_024.png",
+                  "duration_ms": 0
+                }
+              ]
+            }
+          ]
         }
       ]
     }
-  ],
-  "click_reaction": {
-    "id": "click_right",
-    "kind": "one_shot",
-    "fps": 8.333333333333334,
-    "returns_to_idle": true,
-    "frames": [
-      {
-        "source": "animations/click_reaction/right/frames/frame_000.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_001.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_002.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_003.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_004.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_005.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_006.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_007.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_008.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_009.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_010.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_011.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_012.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_013.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_014.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_015.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_016.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_017.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_018.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_019.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_020.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_021.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_022.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_023.png",
-        "duration_ms": 0
-      },
-      {
-        "source": "animations/click_reaction/right/frames/frame_024.png",
-        "duration_ms": 0
-      }
-    ]
-  },
-  "click_reaction_direction_overrides": [
-    {
-      "direction": "left",
-      "id": "click_left",
-      "kind": "one_shot",
-      "fps": 8.333333333333334,
-      "returns_to_idle": true,
-      "frames": [
-        {
-          "source": "animations/click_reaction/left/frames/frame_000.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_001.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_002.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_003.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_004.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_005.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_006.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_007.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_008.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_009.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_010.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_011.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_012.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_013.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_014.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_015.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_016.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_017.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_018.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_019.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_020.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_021.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_022.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_023.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/click_reaction/left/frames/frame_024.png",
-          "duration_ms": 0
-        }
-      ]
-    }
-  ],
-  "passive_actions": [
-    {
-      "id": "idle_breathing_right",
-      "kind": "one_shot",
-      "fps": 8.333333333333334,
-      "returns_to_idle": true,
-      "frames": [
-        {
-          "source": "animations/idle/right/frames/frame_000.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_001.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_002.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_003.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_004.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_005.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_006.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_007.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_008.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_009.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_010.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_011.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_012.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_013.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_014.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_015.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_016.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_017.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_018.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_019.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_020.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_021.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_022.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_023.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/right/frames/frame_024.png",
-          "duration_ms": 0
-        }
-      ]
-    },
-    {
-      "id": "groom_right",
-      "kind": "one_shot",
-      "fps": 8.333333333333334,
-      "returns_to_idle": true,
-      "frames": [
-        {
-          "source": "animations/groom/right/frames/frame_000.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_001.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_002.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_003.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_004.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_005.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_006.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_007.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_008.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_009.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_010.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_011.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_012.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_013.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_014.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_015.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_016.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_017.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_018.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_019.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_020.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_021.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_022.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_023.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/right/frames/frame_024.png",
-          "duration_ms": 0
-        }
-      ]
-    }
-  ],
-  "passive_action_direction_overrides": [
-    {
-      "passive_action_index": 0,
-      "direction": "left",
-      "id": "idle_breathing_left",
-      "kind": "one_shot",
-      "fps": 8.333333333333334,
-      "returns_to_idle": true,
-      "frames": [
-        {
-          "source": "animations/idle/left/frames/frame_000.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_001.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_002.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_003.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_004.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_005.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_006.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_007.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_008.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_009.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_010.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_011.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_012.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_013.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_014.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_015.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_016.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_017.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_018.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_019.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_020.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_021.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_022.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_023.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/idle/left/frames/frame_024.png",
-          "duration_ms": 0
-        }
-      ]
-    },
-    {
-      "passive_action_index": 1,
-      "direction": "left",
-      "id": "groom_left",
-      "kind": "one_shot",
-      "fps": 8.333333333333334,
-      "returns_to_idle": true,
-      "frames": [
-        {
-          "source": "animations/groom/left/frames/frame_000.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_001.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_002.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_003.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_004.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_005.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_006.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_007.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_008.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_009.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_010.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_011.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_012.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_013.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_014.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_015.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_016.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_017.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_018.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_019.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_020.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_021.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_022.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_023.png",
-          "duration_ms": 0
-        },
-        {
-          "source": "animations/groom/left/frames/frame_024.png",
-          "duration_ms": 0
-        }
-      ]
-    }
-  ],
-  "passive_action_weights": [
-    0.7,
-    0.3
   ]
 }
