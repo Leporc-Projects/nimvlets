@@ -1,0 +1,172 @@
+# Nimvlets — Frin: import real + comportamiento con estados (Block 05)
+
+Frin es un lobo blanco/crema con ojos azules — el Nimvlet que
+`docs/PRD_V1.md` documentaba históricamente como "Tan" (nombre stale,
+corregido en este bloque — ver ese archivo). Es el primer Nimvlet UN
+Nimvlet lógico con DOS variantes visuales reales (macho/hembra) y el
+primero con una transición de POSTURA real (sentado/acostado), no solo
+idle/click/passive — ver `docs/ANIMATION_RUNTIME.md` para el grafo de
+comportamiento genérico que este bloque construyó para soportarlo.
+
+## 1. Import: estructura real, frame counts, normalización
+
+Exports reales del owner, preservados en
+`assets/source/incoming/2026-08-19/` (masters + 8 carpetas de
+animación con su spritesheet correspondiente, cada una con una
+subcarpeta anidada extra antes de los PNG reales — el mismo patrón ya
+documentado para Nidir/Bunny). Inspeccionado antes de asumir nada:
+
+```
+frin-macho-{howl,lie-to-sit,sit-to-lie,tail-greet}-left/<subcarpeta>/frame_000..024.png  (25 c/u)
+frin-hembra-{howl,lie-to-sit,sit-to-lie,tail-greet}-right/<subcarpeta>/frame_000..024.png (25 c/u)
+```
+
+**Frame count real: 25 por animación, 8 animaciones, sin excepción** —
+no se forzó ningún número. Dimensiones nativas (distintas entre
+animaciones, cada una con su propio encuadre — la misma situación que
+ya resolvía la política de canvas de trabajo compartido de Nidir/
+Bunny):
+
+| Animación | Macho (left) | Hembra (right) |
+|---|---|---|
+| sit_to_lie | 453×657 | 475×531 |
+| lie_to_sit | 423×515 | 472×499 |
+| howl | 358×515 | 345×515 |
+| tail_greet | 474×607 | 405×507 |
+
+`tools/validate_frame_sequence.py` confirma las 8 secuencias:
+dimensiones consistentes dentro de cada una, sin huecos/duplicados,
+alpha real no degenerado. **Ninguna normalización fue necesaria** —
+los 200 frames reales se copiaron (nunca movidos) tal cual a
+`assets/source/nimvlets/frin/{male,female}/animations/<animación>/
+{left,right}/frames/`, verificados por checksum MD5 contra el staging
+antes de considerar el import completo.
+
+Direcciones canónicas, de los nombres de export FINALES del owner —
+**macho: LEFT, hembra: RIGHT** (mismo cuidado de inversión de campo
+canónico/override que ya usa Bunny, canónico "left" — ver
+`docs/BUNNY_CONTENT.md` §2 — vs. Nidir/hembra de Frin, canónico
+"right", sin inversión). `tools/generate_frin_pack.py` deriva la
+dirección opuesta por el mismo espejado horizontal determinista
+(`prep_dev_sprite.mirror_rgba_horizontal`), nunca con IA.
+
+`master.png` (`Frin_Macho.png`/`Frin_Hembra.png`) se copió tal cual a
+cada `assets/source/nimvlets/frin/{male,female}/master.png` como
+imagen de referencia estática (misma convención que Nidir/Bunny) —
+**no** es RGBA (colortype 2, sin canal alpha; el decoder PNG mínimo de
+este repo solo lee 8-bit RGBA) así que, como en todo pet anterior,
+nunca se alimenta al pipeline de compilación — solo los frames de
+`animations/` lo hacen.
+
+**`local_imports/`/staging temporal:** no se usó — los exports ya
+estaban preservados de forma permanente en
+`assets/source/incoming/2026-08-19/` por el owner (a diferencia de
+Nidir/Bunny, cuyo staging vivió brevemente en `local_imports/` antes
+de eliminarse) — ver el informe de este bloque para si `incoming/`
+queda con contenido redundante tras esta migración.
+
+## 2. Grafo de comportamiento: sentado / acostado
+
+Frin es el primer pet que ejercita el modelo genérico de
+`content::BehaviorState` con MÁS DE UN estado y transiciones reales —
+ver `docs/ANIMATION_RUNTIME.md` para el diseño del mecanismo en sí.
+Ambas variantes (macho/hembra) comparten exactamente el mismo grafo
+(mismos ids de estado, mismos pesos) — `tools/generate_frin_pack.py`
+construye los dos manifests con la MISMA función,
+`_build_variant_manifest()`, así que "comparten el modelo" es una
+garantía de código, no solo documentación.
+
+```
+seated (estado inicial):
+  base_animation: sit_to_lie, frame 0 (la pose sentada real -- NUNCA
+    se inventó/duplicó un asset nuevo: se REFERENCIA el mismo archivo
+    que ya usa sit_to_lie).
+  ambient: sit_to_lie (one_shot) -> lying, tras REST_DELAY_SECONDS=45s
+    (dato de contenido por-estado, ver BehaviorState::
+    ambientIntervalSeconds -- no hardcodeado por especie: Artu, con el
+    mismo grafo en el futuro, define su propio valor sin tocar código).
+  click (ponderado): howl 70% -> seated (self-loop) / tail_greet 30% ->
+    seated (self-loop).
+  hover: ninguno -- hoverUsesAmbientActions=false, hoverActions=[] (el
+    owner no definió ningún hover para Frin todavía; el modelo permite
+    autorarlo después sin ningún cambio de motor).
+
+lying:
+  base_animation: sit_to_lie, frame 24 (el ÚLTIMO -- "the lying pose
+    can be represented by the proper final frame/state" -- de nuevo,
+    referencia directa, ningún asset nuevo).
+  sin ambient (ambientActions=[]) -- NUNCA hay un timer armado
+    mientras lying, así que howl/tail-greet nunca ocurren ahí (ver
+    tests/StatefulBehaviorTest.cpp, NoRandomClickActionsWhileLying).
+  click: lie_to_sit (one_shot) -> seated.
+  sin hover.
+```
+
+**Por qué REST_DELAY_SECONDS=45s y no 15s (el intervalo ambient de
+Bunny/Nidir):** una transición de postura completa (sentarse ->
+acostarse) es un cambio más significativo que un idle esporádico —
+45s es una elección de contenido deliberada, documentada acá, no
+medida ni pedida explícitamente por el owner; trivial de ajustar
+(un solo número en `tools/generate_frin_pack.py`, `REST_DELAY_SECONDS`)
+sin tocar ningún código.
+
+## 3. Dirección + estado
+
+`content::AnimationController::SetDirection()` es genérico sobre
+CUALQUIER `BehaviorState` activo — nunca asume "el" estado de un pet.
+Verificado explícitamente (ver `tests/StatefulBehaviorTest.cpp`):
+cambio de dirección mientras `seated`, mientras `lying`, y — el caso
+más delicado — a MITAD de una transición (`sit_to_lie` en curso): el
+cambio queda guardado (la dirección activa cambia de inmediato como
+metadata, pero el frame en pantalla nunca se toca hasta que la
+transición realmente termine) y se aplica coherentemente recién cuando
+`lying` se vuelve el estado activo, nunca saltando a una pose no
+relacionada por cruzar la mitad de pantalla a mitad de una animación.
+
+## 4. Compatibilidad futura con Artu — solo arquitectura
+
+`docs/PET_CONTENT_SPEC.md`/el brief de este bloque piden que el modelo
+construido para Frin sirva para Artu (futuro, NO poblado en este
+bloque) sin ningún `if (pet == "artu")`. El grafo genérico ya lo
+permite tal cual: Artu tendría su propio `seated`/`lying` con
+`ambient_actions: [sit_to_lie -> lying]`, `click_actions` en `lying`
+(`lie_to_sit -> seated`), y `click_actions` en `seated` ponderado 70%
+belly-roll / 30% stretch — la MISMA forma exacta que Frin, con
+contenido distinto. Cero assets de Artu se agregaron en este bloque
+(fuera de alcance, explícitamente).
+
+## 5. Verificación
+
+- `tools/validate_frame_sequence.py` sobre las 8 secuencias reales:
+  sin hallazgos.
+- `tools/generate_frin_pack.py` corrido contra el binario real:
+  compila ambos packs sin error (`frin_male_pack.nvpack` 62 358 532
+  bytes, `frin_female_pack.nvpack` 69 063 174 bytes).
+- Canvas lógico derivado (canvas de trabajo compartido a través de las
+  4 animaciones × 2 direcciones de cada variante, `visual_scale=1.0`,
+  sin pedido de ajuste en este bloque): macho 125×176, hembra 138×176.
+- Cargado contra el binario real (`NIMVLETS_DEV_SELECT_PET=frin/male`
+  y `frin/female`): arranca en `state='seated'`, click dispara
+  `howl`/`tail_greet` ponderado, el timer ambient (acelerado vía
+  `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=1` para no esperar 45s reales)
+  dispara `sit_to_lie` y transiciona a `lying` — ver el informe de
+  este bloque para el log real.
+- `tests/StatefulBehaviorTest.cpp` (10 tests): seated inicial,
+  sit-to-lie -> lying tras el rest-delay, sin acciones aleatorias
+  mientras lying, lie-to-sit -> seated, selección ponderada 70/30 en
+  seated, dirección en cada punto (seated/lying/a mitad de transición),
+  hover-no-op cuando el estado no define pool, y dos instancias
+  stateful (macho/hembra) sin contaminación cruzada de estado.
+
+## 6. Limitaciones honestas
+
+- El fps de reproducción (8.33 para las 4 animaciones) asume la misma
+  configuración de Ludo.ai que Nidir/Bunny ya documentan ("3 segundos,
+  Max Frames 25") — no confirmada por separado para estos exports
+  puntuales.
+- Sin `provenance.json` (igual que Nidir/Bunny) — el contrato pide
+  `DESCRIPTION.txt` (rasgos físicos), no procedencia.
+- Sin hover propio — explícitamente fuera de alcance hasta que el
+  owner lo defina.
+- El rest-delay de 45s es una elección de contenido razonable, no un
+  número confirmado por el owner — trivial de ajustar.

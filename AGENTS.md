@@ -327,3 +327,5 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/CATALOG.md` | Pet identity, catalog format, and runtime switching design (Block 04). |
 | `docs/LINUX_PLATFORM.md` | Linux (X11/Wayland) build, platform adapter, and CI smoke design (Block 04.1). |
 | `docs/NIDIR_CONTENT.md` | Real asset source convention, import/normalization/mirror pipeline, and the directional content model (Block 04.2). |
+| `docs/BUNNY_CONTENT.md` | Bunny's migration to real production art, canonical-direction inversion, and the QA-driven downscale-quality/70-30-hover/rest-of-size corrections (Block 04.3). |
+| `docs/FRIN_CONTENT.md` | Frin's real male/female import and the named-state behavior graph (seated/lying transitions) it introduced (Block 05). |

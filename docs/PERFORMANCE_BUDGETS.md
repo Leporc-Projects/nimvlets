@@ -381,3 +381,89 @@ como la explicación mejor sustentada por la evidencia disponible (un
 offset constante, no creciente, tras el primer switch con contenido
 grande) -- no confirmado con una herramienta de profiling de memoria
 dedicada, que este entorno no tiene disponible.
+
+## Mediciones reales de Block 05 (Frin, 15s ambient, escala visual, +2 acciones ambient por pet)
+
+Mismo método (Release, arm64 nativo, `ps -o rss,%cpu,time`, lanzamientos
+DIRECTOS vía `NIMVLETS_DEV_SELECT_PET` + `NIMVLETS_DEV_APPDATA_DIR`
+aislado para evitar el efecto post-switch de arriba), 4 pets en
+paralelo, muestreados cada ~10-20s hasta estabilizar:
+
+| Pet | RSS estático estable | CPU estático estable | Pack compilado (bytes en disco, proxy del lado CPU) |
+|---|---|---|---|
+| Bunny | ≈213 MB | 0.0% | 43.0 MB |
+| Nidir | ≈195–196 MB | 0.0% | 55.3 MB |
+| Frin (macho) | ≈209–210 MB | 0.0% | 59.5 MB |
+| Frin (hembra) | ≈219 MB | 0.0% | 65.9 MB |
+
+**CPU sigue en 0.0% exacto en reposo estático** en los 4 (el `TIME`
+acumulado de `ps` no crece entre muestras separadas por ~10-20s reales)
+— el mecanismo event-driven de `docs/ANIMATION_RUNTIME.md` §6 sigue
+intacto; ninguno de los cambios de este bloque (grafo de estados,
+cooldown de hover independiente, redraw de confirmación generalizado)
+introdujo ningún polling nuevo.
+
+**RSS crece de forma real y sustancial frente a Block 04.3** (Bunny
+138MB -> 213MB, Nidir 156MB -> 196MB) — dominado por contenido nuevo
+genuino (Bunny/Nidir ya tenían su segunda acción ambient desde la
+corrección post-QA de Block 04.3, pero ESTE bloque no le agregó
+contenido nuevo a ninguno de los dos; la comparación exacta contra esa
+medición específica no se puede reconstruir con precisión sin volver a
+compilar esa versión exacta del pack) y por Frin siendo, junto con
+Nidir, de los packs más grandes hasta ahora (4 animaciones × 25 frames
+× 2 direcciones cada una). **Los 4 pets exceden claramente el budget
+de <100MB** de la tabla de arriba — un hecho ya conocido de antes de
+este bloque (ver el brief), no una regresión introducida acá.
+
+**Causa raíz, cuantificada esta vez:** `content::FrameDefinition::pixels`
+(el RGBA8 crudo, lado CPU) permanece residente en memoria de forma
+PERMANENTE mientras un pet está activo — no solo durante la carga —
+porque `core::AlphaMask::FromAlphaChannel()` lo necesita en cada cambio
+de frame para reconstruir el hit-mask de click-through
+(`SpikeApp::ApplyCurrentHitMask()`). Al mismo tiempo,
+`graphics::AttachFrameTexture()` sube ESOS MISMOS pixeles a una
+`SDL_Texture` (lado GPU) para cada frame, y `AttachAllTextures()`
+adjunta TODAS las colecciones de TODOS los estados/acciones/direcciones
+de un pet por adelantado, nunca bajo demanda. El tamaño del pack
+compilado en disco (columna de la derecha, arriba) es un proxy directo
+y medido del volumen de datos CPU-side resident — la tabla completa de
+Nidir (§8 de `docs/NIDIR_CONTENT.md`) ya documentaba la mitad de esto
+("mantener AMBAS direcciones de TODAS las animaciones residentes...
+ahorraría del orden de 15MB") sin implementarlo; este bloque confirma,
+con las 4 mediciones de arriba, que el patrón es el mismo para los 4
+pets y que la duplicación CPU+GPU (no solo la de dirección) es
+probablemente el término dominante — el tamaño de pack de Bunny
+(43.0MB) más su textura GPU equivalente (misma cantidad de pixeles,
+formato RGBA32) más el overhead base del proceso SDL (~15-20MB medido
+en corridas previas) da un total del orden de magnitud correcto para
+explicar ≈213MB sin necesitar ningún otro factor.
+
+**Optimización concreta, NO implementada en este bloque** (por qué:
+implementarla bien exige decidir un mecanismo de invalidación de caché
+para el hit-mask y/o carga perezosa de texturas por dirección/estado,
+un cambio de arquitectura real con superficie de riesgo (una animación
+en reproducción cuando cambia la dirección activa, o cuando el estado
+activo cambia y las texturas de un estado recién-inactivo deberían
+liberarse) desproporcionada frente al resto del alcance de este
+bloque, exactamente el caso que el brief permite documentar en vez de
+implementar):
+
+1. Precalcular y cachear el `core::AlphaMask` de cada frame UNA VEZ al
+   cargar el pack (en vez de reconstruirlo desde `pixels` en cada
+   cambio de frame) y liberar `FrameDefinition::pixels` inmediatamente
+   después de adjuntar la textura GPU + precalcular esa máscara — el
+   hit-mask es much más chico que el RGBA crudo (un booleano por celda
+   del canvas lógico, no 4 bytes por pixel nativo), así que esto
+   eliminaría la copia CPU-side casi por completo sin perder ninguna
+   funcionalidad.
+2. Cargar bajo demanda (y liberar) las texturas de la dirección/estado
+   NO activos — hoy `AttachAllTextures()` adjunta las 8 combinaciones
+   de animación×dirección de un pet de un solo estado (o 16+ para
+   Frin, 2 estados × 4 acciones × 2 direcciones) por adelantado, aunque
+   como mucho 1-2 estén en pantalla en un momento dado.
+
+Cualquiera de las dos, implementada con cuidado, reduciría RSS de
+forma sustancial sin sacrificar corrección visual — pero ninguna es
+segura de implementar apurado dentro de este bloque, así que quedan
+documentadas como el próximo paso concreto en vez de intentadas a
+medias.

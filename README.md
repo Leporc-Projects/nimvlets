@@ -5,46 +5,31 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está actualmente en **Block 04.3 — Nidir: Calidad
-Visual y Tamaño**, un bloque CORRECTIVO abierto sobre Block 04.2 —
-Nidir: Assets Reales + Pipeline de Animación Direccional (todavía sin
-mergear a main). Primera pasada: tras encontrar problemas visuales
-reales en QA manual del owner (clipping, tamaño inconsistente entre
-animaciones, "sprites incompletos" al volver a idle) — ver
-`docs/NIDIR_CONTENT.md` §12–§14 para el diagnóstico y la corrección.
-Segunda pasada (corrección post-QA, tras una segunda ronda de QA
-manual): un bug real de corrupción visual al cambiar de dirección
-automáticamente (ver `docs/NIDIR_CONTENT.md` §15), un candidato de
-tamaño global +5% (§16), y la migración de **Bunny** de fixture de QA
-sintético a assets reales de producción (ver
-[`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md)) — la segunda
-validación real (después de Nidir) del pipeline direccional/de
-normalización visual genérico que este bloque construyó. Construido, a
-su vez, sobre Block 04.1 — Habilitación de Linux como Plataforma de
-Escritorio (ver
-[`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04 —
-Catálogo de Pets + Switching en Runtime (ver
-[`docs/CATALOG.md`](docs/CATALOG.md)), Block 03 — Persistencia Local
-de Estado (el click balance, el id del pet activo, y la última
-posición de ventana sobreviven a un reinicio — ver
-[`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)), Block 02 — Content +
-Animation Foundation (un pequeño runtime de contenido+animación,
-data-driven — ver
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)), y Block 01 —
-Foundation + Platform Feasibility Spike (bootstrap disciplinado del
-repo más una prueba de que el enfoque central de
-windowing/transparencia/hit-testing/drag es viable). Block 04.2
-integra **Nidir**, el primer Nimvlet con arte real de producción (Bunny
-era, hasta Block 04.3, un fixture de QA sintético — ver más abajo), y
-establece el contrato permanente de asset source para todo Nimvlet
-futuro: frames PNG individuales como fuente canónica, spritesheet como
-artefacto secundario, sets direccionales explícitos (right/left) — ver
-[`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) para el diseño
-completo. Esto explícitamente *no* es todavía el producto
-terminado — ver [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md)
-para lo que está verificado y lo que no, y `AGENTS.md` para los
-contratos de ingeniería permanentes que sigue este bloque y cada
-bloque futuro.
+Este repositorio está en **Block 05 — Behavior Runtime + Frin Vertical
+Slice + Baseline Cleanup**, construido sobre Block 04.3 (corrección
+post-QA de Nidir/Bunny), Block 04.2 (assets reales + pipeline
+direccional), Block 04.1 (Linux como plataforma de escritorio, ver
+[`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04
+(catálogo de pets + switching en runtime, ver
+[`docs/CATALOG.md`](docs/CATALOG.md)), Block 03 (persistencia local,
+ver [`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)), Block 02 (content +
+animation foundation, ver
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)), y Block 01
+(foundation + platform feasibility spike). Block 05 generaliza el
+runtime de contenido de un modelo fijo idle/click/passive a un **grafo
+de comportamiento por-estado** (`content::BehaviorState`), agrega el
+segundo Nimvlet con estados reales — **Frin** (macho/hembra, lobo
+blanco/crema, un único Nimvlet lógico con dos variantes visuales —
+transición sentado/acostado, ver
+[`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md)) — junto con Bunny y
+Nidir, corrige el comportamiento real de hover (ya no comparte
+cooldown con el timer ambient), sube el intervalo ambient a 15s, y
+agrega una escala visual por-pet genérica y data-driven
+(`content::PetDefinition::visualScale`). Esto explícitamente *no* es
+todavía el producto terminado — ver
+[`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está
+verificado y lo que no, y `AGENTS.md` para los contratos de
+ingeniería permanentes.
 
 ## Requirements
 
@@ -55,7 +40,8 @@ bloque futuro.
   workload
 - Linux: Ninja (`ninja-build`) + the X11/Wayland development packages
   listed in [`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md) §2
-- Python 3 (for `tools/stats_loc.py` only — no packages needed)
+- Python 3 (for `tools/stats_loc.py` and the asset pipeline — no
+  packages needed)
 - No manual SDL3 install required — see below.
 
 ## Build
@@ -95,8 +81,16 @@ source tree.
 # relative path that resolves from the current working directory
 ./build/macos-debug/src/app/nimvlets_spike
 
-# QA convenience: passive action every ~5s instead of the real ~300s
-# default (production behavior is unchanged — see docs/ANIMATION_RUNTIME.md §8)
+# owner manual QA: launch a specific catalog entry without touching your
+# real persisted pet selection (Block 05) -- "petId" or "petId/variantId"
+NIMVLETS_DEV_SELECT_PET=bunny ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_SELECT_PET=nidir ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_SELECT_PET=frin/male ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_SELECT_PET=frin/female ./build/macos-debug/src/app/nimvlets_spike
+
+# QA convenience: ambient action every ~5s instead of the real per-state
+# default (15s for Bunny/Nidir, 45s for Frin's seated rest-delay --
+# production behavior is unchanged — see docs/ANIMATION_RUNTIME.md)
 NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5 ./build/macos-debug/src/app/nimvlets_spike
 
 # conveniencia de QA: persiste a un directorio aislado en vez de la
@@ -109,48 +103,48 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nimvlets_dev_state ./build/macos-debug/src/app/nim
 NIMVLETS_DEV_SWITCH_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 
 # conveniencia de QA: alterna N veces entre Direction::kRight/kLeft
-# justo después de arrancar (Block 04.2 — no es comportamiento de
-# producto, ver docs/NIDIR_CONTENT.md §5). En producción, la dirección
-# ya se resuelve sola: mitad derecha de la pantalla -> right, mitad
-# izquierda -> left (Block 04.3, ver docs/NIDIR_CONTENT.md §13) --
-# esta variable sigue sirviendo para forzar alternancias rápidas sin
+# justo después de arrancar. En producción, la dirección ya se resuelve
+# sola: mitad derecha de la pantalla -> right, mitad izquierda -> left
+# -- esta variable sigue sirviendo para forzar alternancias rápidas sin
 # mover la ventana de verdad.
 NIMVLETS_DEV_DIRECTION_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 ```
 
+Combiná `NIMVLETS_DEV_SELECT_PET` con `NIMVLETS_DEV_APPDATA_DIR` para
+probar cualquier pet sin arriesgar tu estado persistido real — ver
+"Owner manual QA" más abajo para la lista completa de comandos.
+
 This opens a small, borderless, always-on-top, transparent window
 showing whichever pet the catalog resolves as active (see
 [`docs/CATALOG.md`](docs/CATALOG.md)) — by default **Bunny** (id
-`bunny_dev`, kept unchanged for catalog/persisted-state compatibility;
-128×168 logical canvas, derived the same content-anchored way as
-Nidir — see [`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md)).
-Migrated in Block 04.3 from a synthetic Block 01/02 QA-fixture-derived
-pack to the owner's real production art (idle + click) — the OLD
-synthetic generator (`tools/generate_bunny_dev_pack.py`) is kept only
-as a historical artifact, explicitly marked "do not run" in its own
-docstring (see [`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md) for
-why). **Nidir** (168×165 logical canvas, derived from a shared
-content-anchored working canvas across its idle and click-fire
-animations, not just idle's native 513×525 art alone — see
-`docs/NIDIR_CONTENT.md` §12 — `assets/dev/nidir_pack.nvpack`) is the
-catalog's second, real entry since Block 04.2 — see
-[`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md) — reachable today via
-`NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). Both
-pets' logical canvases include a +5% global display-size candidate
-(`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR`, Block 04.3 — see
-`docs/NIDIR_CONTENT.md` §16 for how to revert it). The catalog
-and the active pet's pack are required, not optional — if either can't
-be loaded (e.g. not run from the repo root), the app logs a specific
-error and exits rather than falling back to any placeholder; if a
-*previously saved* pet selection can't be resolved or loaded, it falls
-back to the catalog's default instead of crashing. Haz click en la
-región visible para incrementar el click balance (persistido localmente — ver
-[`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)) y reproducir una reacción
-de click corta; cada ~300s (o el override DEV de arriba) también
-reproduce una acción pasiva corta por su cuenta. Arrástrala para mover
-la ventana (la nueva posición también se persiste); hacer click en el
-área transparente pasa a lo que esté debajo. Cerrar y reabrir la
-ventana la reabre donde la dejaste, con tu click balance intacto.
+`bunny`, renamed from `bunny_dev` in Block 05 — see
+`docs/DECISION_LOG.md`; 134×176 logical canvas, `visualScale=1.0`,
+real production art since Block 04.3 — see
+[`docs/BUNNY_CONTENT.md`](docs/BUNNY_CONTENT.md)). **Nidir** (176×173
+native canvas × `visualScale=1.10` = 194×190 on screen, Block 05 — see
+[`docs/NIDIR_CONTENT.md`](docs/NIDIR_CONTENT.md)) and **Frin**
+male/female (125×176 / 138×176, `visualScale=1.0`, the first Nimvlet
+with real seated/lying state transitions — see
+[`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md)) round out the catalog.
+All four are reachable via `NIMVLETS_DEV_SELECT_PET`/
+`NIMVLETS_DEV_SWITCH_TEST_COUNT` above (no UI selector yet). The
+catalog and the active pet's pack are required, not optional — if
+either can't be loaded (e.g. not run from the repo root), the app logs
+a specific error and exits rather than falling back to any
+placeholder; if a *previously saved* pet selection can't be resolved
+or loaded (e.g. an old `bunny_dev` save from before the Block 05
+rename), it falls back to the catalog's default and repairs the saved
+selection instead of crashing. Haz click en la región visible para
+incrementar el click balance (persistido localmente — ver
+[`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)) y reproducir una
+reacción de click corta; cada ~15s (Bunny/Nidir) o ~45s (Frin, mientras
+está sentado) también reproduce una acción ambient por su cuenta, y
+reposar el cursor sobre el pet (sin click) puede disparar la misma
+acción con su propio cooldown corto e independiente del timer ambient.
+Arrástrala para mover la ventana (la nueva posición también se
+persiste); hacer click en el área transparente pasa a lo que esté
+debajo. Cerrar y reabrir la ventana la reabre donde la dejaste, con tu
+click balance intacto.
 
 On macOS and Linux/X11, click-through hit-testing is handed to SDL's
 own `SDL_SetWindowShape()` mechanism (event-driven, no polling) — see
@@ -172,15 +166,48 @@ with:
 pkill -TERM -f nimvlets_spike
 ```
 
+## Owner manual QA
+
+```bash
+# Bunny (default)
+./build/macos-debug/src/app/nimvlets_spike
+
+# Nidir
+NIMVLETS_DEV_SELECT_PET=nidir ./build/macos-debug/src/app/nimvlets_spike
+
+# Frin (macho)
+NIMVLETS_DEV_SELECT_PET=frin/male ./build/macos-debug/src/app/nimvlets_spike
+
+# Frin (hembra)
+NIMVLETS_DEV_SELECT_PET=frin/female ./build/macos-debug/src/app/nimvlets_spike
+```
+
+Cada uno de estos, sin `NIMVLETS_DEV_APPDATA_DIR`, sigue leyendo/
+escribiendo tu estado persistido REAL (`activePetId` se actualiza al
+switchear vía UI/click normalmente, nunca por esta variable sola — ver
+el comentario de `kDevSelectPetEnvVar` en `src/app/SpikeApp.cpp`) — si
+preferís no tocarlo en absoluto durante la QA, agregá
+`NIMVLETS_DEV_APPDATA_DIR=/tmp/nimvlets_qa` a cualquiera de los
+comandos de arriba.
+
 ## Test
 
 ```bash
 ctest --preset macos-debug --output-on-failure
 ```
 
-Tests are pure `src/core` logic (gesture classification, frame-timing
-math, hit-testing geometry) — no SDL, no display required, so they run
-the same in CI as on a dev machine.
+Tests are pure `src/core`/`src/content`/`src/catalog`/`src/persistence`
+logic — no SDL, no display required, so they run the same in CI as on
+a dev machine.
+
+```bash
+python3 tools/test_asset_pipeline.py
+```
+
+Pure-Python `unittest` coverage for the asset pipeline (mirroring,
+frame-sequence validation, content-anchored canvas normalization,
+area-average downscale) — run by hand, not via CTest (no C++
+dependency).
 
 ## LOC stats
 
@@ -196,7 +223,7 @@ output. See `AGENTS.md` §7 and `tools/stats_loc.py`'s own docstring.
 
 ```
 src/core         pure C++20 logic, no SDL — unit tested in isolation
-src/content      pure, data-driven content model + animation controller + pack loader (no SDL)
+src/content      pure, data-driven behavior-graph model + animation controller + pack loader (no SDL)
 src/catalog      pure pet identity + catalog + active-selection/switching logic (no SDL)
 src/persistence  pure local state model + serializer + atomic-write store + debounce scheduler (no SDL)
 src/graphics     SDL rendering: turns a content::FrameDefinition into a texture
@@ -205,9 +232,11 @@ src/platform     native macOS (AppKit) / Windows (Win32) / Linux (X11+Wayland) w
 src/app          the spike executable: event loop + wiring
 tests/           CTest-driven unit tests for src/core, src/content, src/catalog, and src/persistence
 tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, compile_pet_catalog.py,
-                 generate_bunny_dev_pack.py, validate_frame_sequence.py, generate_nidir_pack.py, test_asset_pipeline.py)
-assets/dev/      dev-only placeholder assets (see assets/dev/README.md) + compiled runtime packs (*.nvpack)
-assets/source/nimvlets/  real Nimvlet source art (frames, spritesheets, DESCRIPTION.txt — see docs/NIDIR_CONTENT.md)
+                 generate_bunny_pack.py, generate_nidir_pack.py, generate_frin_pack.py,
+                 validate_frame_sequence.py, test_asset_pipeline.py)
+assets/dev/      compiled runtime packs (*.nvpack) + compiled catalog (*.nvcat) -- see assets/dev/README.md
+assets/source/nimvlets/  real Nimvlet source art (frames, spritesheets, DESCRIPTION.txt — see
+                 assets/source/nimvlets/README.md and docs/NIDIR_CONTENT.md/BUNNY_CONTENT.md/FRIN_CONTENT.md)
 cmake/           CMake helper modules (warnings, SDL3 fetch)
 docs/            product + engineering contracts (see AGENTS.md §18)
 ```

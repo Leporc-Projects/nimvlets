@@ -171,3 +171,33 @@ carpeta de origen (frames PNG individuales como fuente canónica,
 spritesheet como artefacto secundario, `DESCRIPTION.txt` por rasgos
 físicos estables) queda documentada como el patrón real para cualquier
 Nimvlet futuro — ver `docs/NIDIR_CONTENT.md` §8.
+
+## Relación de Block 05 con este spec
+
+Block 05 reemplaza el modelo de contenido fijo idle/click/passive de
+Block 02 (una animación idle, un click reaction, una lista plana de
+passive actions) por un **grafo de comportamiento por-estado**
+(`content::BehaviorState`/`WeightedAction`, formato "NVPACK2") — ver
+`docs/ANIMATION_RUNTIME.md` §2 para el diseño completo y
+`docs/FRIN_CONTENT.md` para el primer pet real que lo necesita (Frin,
+transición sentado/acostado). La fila de la tabla de arriba "zero or
+more optional animations/actions" (antes `PetDefinition::passiveActions`)
+se generaliza: cada `BehaviorState` tiene TRES listas ponderadas
+(`ambientActions`/`hoverActions`/`clickActions`), cada acción con su
+propio `targetStateId` — un pet de un solo estado (Bunny, Nidir) es
+exactamente el caso anterior expresado en la forma nueva (self-loops),
+así que esto no rompe nada de lo ya construido, solo lo generaliza.
+
+También agrega el primer campo de tamaño VISUAL (no solo lógico/de
+canvas): `PetDefinition::visualScale` (default 1.0, per-pet, aplicado
+solo en runtime — ver `docs/ANIMATION_RUNTIME.md` §11) — cubre la fila
+"base visual size" de la tabla original de forma más completa que
+`canvasWidth`/`canvasHeight` solos, que ya existían desde Block 02
+pero no dejaban un lugar per-pet para "este personaje debería verse
+proporcionalmente más grande/chico que los demás" sin tocar el arte
+fuente.
+
+Sigue sin estar poblado en este bloque: `purchase price in clicks`,
+`starter eligibility`, `hidden/secret eligibility`, `thumbnail`,
+`provenance metadata` (ninguno de los 4 pets reales tiene
+`provenance.json` todavía — ver `assets/source/nimvlets/README.md`).

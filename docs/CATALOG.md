@@ -111,15 +111,35 @@ determinista, sin dependencias de terceros). Esquema:
   "schema_version": 1,
   "entries": [
     {
-      "pet_id": "bunny_dev",
+      "pet_id": "bunny",
       "variant_id": "",
-      "display_name": "Bunny (dev fixture)",
+      "display_name": "Bunny",
       "pack_path": "assets/dev/bunny_pack.nvpack",
       "is_default": true
+    },
+    {
+      "pet_id": "frin",
+      "variant_id": "male",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_male_pack.nvpack",
+      "is_default": false
+    },
+    {
+      "pet_id": "frin",
+      "variant_id": "female",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_female_pack.nvpack",
+      "is_default": false
     }
   ]
 }
 ```
+
+(reflects the real `assets/dev/pet_catalog_manifest.json` as of Block
+05 — `bunny_dev` was renamed to `bunny` that same block, see
+`docs/DECISION_LOG.md`; the two Frin entries share `pet_id: "frin"`
+with distinct `variant_id`s, exactly the male/female case this
+document anticipated since Block 04.)
 
 `pack_path` se guarda tal cual en el binario compilado — a diferencia
 de los `source` de frames en `compile_pet_pack.py` (resueltos relativo
@@ -190,9 +210,11 @@ switching (block brief §4):
 - **Al tener éxito**: suelta las texturas del pet anterior
   (`ReleaseAllTextures()`), reemplaza `pet_`, reatacha texturas del
   nuevo (`AttachAllTextures()`), reconstruye `animController_` (que
-  arranca en Idle del pet nuevo — exactamente lo requerido), reaplica
-  tamaño de ventana/presentación lógica (por si el canvas cambió de
-  tamaño entre pets), actualiza
+  arranca en `states[0]`/`ControllerMode::kBase` del pet nuevo —
+  exactamente lo requerido, ver `docs/ANIMATION_RUNTIME.md` §2/§3),
+  reaplica tamaño de ventana/presentación lógica a
+  `EffectiveCanvasWidth()/Height()` (por si el canvas o el
+  `visualScale` cambiaron entre pets — Block 05), actualiza
   `appState_.activePetId`/`activeVariantId`, marca el scheduler de
   persistencia dirty, y pide un redraw (el loop principal reconstruye
   textura/hit-mask/forma de ventana en su siguiente vuelta, el mismo
@@ -205,10 +227,11 @@ switching (block brief §4):
 `animController_.reset()` ocurre *antes* de reemplazar `pet_` y
 *antes* de que se le vuelva a hacer `emplace()`: esto evita que el
 puntero interno del controller a la animación activa quede colgando si
-`pet_.passiveActions` cambia de tamaño entre el pet viejo y el nuevo
-(reasignar un `std::vector` puede reubicar su buffer) — nunca existe un
-`AnimationController` vivo mientras el contenido de `pet_` está siendo
-reemplazado.
+`pet_.states` (o cualquier `std::vector` anidado dentro, como
+`states[i].ambientActions`) cambia de tamaño entre el pet viejo y el
+nuevo (reasignar un `std::vector` puede reubicar su buffer) — nunca
+existe un `AnimationController` vivo mientras el contenido de `pet_`
+está siendo reemplazado.
 
 No hay switching automático de producto en este bloque: nada llama a
 `TrySwitchActivePet()` salvo el mecanismo solo-DEV de abajo.
@@ -271,7 +294,7 @@ Todo `src/catalog` es puro (sin SDL) y depende solo de
   cubierto arriba): selección persistida válida, desconocida, vacía, y
   resolución exacta de variante (5 casos).
 - `tests/PetSwitchingTest.cpp` — directorios temporales reales con
-  packs "NVPACK1" sintéticos (mismo nivel de realismo que
+  packs "NVPACK2" sintéticos (mismo nivel de realismo que
   `tests/AppStateStoreTest.cpp`, nunca datos reales): switch exitoso,
   switch fallido por identidad desconocida, switch fallido por pack
   faltante, switching repetido sin acumular estado, y persistencia
@@ -287,15 +310,21 @@ usuario ni requiere display.
 ## 10. Intencionalmente no implementado
 
 - **Sin UI ni menú de selección.** El switching es una API de backend
-  reutilizable, sin ningún punto de entrada visible al usuario en este
-  bloque.
+  reutilizable, sin ningún punto de entrada visible al usuario todavía
+  — pets solo se alcanzan vía `NIMVLETS_DEV_SELECT_PET`/
+  `NIMVLETS_DEV_SWITCH_TEST_COUNT` (mecanismos solo-DEV).
 - **Sin migración de schema del catálogo.** Exactamente un
   `schemaVersion` soportado, igual que `persistence::AppState`.
-- **Sin arte real para ningún Nimvlet más allá de Nidir** (Block 04.2
-  — ver `docs/NIDIR_CONTENT.md`). Bunny sigue siendo un fixture de QA,
-  no un Nimvlet real.
 - **Sin verificación de existencia de `packPath` en el loader C++.**
   Ver §3/§5 para por qué, y dónde sí se descubre un pack faltante.
-- **Sin variantes reales cargadas.** El concepto de variante está
-  soportado estructuralmente (ver §2 y los tests) pero no hay ningún
-  pack de variante real en este bloque.
+
+**Actualización (histórica, hasta Block 05):** hasta Block 04.3, Bunny
+seguía siendo un fixture de QA sintético (no arte real) y no existía
+ninguna variante real cargada. Ambas cosas cambiaron: Bunny tiene arte
+real desde Block 04.3 (ver `docs/BUNNY_CONTENT.md`), y Frin (Block 05
+— ver `docs/FRIN_CONTENT.md`) es la primera variante real cargada de
+verdad, dos entradas de catálogo (`{"frin","male"}`/`{"frin","female"}`)
+compartiendo `petId`, exactamente el mecanismo que este documento ya
+anticipaba desde Block 04. El catálogo actual (`assets/dev/
+pet_catalog_manifest.json`) tiene 4 entradas: Bunny (default), Nidir,
+Frin/male, Frin/female.

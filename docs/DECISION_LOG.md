@@ -1524,3 +1524,224 @@ el staging antes de verificar) es idéntico sin importar de qué
 directorio se lea — solo cambia la convención operativa hacia
 adelante. Los dos imports de esta corrección (`groom` de Bunny,
 `wing_stretch` de Nidir) ya siguieron esta convención.
+
+### DEC-063 — Grafo de comportamiento por-estado ("NVPACK2"), reemplazando idle/click/passive fijo
+**Status:** DECIDIDO · Block 05.
+
+El modelo de contenido de Block 02-04.3 (`PetDefinition::idle`/
+`clickReaction`/`passiveActions`, un único estado implícito por pet) no
+podía expresar Frin (transición real sentado/acostado) sin ramas de
+código específicas por especie — prohibido por AGENTS.md §13. Se
+generalizó a `content::BehaviorState`: cada pet tiene una lista de
+estados con nombre, cada uno con una pose base y tres triggers
+(`ambientActions`/`hoverActions`/`clickActions`), cada acción una
+`WeightedAction` con su propio `targetStateId` (a qué estado
+transicionar al terminar — el MISMO estado es un self-loop, el caso de
+todo pet normal; uno DISTINTO es una transición real). Un pet de un
+solo estado (Bunny, Nidir) es exactamente el modelo anterior expresado
+en la forma nueva — cero cambio de comportamiento, solo de
+representación.
+
+Se evaluó extender el formato "NVPACK1" de forma aditiva (como hizo
+Block 04.2 con las direcciones) pero se descartó: el layout no es una
+extensión, es una reestructuración real (idle/click/passive dejan de
+ser campos con nombre fijo). Reinterpretar bytes viejos bajo el mismo
+magic habría sido deshonesto: se bumpeó a `"NVPACK2\0"`. Ningún pack
+externo/shippeado depende de NVPACK1 — todos se regeneran desde fuente
+por su propio `generate_<pet>_pack.py` — así que no hay ningún costo
+real de compatibilidad retroactiva que pagar.
+
+Ver `docs/ANIMATION_RUNTIME.md` §2-§4 para el diseño completo,
+`src/content/AnimationController.{h,cpp}` para la máquina de estados
+genérica, y `docs/FRIN_CONTENT.md` para el primer pet real que necesita
+más de un estado.
+
+### DEC-064 — Escala visual por-pet, genérica y data-driven (`visualScale`)
+**Status:** DECIDIDO · Block 05.
+
+El owner reportó que Nidir se ve visualmente más chico que Bunny pese a
+tener un canvas lógico comparable (mucho detalle fino, Nidir se percibe
+"menos presente" en el escritorio). Se agregó
+`content::PetDefinition::visualScale` (double, default 1.0) —
+puramente runtime: `SpikeApp::EffectiveCanvasWidth()/Height()`
+(`round(canvasWidth/Height * visualScale)`) gobierna ventana/render-
+target-lógico/hit-mask juntos, sin tocar nunca el arte fuente ni los
+bytes del pack compilado. Se evaluó y descartó retirar el mecanismo
+existente `DISPLAY_SIZE_SCALE_FACTOR` (un knob global de Python,
+compile-time, ya vigente en 1.10 desde Block 04.3) en favor de este
+nuevo campo — hacerlo habría exigido recalcular el canvas "base" de
+Bunny (actualmente ya incluye ese +10% histórico) para reproducir
+exactamente su tamaño actual aprobado, con riesgo real de una
+diferencia de redondeo de 1px; en cambio, `visualScale` se trata como
+un multiplicador INDEPENDIENTE aplicado ENCIMA del canvas ya derivado
+— Bunny queda en el default 1.0 (cero cambio, tamaño actual aprobado
+preservado exactamente) y Nidir en 1.10 (candidato conservador de QA,
+"+10% relativo a su resultado actual" — resultado exacto: 176×173
+nativo -> 194×190 efectivo, verificado contra el binario real). Los dos
+mecanismos (`DISPLAY_SIZE_SCALE_FACTOR` global de compile-time,
+`visualScale` por-pet de runtime) coexisten deliberadamente, con roles
+distintos y documentados — ver `docs/ANIMATION_RUNTIME.md` §11.
+
+### DEC-065 — Cooldown de hover INDEPENDIENTE del timer ambient, supersede DEC-060
+**Status:** DECIDIDO · Block 05. Supersede el diseño de DEC-060 (Block
+04.3), que queda histórico — no se reescribe, se corrige acá con
+evidencia nueva.
+
+El owner especificó explícitamente para este bloque: "hover must NOT
+be blocked simply because the ambient 15-second timer has not
+expired". Esto es una corrección directa de DEC-060, que deliberadamente
+compartía un único deadline entre hover y el timer ambient, precisamente
+para evitar que ambos dispararan casi simultáneamente. Ese diseño tenía
+un efecto secundario real no anticipado: si el timer ambient acababa de
+disparar, hover quedaba bloqueado hasta que el intervalo completo
+(ahora 15s) volviera a vencer — un cursor reposando sobre el pet
+inmediatamente después de un disparo ambient no obtenía ninguna
+reacción visible, contradiciendo "a real mouse/pointer entering the
+visible Nimvlet must cause a visible reaction".
+
+Corrección: `hoverCooldownUntilMs_`, un deadline propio y chico (2s,
+`kHoverCooldownSeconds`), completamente independiente de
+`ambientDeadlineMs_` — ninguno de los dos consulta el reloj del otro.
+El riesgo original que motivó DEC-060 (dos acciones casi seguidas) se
+mitiga de otra forma: el cooldown de hover es corto pero real (2s), y
+como ambos caminos igual respetan `ControllerMode::kBase` antes de
+disparar, cualquiera que dispare primero automáticamente bloquea al
+otro hasta que la acción en curso termine — nunca hay una colisión
+visual, solo la posibilidad (aceptable, y pedida por el owner) de que
+ambos caminos disparen relativamente cerca en el tiempo. `core::
+HoverPassiveGate` (la detección de flanco en sí) no cambió — sigue
+siendo la misma clase pura de Block 04.3.
+
+### DEC-066 — Intervalo ambient sube a 15 segundos (Bunny/Nidir), Frin usa un rest-delay propio de 45s
+**Status:** DECIDIDO · Block 05.
+
+Política de producto vigente para este bloque: "target interval is now
+15 seconds" — reemplaza los 10s de la corrección post-QA de Block
+04.3 (DEC-059). Aplicado vía `BehaviorState::ambientIntervalSeconds`
+(ahora por-ESTADO, no un único valor por-pet — ver DEC-063), 15.0 para
+el único estado de Bunny/Nidir. Frin usa 45.0 para su estado "seated"
+(el "rest delay" antes de `sit_to_lie` — una transición de postura
+completa, más significativa que un idle esporádico, así que un ritmo
+más pausado es una elección de contenido razonable, no una medida
+pedida por el owner) y NINGÚN valor efectivo en "lying" (sin
+`ambientActions`, el timer nunca se arma ahí — "No random howl/
+tail-greet while lying").
+
+### DEC-067 — Renombre de identidad de catálogo `bunny_dev` -> `bunny`
+**Status:** DECIDIDO · Block 05 — ver AGENTS.md §6 del brief
+("content/catalog cleanup before product UI").
+
+`bunny_dev` era el id heredado del fixture sintético de Block 01/02.
+Bunny tiene arte real de producción desde Block 04.3 — mantener el
+sufijo "_dev" en el identificador que terminará persistido en el save
+del usuario real (y, más adelante, en datos de ownership/shop) ya no
+reflejaba la realidad del contenido, y el momento de corregirlo es
+ANTES de que exista UI de producto que cree datos de larga vida
+alrededor de él (justo lo que este bloque pide evaluar). Se decidió
+migrar: `tools/generate_bunny_pack.py`'s manifest `"id"` y
+`assets/dev/pet_catalog_manifest.json`'s `pet_id` pasan a `"bunny"`.
+
+Compatibilidad preservada sin código nuevo: `SpikeApp::Init()` ya
+maneja una selección persistida que no calza con ningún id del catálogo
+cayendo al default y reparando el save (`usedFallback`, mecanismo
+existente desde Block 04, cubierto por
+`tests/PetSwitchingTest.cpp`/`ActivePetResolutionTest.cpp`) — un save
+real con `activePetId: "bunny_dev"` de antes de este bloque simplemente
+no calza más, cae al default (que sigue siendo Bunny), y se repara solo
+en el próximo flush. `assets/dev/bunny_pack.nvpack` (la RUTA del
+archivo) NO se renombra — solo el identificador lógico interno — para
+minimizar el blast radius de este cambio.
+
+Se evaluó y se descartó, en el mismo pase, renombrar el directorio
+`assets/dev/` (nombre ya inexacto — contiene arte real de producción
+compilado, no solo contenido de dev) y el ejecutable `nimvlets_spike`
+(sigue siendo, en los hechos, un spike/foundation runtime — no existe
+todavía ninguna UI de producto real). Ambos casos: el riesgo de tocar
+rutas hardcodeadas en `src/app/SpikeApp.cpp`, cada `generate_<pet>_
+pack.py`, y toda la documentación que las referencia no se justificaba
+frente a ningún beneficio real — ninguno de los dos nombres, a
+diferencia de `bunny_dev`, va a terminar persistido en datos de usuario
+reales. Documentado acá explícitamente, no una omisión no examinada.
+
+### DEC-068 — Retiro del fixture sintético original de Bunny (Block 01/02)
+**Status:** DECIDIDO · Block 05.
+
+`tools/generate_bunny_dev_pack.py` (el generador determinista original
+de Block 02, derivando 7 frames por transformaciones de pixeles
+simples de `bunny_source.png`) y sus artefactos
+(`assets/dev/bunny_pack/` — el manifest+frames sintéticos,
+`assets/dev/bunny_source.png` — la imagen fuente de 320×320) se
+eliminaron. Superseded desde Block 04.3 (Bunny tiene arte real de
+producción hace tres bloques) y, tras el bump de formato de DEC-063,
+genuinamente roto: ese script sigue construyendo un manifest con la
+forma vieja (`idle`/`click_reaction`/`passive_actions` planos) y
+`compile_pet_pack.py` ya no la acepta — fallaría con "missing required
+field 'states'" si se corriera. Su propio docstring ya lo marcaba
+explícitamente como "no correr, sobrescribiría contenido real" desde
+Block 04.3. Valor histórico preservado en `git log`/DEC-018/DEC-023 sin
+necesidad de mantener código roto corriendo — ver AGENTS.md §6 del
+brief de este bloque ("remove truly obsolete generated artifacts/tools
+only when they are demonstrably superseded and no longer useful").
+
+### DEC-069 — Frin: import real macho/hembra + primer pet con transición de postura real
+**Status:** DECIDIDO · Block 05 — ver `docs/FRIN_CONTENT.md` para el
+detalle completo.
+
+Frin (lobo blanco/crema) es el Nimvlet documentado históricamente como
+"Tan" en `docs/PRD_V1.md` — nombre corregido en este bloque para
+coincidir con el contenido real final del owner. Import real de 8
+animaciones (sit_to_lie/lie_to_sit/howl/tail_greet × macho/hembra, 25
+frames c/u, sin normalización necesaria) con el mismo pipeline genérico
+que Nidir/Bunny ya validaron dos veces. Primer pet en ejercitar
+`BehaviorState` con MÁS de un estado y transiciones reales (DEC-063) —
+sentado/acostado, con un rest-delay de 45s (DEC-066) y click ponderado
+70/30 (howl/tail-greet) mientras sentado. Las poses base de ambos
+estados se derivan por REFERENCIA a frames ya existentes de
+`sit_to_lie` (frame 0 = sentado, frame final = acostado) — nunca se
+inventó ni duplicó ningún asset nuevo.
+
+### DEC-070 — Diagnóstico de Bunny: la fuente NO está defectuosa; el hallazgo de clipping de DEC-058 se retracta parcialmente
+**Status:** DECIDIDO · Block 05 — ver el informe de este bloque para
+la evidencia pixel-a-pixel completa.
+
+El owner reportó, en QA manual posterior a Block 04.3, que las
+animaciones de Bunny seguían mostrando pérdida de pixeles/partes del
+cuerpo durante la reproducción, y afirmó explícitamente que los PNG
+fuente originales NO son defectuosos — instrucción directa de este
+bloque: no asumir que sí lo son, diagnosticar con evidencia real en vez
+de repetir un cambio de filtro especulativo.
+
+Se re-midió, pixel a pixel (no solo por conteo de bounding box), el
+gradiente de alpha real en las tres ubicaciones que DEC-058 (Block
+04.3) había señalado como "clipping real" (oreja de idle/left/frame_019,
+borde de click_reaction/left/frame_012, borde de groom/left/frame_020).
+Los tres muestran una transición antialiaseada limpia de 2-3 pixeles
+(p. ej. alpha 23→163→255) hacia el borde del frame nativo — consistente
+con un borde NATURAL que simplemente cae cerca del límite del canvas
+exportado, no con un corte plano/mid-forma. **DEC-058 se retracta
+parcialmente**: la conclusión "el clipping lateral SÍ es real" no
+resiste una medición de gradiente real — el error metodológico exacto
+que la propia sección de DEC-058 advertía evitar (confiar en un conteo
+de bounding box sin confirmar visualmente) se repitió en esa misma
+corrección.
+
+Auditado también, con evidencia: la etapa de composición/normalización
+(`compose_on_canvas`/`normalize_visual_scale`) no introduce recorte
+adicional (el margen del canvas de trabajo compartido es generoso en
+los tres casos medidos), y el downscale de render-time (textura
+compilada -> canvas lógico, `SDL_SCALEMODE_LINEAR`) pierde <0.3% de
+pixeles opacos frente a un filtro de caja de referencia — no es una
+fuente material de pérdida. Un intento de leer pixeles REALMENTE
+renderizados (`SDL_RenderReadPixels`, ver `NIMVLETS_DEV_DUMP_FRAMES_DIR`
+en `docs/ANIMATION_RUNTIME.md` §8.2) encontró que el PRIMER render de
+cada sesión se lee de vuelta vacío de forma 100% reproducible — evidencia
+real mitigada de forma genérica (DEC de abajo, ver §8.2), aunque no
+concluyente sobre la causa exacta.
+
+**Conclusión:** el pipeline de assets (fuente -> compilación -> carga)
+queda exonerado con evidencia concreta — soporta directamente la
+afirmación del owner. La causa raíz exacta de lo que el owner percibe
+sigue sin confirmarse con certeza total (requiere una observación
+visual interactiva real en macOS, que este entorno de agente no tiene)
+— ver el informe de Block 05 para el detalle completo y la mitigación
+genérica aplicada (§8.2 de `docs/ANIMATION_RUNTIME.md`).
