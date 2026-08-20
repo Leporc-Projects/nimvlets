@@ -31,19 +31,25 @@ dirección opuesta -- la lógica en sí es genérica (una función que
 recibe "cuál carpeta es la canónica importada" y "cuál hay que
 derivar", sin asumir cuál lado es cuál).
 
-Solo se integran las animaciones que HOY existen en el export real del
-owner -- static/base master, un idle periódico, un click_reaction --
-por instrucción explícita del brief de este bloque. NO se implementa
-acá (deliberadamente diferido a un futuro bloque de interacción,
-después de que exista el arte nuevo): una segunda animación de idle,
-el comportamiento ponderado 70/30 entre dos idles, ni un disparador
-por hover. El scheduler de acciones pasivas ya soporta una LISTA de
-`passive_actions` (ver content::PetDefinition::passiveActions) -- una
-segunda entrada real, cuando exista el arte, se agrega ahí sin ningún
-cambio de arquitectura, exactamente el mismo patrón "generic, no
-per-pet C++" que este bloque ya demostró para Nidir.
+Primera pasada de Block 04.3 (arriba): solo static/base master, un
+idle periódico, un click_reaction -- por instrucción explícita del
+brief original. La corrección post-QA de este mismo bloque agrega
+AHORA la segunda animación de idle real ("groom" -- el owner exportó
+`local_imports/bunny/bunny-idle-groom-left/`, ya copiado a
+`assets/source/nimvlets/bunny/animations/groom/left/`, mismo patrón
+de import manual documentado que idle/click_reaction), la selección
+ponderada 70/30 entre las dos (ver `passive_action_weights` en
+tools/compile_pet_pack.py y content::ChooseWeightedPassiveActionIndex()),
+y el disparo por hover (ver src/app/SpikeApp.cpp,
+MaybeTriggerHoverPassiveAction()) -- exactamente el mismo patrón
+"generic, no per-pet C++" que este bloque ya demostró para Nidir: el
+scheduler de acciones pasivas ya soportaba una LISTA de
+`passive_actions` (ver content::PetDefinition::passiveActions) desde
+antes de que existiera este arte nuevo, así que agregar la segunda
+entrada real no requirió ningún cambio de arquitectura, solo este
+script.
 
-Escribe, para CADA animación (idle, click_reaction):
+Escribe, para CADA animación (idle, click_reaction, groom):
     assets/source/nimvlets/bunny/animations/<anim>/right/frames/frame_NNN.png
         (espejo horizontal exacto de cada frame "left")
     assets/source/nimvlets/bunny/animations/<anim>/right/spritesheet/spritesheet.png
@@ -109,6 +115,18 @@ CLICK_DERIVED_FRAMES_DIR = os.path.join(CLICK_ROOT, "right", "frames")
 CLICK_CANONICAL_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "left", "spritesheet", "spritesheet.png")
 CLICK_DERIVED_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "right", "spritesheet", "spritesheet.png")
 
+# Segunda animación de idle real (Block 04.3, corrección post-QA -- ver
+# el docstring del módulo). Importada desde
+# local_imports/bunny/bunny-idle-groom-left/, ya copiada a esta ruta
+# canónica en un commit dedicado -- mismo patrón exacto que idle/
+# click_reaction: "left" es la dirección REAL importada (canónica para
+# Bunny), "right" se deriva acá por el mismo espejado determinista.
+GROOM_ROOT = os.path.join(BUNNY_ROOT, "animations", "groom")
+GROOM_CANONICAL_FRAMES_DIR = os.path.join(GROOM_ROOT, "left", "frames")
+GROOM_DERIVED_FRAMES_DIR = os.path.join(GROOM_ROOT, "right", "frames")
+GROOM_CANONICAL_SPRITESHEET_PATH = os.path.join(GROOM_ROOT, "left", "spritesheet", "spritesheet.png")
+GROOM_DERIVED_SPRITESHEET_PATH = os.path.join(GROOM_ROOT, "right", "spritesheet", "spritesheet.png")
+
 MANIFEST_PATH = os.path.join(BUNNY_ROOT, "pack_manifest.json")
 COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "bunny_pack.nvpack")
 
@@ -118,9 +136,9 @@ COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "bunny_pack.nvpack")
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
 # Grilla del spritesheet: 5 columnas -- confirmado inspeccionando las
-# dimensiones reales de los dos spritesheets importados (idle:
-# 1920x2685 == 5*384 x 5*537; click: 2095x2935 == 5*419 x 5*587,
-# ambos exactos), no asumido.
+# dimensiones reales de los tres spritesheets importados (idle:
+# 1920x2685 == 5*384 x 5*537; click: 2095x2935 == 5*419 x 5*587; groom:
+# 2230x3010 == 5*446 x 5*602, los tres exactos), no asumido.
 GRID_COLUMNS = 5
 
 # 128: mismo punto medio estándar de borde antialiaseado que Nidir/la
@@ -132,18 +150,28 @@ GRID_COLUMNS = 5
 ALPHA_HIT_THRESHOLD = 128
 
 # Misma configuración de Ludo.ai que Nidir usó ("3 seconds, Max Frames
-# 25") -- el owner no proveyó un dato separado para este export de
-# Bunny específicamente, pero SÍ trae 25 frames como Nidir, consistente
-# con esa misma configuración. Suposición explícita y documentada, no
-# confirmada por separado -- si se confirma un valor distinto en el
-# futuro, ajustar acá.
+# 25") -- el owner no proveyó un dato separado para estos exports de
+# Bunny específicamente, pero idle/click_reaction/groom traen los tres
+# 25 frames, consistente con esa misma configuración. Suposición
+# explícita y documentada, no confirmada por separado -- si se
+# confirma un valor distinto en el futuro, ajustar acá.
 EXPORT_DURATION_SECONDS = 3.0
 
-# Sin cambios respecto al fixture sintético anterior de Bunny -- este
-# bloque solo cambió el valor de Nidir (a 60s, pedido explícito del
-# owner); nada pidió cambiar el de Bunny, así que se mantiene el
-# default de PetDefinition.
-PASSIVE_INTERVAL_SECONDS = 300.0
+# 10 segundos -- pedido explícito del owner en la corrección post-QA de
+# este bloque ("intervalo pasivo de 10 segundos para ambos Nimvlets"),
+# reemplazando el default sin-cambios de PetDefinition (300s) que la
+# primera pasada de este bloque todavía usaba para Bunny. Mismo valor
+# que Nidir (ver tools/generate_nidir_pack.py) -- un único intervalo de
+# producto para los dos, no un ajuste por-pet.
+PASSIVE_INTERVAL_SECONDS = 10.0
+
+# Selección ponderada 70/30 entre las DOS acciones pasivas de Bunny
+# (Block 04.3, corrección post-QA -- pedido explícito del owner) --
+# ver content::ChooseWeightedPassiveActionIndex() y el índice 0 = idle
+# periódico (breathing), índice 1 = groom (nueva). El orden de esta
+# lista debe calzar exactamente con el orden de `passive_actions` en el
+# manifest más abajo -- ver main().
+PASSIVE_ACTION_WEIGHTS = [0.7, 0.3]
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
@@ -227,29 +255,44 @@ def main() -> int:
     click_left_report, click_right_report = _derive_mirrored_direction(
         "click_reaction", CLICK_CANONICAL_FRAMES_DIR, CLICK_DERIVED_FRAMES_DIR, CLICK_CANONICAL_SPRITESHEET_PATH, CLICK_DERIVED_SPRITESHEET_PATH
     )
+    groom_left_report, groom_right_report = _derive_mirrored_direction(
+        "groom", GROOM_CANONICAL_FRAMES_DIR, GROOM_DERIVED_FRAMES_DIR, GROOM_CANONICAL_SPRITESHEET_PATH, GROOM_DERIVED_SPRITESHEET_PATH
+    )
 
     # Misma política de canvas de trabajo compartido/anclado por
     # contenido que Nidir ya usa (Block 04.3) -- ver
     # prep_dev_sprite.compute_frame_normalization_plan() y el
     # docstring de tools/compile_pet_pack.py. "idle" es el grupo de
-    # referencia por la misma convención que Nidir (DEC-045).
+    # referencia por la misma convención que Nidir (DEC-045). "groom"
+    # se agrega acá como un tercer grupo (corrección post-QA) -- el
+    # canvas de trabajo compartido debe ser lo bastante grande como
+    # para contener también su contenido nativo, o el canvas lógico
+    # que este script deriva más abajo (a partir de ESTE mismo plan)
+    # quedaría desalineado con el que tools/compile_pet_pack.py
+    # recalcula de forma independiente al compilar (que SÍ incluye
+    # "groom" automáticamente, en cuanto aparece en
+    # manifest["passive_actions"] -- ver su _build_normalization_plan()).
     normalization_entries = {
         "idle": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png")),
         "idle_right": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_DERIVED_FRAMES_DIR, "frame_000.png")),
         "click_reaction": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_CANONICAL_FRAMES_DIR, "frame_000.png")),
         "click_reaction_right": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_DERIVED_FRAMES_DIR, "frame_000.png")),
+        "groom": prep_dev_sprite.read_png_rgba(os.path.join(GROOM_CANONICAL_FRAMES_DIR, "frame_000.png")),
+        "groom_right": prep_dev_sprite.read_png_rgba(os.path.join(GROOM_DERIVED_FRAMES_DIR, "frame_000.png")),
     }
     normalization_groups = {
         "idle": "idle",
         "idle_right": "idle",
         "click_reaction": "click_reaction",
         "click_reaction_right": "click_reaction",
+        "groom": "groom",
+        "groom_right": "groom",
     }
     normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
         normalization_entries, normalization_groups, reference_group="idle"
     )
     _, working_width, working_height, _, _ = normalization_plan["idle"]
-    print(f"canvas de trabajo compartido (idle + click_reaction, contenido alineado): {working_width}x{working_height}")
+    print(f"canvas de trabajo compartido (idle + click_reaction + groom, contenido alineado): {working_width}x{working_height}")
     for key, (scale, _, _, offset_x, offset_y) in normalization_plan.items():
         print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
 
@@ -270,10 +313,17 @@ def main() -> int:
     click_left_entries = [_frame_entry(click_left_dir, i) for i in range(click_left_report.frame_count)]
     click_right_entries = [_frame_entry(click_right_dir, i) for i in range(click_right_report.frame_count)]
 
+    groom_left_dir = os.path.join("animations", "groom", "left", "frames")
+    groom_right_dir = os.path.join("animations", "groom", "right", "frames")
+    groom_left_entries = [_frame_entry(groom_left_dir, i) for i in range(groom_left_report.frame_count)]
+    groom_right_entries = [_frame_entry(groom_right_dir, i) for i in range(groom_right_report.frame_count)]
+
     idle_playback_fps = idle_left_report.frame_count / EXPORT_DURATION_SECONDS
     click_playback_fps = click_left_report.frame_count / EXPORT_DURATION_SECONDS
+    groom_playback_fps = groom_left_report.frame_count / EXPORT_DURATION_SECONDS
     print(f"idle: {idle_left_report.frame_count} frames reales, fps derivado={idle_playback_fps:.4f}")
     print(f"click_reaction: {click_left_report.frame_count} frames reales, fps derivado={click_playback_fps:.4f}")
+    print(f"groom: {groom_left_report.frame_count} frames reales, fps derivado={groom_playback_fps:.4f}")
 
     manifest = {
         # Se mantiene "bunny_dev" -- ver "Identidad de catálogo" en el
@@ -285,7 +335,7 @@ def main() -> int:
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
         "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
-        "content_version": "block04.3-bunny-1",
+        "content_version": "block04.3-bunny-2",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         "normalize_visual_scale": True,
         # IMPORTANTE -- content::ResolveIdleAnimation()/
@@ -347,9 +397,13 @@ def main() -> int:
                 "frames": click_left_entries,
             }
         ],
-        # Único idle periódico existente hoy (ver el docstring del
-        # módulo -- una segunda animación de idle, 70/30, y hover
-        # quedan deliberadamente fuera de alcance de este bloque).
+        # DOS acciones pasivas (Block 04.3, corrección post-QA -- antes
+        # solo existía el idle periódico "breathing"; "groom" es la
+        # segunda, real, importada en esta misma corrección). Mismo
+        # cuidado de inversión canónica que idle/click_reaction arriba:
+        # el índice 1 (groom) usa los frames DERIVADOS ("right") en su
+        # entrada canónica y los REALES ("left") en su override --
+        # nunca al revés.
         "passive_actions": [
             {
                 "id": "idle_breathing_right",
@@ -357,7 +411,14 @@ def main() -> int:
                 "fps": idle_playback_fps,
                 "returns_to_idle": True,
                 "frames": idle_right_entries,
-            }
+            },
+            {
+                "id": "groom_right",
+                "kind": "one_shot",
+                "fps": groom_playback_fps,
+                "returns_to_idle": True,
+                "frames": groom_right_entries,
+            },
         ],
         "passive_action_direction_overrides": [
             {
@@ -368,8 +429,21 @@ def main() -> int:
                 "fps": idle_playback_fps,
                 "returns_to_idle": True,
                 "frames": idle_left_entries,
-            }
+            },
+            {
+                "passive_action_index": 1,
+                "direction": "left",
+                "id": "groom_left",
+                "kind": "one_shot",
+                "fps": groom_playback_fps,
+                "returns_to_idle": True,
+                "frames": groom_left_entries,
+            },
         ],
+        # 70/30 entre las dos entradas de arriba, en el mismo orden --
+        # ver PASSIVE_ACTION_WEIGHTS y
+        # content::ChooseWeightedPassiveActionIndex().
+        "passive_action_weights": PASSIVE_ACTION_WEIGHTS,
     }
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

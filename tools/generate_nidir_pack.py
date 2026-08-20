@@ -98,6 +98,23 @@ animaciones") agrega estos cambios acá:
       docs/NIDIR_CONTENT.md para el tamaño exacto resultante y cómo
       revertirlo.
 
+La CORRECCIÓN post-QA de este mismo bloque (segunda pasada) agrega,
+además, la segunda animación de idle real de Nidir ("wing_stretch" --
+el owner exportó
+`local_imports/nidir/nidir-idle-wing-stretch-right/`, ya copiado a
+`assets/source/nimvlets/nidir/animations/wing_stretch/right/`, mismo
+patrón de import manual documentado que idle/click_reaction), la
+selección ponderada 70/30 entre las dos (ver `passive_action_weights`
+en tools/compile_pet_pack.py), el intervalo pasivo de 10 segundos
+(reemplazando el valor de producto de 60s de la pasada anterior -- el
+owner pidió explícitamente 10s para ambos Nimvlets en esta
+corrección), y +5 puntos porcentuales adicionales de
+DISPLAY_SIZE_SCALE_FACTOR (de 1.05 a 1.10, ~+10% total respecto del
+baseline original de 160 -- ver tools/prep_dev_sprite.py). El disparo
+por hover (ver src/app/SpikeApp.cpp, MaybeTriggerHoverPassiveAction())
+también aplica a Nidir sin ningún cambio en este script -- es
+enteramente lógica de runtime, no de contenido.
+
 Uso:
     python3 tools/generate_nidir_pack.py
 
@@ -133,6 +150,18 @@ CLICK_LEFT_FRAMES_DIR = os.path.join(CLICK_ROOT, "left", "frames")
 CLICK_RIGHT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "right", "spritesheet", "spritesheet.png")
 CLICK_LEFT_SPRITESHEET_PATH = os.path.join(CLICK_ROOT, "left", "spritesheet", "spritesheet.png")
 
+# Segunda animación de idle real (Block 04.3, corrección post-QA -- ver
+# el docstring del módulo). Importada desde
+# local_imports/nidir/nidir-idle-wing-stretch-right/, ya copiada a esta
+# ruta canónica en un commit dedicado -- mismo patrón exacto que idle/
+# click_reaction: "right" es la dirección REAL importada (canónica
+# para Nidir), "left" se deriva acá por el mismo espejado determinista.
+WING_STRETCH_ROOT = os.path.join(NIDIR_ROOT, "animations", "wing_stretch")
+WING_STRETCH_RIGHT_FRAMES_DIR = os.path.join(WING_STRETCH_ROOT, "right", "frames")
+WING_STRETCH_LEFT_FRAMES_DIR = os.path.join(WING_STRETCH_ROOT, "left", "frames")
+WING_STRETCH_RIGHT_SPRITESHEET_PATH = os.path.join(WING_STRETCH_ROOT, "right", "spritesheet", "spritesheet.png")
+WING_STRETCH_LEFT_SPRITESHEET_PATH = os.path.join(WING_STRETCH_ROOT, "left", "spritesheet", "spritesheet.png")
+
 MANIFEST_PATH = os.path.join(NIDIR_ROOT, "pack_manifest.json")
 COMPILED_PATH = os.path.join(REPO_ROOT, "assets", "dev", "nidir_pack.nvpack")
 
@@ -167,7 +196,8 @@ RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 # (frame 0 arriba-izquierda, avanzando por fila) -- confirmado
 # inspeccionando visualmente assets/source/nimvlets/nidir/animations/idle/right/spritesheet/spritesheet.png
 # (2565x2625 == 5*513 x 5*525 exacto) antes de escribir este código, no
-# asumido.
+# asumido. wing_stretch (corrección post-QA) también calza esta misma
+# grilla (3120x2595 == 5*624 x 5*519 exacto).
 GRID_COLUMNS = 5
 
 # 128: mismo punto medio estándar de borde antialiaseado que Bunny usa
@@ -205,12 +235,30 @@ ALPHA_HIT_THRESHOLD = 128
 EXPORT_DURATION_SECONDS = 3.0
 CLICK_EXPORT_DURATION_SECONDS = 3.0
 
-# Cada cuánto se dispara la animación de idle esporádica. Block 04.2
-# lo dejaba en 300s (5min, el default del esquema de PetDefinition) de
-# forma explícita como no-final -- Block 04.3 lo fija a 60s (1 minuto)
-# por pedido directo del owner ("El idle periódico queremos dejarlo en
-# 1 minuto"), ya no un placeholder sino un valor de producto real.
-PASSIVE_INTERVAL_SECONDS = 60.0
+# wing_stretch (corrección post-QA de este mismo bloque) también trae
+# 25 frames -- misma suposición explícita que click-fire ya documenta
+# arriba: no confirmada por separado con el owner, pero consistente con
+# la misma configuración de Ludo ("3 seconds, Max Frames 25").
+WING_STRETCH_EXPORT_DURATION_SECONDS = 3.0
+
+# Cada cuánto se dispara una acción pasiva esporádica. Block 04.2 lo
+# dejaba en 300s (5min, el default del esquema de PetDefinition) de
+# forma explícita como no-final; Block 04.3 lo fijó a 60s (1 minuto)
+# por pedido directo del owner. La corrección post-QA de este mismo
+# bloque lo vuelve a bajar a 10 segundos -- pedido explícito y
+# posterior del owner ("intervalo pasivo de 10 segundos para ambos
+# Nimvlets"), mismo valor que Bunny (ver
+# tools/generate_bunny_pack.py) -- un único intervalo de producto para
+# los dos, no un ajuste por-pet.
+PASSIVE_INTERVAL_SECONDS = 10.0
+
+# Selección ponderada 70/30 entre las DOS acciones pasivas de Nidir
+# (Block 04.3, corrección post-QA -- pedido explícito del owner) --
+# ver content::ChooseWeightedPassiveActionIndex() y el índice 0 = idle
+# periódico (breathing/fuego), índice 1 = wing_stretch (nueva). El
+# orden de esta lista debe calzar exactamente con el orden de
+# `passive_actions` en el manifest más abajo -- ver main().
+PASSIVE_ACTION_WEIGHTS = [0.7, 0.3]
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
@@ -297,6 +345,10 @@ def main() -> int:
     click_right_report, click_left_report = _derive_left_direction(
         "click_reaction", CLICK_RIGHT_FRAMES_DIR, CLICK_LEFT_FRAMES_DIR, CLICK_RIGHT_SPRITESHEET_PATH, CLICK_LEFT_SPRITESHEET_PATH
     )
+    wing_stretch_right_report, wing_stretch_left_report = _derive_left_direction(
+        "wing_stretch", WING_STRETCH_RIGHT_FRAMES_DIR, WING_STRETCH_LEFT_FRAMES_DIR,
+        WING_STRETCH_RIGHT_SPRITESHEET_PATH, WING_STRETCH_LEFT_SPRITESHEET_PATH
+    )
 
     # Canvas lógico derivado del canvas de TRABAJO compartido (Block
     # 04.3), no de la resolución nativa cruda de idle (eso era la
@@ -307,24 +359,33 @@ def main() -> int:
     # ratio correcto -- compile_pet_pack.py vuelve a calcular el mismo
     # plan de forma independiente a partir de los mismos PNG fuente
     # (no se pasa ningún estado entre los dos scripts), así que ambos
-    # SIEMPRE coinciden sin necesidad de sincronizar nada.
+    # SIEMPRE coinciden sin necesidad de sincronizar nada. "wing_stretch"
+    # se agrega acá como un tercer grupo (corrección post-QA) -- mismo
+    # motivo que groom en tools/generate_bunny_pack.py: el canvas de
+    # trabajo compartido debe contemplar también su contenido nativo,
+    # o quedaría desalineado con el que compile_pet_pack.py recalcula
+    # de forma independiente al compilar.
     normalization_entries = {
         "idle": prep_dev_sprite.read_png_rgba(os.path.join(RIGHT_FRAMES_DIR, "frame_000.png")),
         "idle_left": prep_dev_sprite.read_png_rgba(os.path.join(LEFT_FRAMES_DIR, "frame_000.png")),
         "click_reaction": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_RIGHT_FRAMES_DIR, "frame_000.png")),
         "click_reaction_left": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_LEFT_FRAMES_DIR, "frame_000.png")),
+        "wing_stretch": prep_dev_sprite.read_png_rgba(os.path.join(WING_STRETCH_RIGHT_FRAMES_DIR, "frame_000.png")),
+        "wing_stretch_left": prep_dev_sprite.read_png_rgba(os.path.join(WING_STRETCH_LEFT_FRAMES_DIR, "frame_000.png")),
     }
     normalization_groups = {
         "idle": "idle",
         "idle_left": "idle",
         "click_reaction": "click_reaction",
         "click_reaction_left": "click_reaction",
+        "wing_stretch": "wing_stretch",
+        "wing_stretch_left": "wing_stretch",
     }
     normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
         normalization_entries, normalization_groups, reference_group="idle"
     )
     _, working_width, working_height, _, _ = normalization_plan["idle"]
-    print(f"canvas de trabajo compartido (idle + click_reaction, contenido alineado): {working_width}x{working_height}")
+    print(f"canvas de trabajo compartido (idle + click_reaction + wing_stretch, contenido alineado): {working_width}x{working_height}")
     for key, (scale, _, _, offset_x, offset_y) in normalization_plan.items():
         print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
 
@@ -345,13 +406,20 @@ def main() -> int:
     click_right_frame_entries = [_frame_entry(click_right_dir, i) for i in range(click_right_report.frame_count)]
     click_left_frame_entries = [_frame_entry(click_left_dir, i) for i in range(click_left_report.frame_count)]
 
+    wing_stretch_right_dir = os.path.join("animations", "wing_stretch", "right", "frames")
+    wing_stretch_left_dir = os.path.join("animations", "wing_stretch", "left", "frames")
+    wing_stretch_right_frame_entries = [_frame_entry(wing_stretch_right_dir, i) for i in range(wing_stretch_right_report.frame_count)]
+    wing_stretch_left_frame_entries = [_frame_entry(wing_stretch_left_dir, i) for i in range(wing_stretch_left_report.frame_count)]
+
     # fps derivado de la cantidad REAL de frames entregados / la
     # duración de generación configurada en Ludo.ai -- nunca
     # hardcodeado a 24/25 (ver EXPORT_DURATION_SECONDS arriba y
     # validate_frame_sequence.py).
     idle_playback_fps = right_report.frame_count / EXPORT_DURATION_SECONDS
     click_playback_fps = click_right_report.frame_count / CLICK_EXPORT_DURATION_SECONDS
+    wing_stretch_playback_fps = wing_stretch_right_report.frame_count / WING_STRETCH_EXPORT_DURATION_SECONDS
     print(f"click_reaction: {click_right_report.frame_count} frames reales @ {click_right_report.width}x{click_right_report.height}, fps derivado={click_playback_fps:.4f}")
+    print(f"wing_stretch: {wing_stretch_right_report.frame_count} frames reales @ {wing_stretch_right_report.width}x{wing_stretch_right_report.height}, fps derivado={wing_stretch_playback_fps:.4f}")
 
     manifest = {
         "id": "nidir",
@@ -361,7 +429,7 @@ def main() -> int:
         "canvas_height": canvas_height,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
         "passive_interval_seconds": PASSIVE_INTERVAL_SECONDS,
-        "content_version": "block04.3-nidir-2",
+        "content_version": "block04.3-nidir-3",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         # Canvas de trabajo compartido, anclado por contenido (Block
         # 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y tamaño visual
@@ -424,13 +492,20 @@ def main() -> int:
                 "frames": click_left_frame_entries,
             }
         ],
-        # La secuencia completa importada, reclasificada como acción
-        # pasiva ESPORÁDICA (one_shot) -- nunca un loop continuo. Se
-        # dispara vía el scheduler de acciones pasivas ya existente
+        # DOS acciones pasivas (Block 04.3, corrección post-QA -- antes
+        # solo existía el idle periódico "breathing"; "wing_stretch" es
+        # la segunda, real, importada en esta misma corrección). La
+        # secuencia completa importada de cada una, reclasificada como
+        # acción pasiva ESPORÁDICA (one_shot) -- nunca un loop continuo.
+        # Se disparan vía el scheduler de acciones pasivas ya existente
         # desde Block 02 (SpikeApp::nextPassiveDeadlineMs_ /
-        # AnimationController::TriggerPassiveAction()), y al terminar
-        # vuelve a la pose base estática por el mismo mecanismo que ya
-        # usa cualquier click_reaction (returnsToIdle).
+        # AnimationController::TriggerPassiveAction()), ponderadas 70/30
+        # (ver PASSIVE_ACTION_WEIGHTS), y al terminar vuelven a la pose
+        # base estática por el mismo mecanismo que ya usa cualquier
+        # click_reaction (returnsToIdle). Nidir es canónicamente "right"
+        # (a diferencia de Bunny) -- sin inversión: la entrada canónica
+        # de wing_stretch usa los frames REALES ("right"), el override
+        # usa los DERIVADOS ("left"), igual que idle/click_reaction.
         "passive_actions": [
             {
                 "id": "idle_breathing_right",
@@ -438,7 +513,14 @@ def main() -> int:
                 "fps": idle_playback_fps,
                 "returns_to_idle": True,
                 "frames": right_frame_entries,
-            }
+            },
+            {
+                "id": "wing_stretch_right",
+                "kind": "one_shot",
+                "fps": wing_stretch_playback_fps,
+                "returns_to_idle": True,
+                "frames": wing_stretch_right_frame_entries,
+            },
         ],
         "passive_action_direction_overrides": [
             {
@@ -449,8 +531,21 @@ def main() -> int:
                 "fps": idle_playback_fps,
                 "returns_to_idle": True,
                 "frames": left_frame_entries,
-            }
+            },
+            {
+                "passive_action_index": 1,
+                "direction": "left",
+                "id": "wing_stretch_left",
+                "kind": "one_shot",
+                "fps": wing_stretch_playback_fps,
+                "returns_to_idle": True,
+                "frames": wing_stretch_left_frame_entries,
+            },
         ],
+        # 70/30 entre las dos entradas de arriba, en el mismo orden --
+        # ver PASSIVE_ACTION_WEIGHTS y
+        # content::ChooseWeightedPassiveActionIndex().
+        "passive_action_weights": PASSIVE_ACTION_WEIGHTS,
     }
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

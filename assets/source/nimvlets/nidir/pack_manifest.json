@@ -2,11 +2,11 @@
   "id": "nidir",
   "display_name": "Nidir",
   "variant_group": "",
-  "canvas_width": 168,
-  "canvas_height": 165,
+  "canvas_width": 176,
+  "canvas_height": 173,
   "alpha_hit_threshold": 128,
-  "passive_interval_seconds": 60.0,
-  "content_version": "block04.3-nidir-2",
+  "passive_interval_seconds": 10.0,
+  "content_version": "block04.3-nidir-3",
   "runtime_max_frame_dimension": 320,
   "normalize_visual_scale": true,
   "idle": {
@@ -363,6 +363,114 @@
           "duration_ms": 0
         }
       ]
+    },
+    {
+      "id": "wing_stretch_right",
+      "kind": "one_shot",
+      "fps": 8.333333333333334,
+      "returns_to_idle": true,
+      "frames": [
+        {
+          "source": "animations/wing_stretch/right/frames/frame_000.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_001.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_002.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_003.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_004.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_005.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_006.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_007.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_008.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_009.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_010.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_011.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_012.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_013.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_014.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_015.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_016.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_017.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_018.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_019.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_020.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_021.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_022.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_023.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/right/frames/frame_024.png",
+          "duration_ms": 0
+        }
+      ]
     }
   ],
   "passive_action_direction_overrides": [
@@ -475,6 +583,120 @@
           "duration_ms": 0
         }
       ]
+    },
+    {
+      "passive_action_index": 1,
+      "direction": "left",
+      "id": "wing_stretch_left",
+      "kind": "one_shot",
+      "fps": 8.333333333333334,
+      "returns_to_idle": true,
+      "frames": [
+        {
+          "source": "animations/wing_stretch/left/frames/frame_000.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_001.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_002.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_003.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_004.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_005.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_006.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_007.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_008.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_009.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_010.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_011.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_012.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_013.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_014.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_015.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_016.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_017.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_018.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_019.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_020.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_021.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_022.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_023.png",
+          "duration_ms": 0
+        },
+        {
+          "source": "animations/wing_stretch/left/frames/frame_024.png",
+          "duration_ms": 0
+        }
+      ]
     }
+  ],
+  "passive_action_weights": [
+    0.7,
+    0.3
   ]
 }
