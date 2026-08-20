@@ -7,6 +7,7 @@
 #include "DirectionTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
+#include "HoverPassiveGateTest.h"
 #include "LinuxBackendPolicyTest.h"
 #include "PersistenceIntegrationTest.h"
 #include "PersistenceSchedulerTest.h"
@@ -22,6 +23,7 @@ int main() {
 
     nimvlets::tests::RegisterDragClassifierTests(runner);
     nimvlets::tests::RegisterFrameSchedulerTests(runner);
+    nimvlets::tests::RegisterHoverPassiveGateTests(runner);
     nimvlets::tests::RegisterSilhouetteTests(runner);
     nimvlets::tests::RegisterAlphaMaskTests(runner);
     nimvlets::tests::RegisterAnimationControllerTests(runner);

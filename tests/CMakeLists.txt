@@ -9,6 +9,8 @@ add_executable(nimvlets_tests
   TestRunner.h
   DragClassifierTest.h
   DragClassifierTest.cpp
+  HoverPassiveGateTest.h
+  HoverPassiveGateTest.cpp
   FrameSchedulerTest.h
   FrameSchedulerTest.cpp
   SilhouetteTest.h

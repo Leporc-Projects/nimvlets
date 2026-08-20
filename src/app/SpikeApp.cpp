@@ -10,6 +10,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <random>
 
 namespace nimvlets::app {
 
@@ -39,6 +40,10 @@ constexpr const char* kDevDirectionTestCountEnvVar = "NIMVLETS_DEV_DIRECTION_TES
 // Lee NIMVLETS_DEV_CLICK_TEST_COUNT — ver el comentario de
 // SpikeApp::RunDevClickSmokeTestIfRequested().
 constexpr const char* kDevClickTestCountEnvVar = "NIMVLETS_DEV_CLICK_TEST_COUNT";
+
+// Lee NIMVLETS_DEV_HOVER_TEST_COUNT — ver el comentario de
+// SpikeApp::RunDevHoverSmokeTestIfRequested().
+constexpr const char* kDevHoverTestCountEnvVar = "NIMVLETS_DEV_HOVER_TEST_COUNT";
 
 // Separación de wall-clock del redraw de confirmación (Block 04.3 --
 // ver el comentario de confirmRedrawDeadlineMs_ en SpikeApp.h). 120ms
@@ -462,6 +467,15 @@ bool SpikeApp::Init() {
     passiveIntervalSecondsEffective_ = ComputeEffectivePassiveIntervalSeconds();
     nextPassiveDeadlineMs_ = static_cast<double>(SDL_GetTicks()) + passiveIntervalSecondsEffective_ * 1000.0;
 
+    // Semilla real de aleatoriedad (Block 04.3, corrección post-QA —
+    // política 70/30), una sola vez por proceso — ver el comentario de
+    // passiveActionRng_ en SpikeApp.h. std::random_device puede ser
+    // determinista en algunas plataformas sin una fuente de entropía real
+    // (documentado por el propio estándar) pero eso es aceptable acá: la
+    // elección entre acciones pasivas no tiene ninguna implicancia de
+    // seguridad, solo de variedad visual.
+    passiveActionRng_.seed(std::random_device{}());
+
     // Objective, non-visual confirmation of high-DPI backing: logical
     // ("point") size vs. actual backbuffer size in pixels. On a Retina
     // display with SDL_WINDOW_HIGH_PIXEL_DENSITY honored, the pixel size
@@ -699,6 +713,98 @@ void SpikeApp::RunDevClickSmokeTestIfRequested() {
     SDL_Log("nimvlets: DEV click smoke test complete — %zu click(s) requested", count);
 }
 
+double SpikeApp::NextUniformRandom01() {
+    // std::uniform_real_distribution es barata de construir (sin estado
+    // propio de peso — a diferencia de, p. ej., un discrete_distribution)
+    // así que construirla inline en cada llamado, en vez de guardarla
+    // como miembro, es la opción simple correcta acá — ver el comentario
+    // de passiveActionRng_ en SpikeApp.h.
+    return std::uniform_real_distribution<double>(0.0, 1.0)(passiveActionRng_);
+}
+
+void SpikeApp::MaybeTriggerHoverPassiveAction(bool cursorOverOpaque, double nowMs) {
+    // Prioridad click/drag > hover/pasiva > estática (Block 04.3,
+    // corrección post-QA) — ver el doc comment de este método en
+    // SpikeApp.h para el contrato completo. Ningún gesto en curso
+    // alimenta jamás hoverPassiveGate_.
+    if (dragClassifier_.IsActive()) {
+        return;
+    }
+    if (!hoverPassiveGate_.Update(cursorOverOpaque)) {
+        return;  // no es un flanco de subida -- nada que hacer
+    }
+
+    // El gate ya confirmó el flanco -- ahora el mismo cooldown
+    // compartido que el timer ambiente usa (ver el comentario de
+    // nextPassiveDeadlineMs_ en SpikeApp.h): si todavía no venció, hover
+    // NO dispara, evitando el "spam" de dos acciones pasivas seguidas
+    // sin importar cuál camino dispare primero.
+    if (nowMs < nextPassiveDeadlineMs_) {
+        return;
+    }
+    // TriggerPassiveAction() ya sería un no-op fuera de Idle (ver su
+    // doc comment) -- esta guarda extra solo evita gastar un sorteo
+    // aleatorio y loguear un disparo que en los hechos no ocurriría.
+    if (animController_->State() != content::ControllerState::kIdle || pet_.passiveActions.empty()) {
+        return;
+    }
+
+    const std::size_t index = content::ChooseWeightedPassiveActionIndex(pet_, NextUniformRandom01());
+    animController_->TriggerPassiveAction(index, nowMs);
+    nextPassiveDeadlineMs_ = nowMs + passiveIntervalSecondsEffective_ * 1000.0;
+    needsRedraw_ = true;
+    SDL_Log("nimvlets: hover-triggered passive action #%zu", index);
+}
+
+void SpikeApp::RunDevHoverSmokeTestIfRequested() {
+    const char* countEnv = std::getenv(kDevHoverTestCountEnvVar);
+    if (countEnv == nullptr || countEnv[0] == '\0') {
+        return;  // sin la variable de entorno, esto es un no-op total
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(countEnv, &end, 10);
+    if (end == countEnv || parsed <= 0) {
+        SDL_Log("nimvlets: %s='%s' is not a valid positive integer; ignoring", kDevHoverTestCountEnvVar, countEnv);
+        return;
+    }
+    const auto count = static_cast<std::size_t>(parsed);
+
+    SDL_Log("nimvlets: DEV hover smoke test active — %s=%zu", kDevHoverTestCountEnvVar, count);
+
+    // Tiempo SIMULADO, no wall-clock real -- ver el doc comment de este
+    // método en SpikeApp.h para el comportamiento esperado exacto (solo
+    // el primer ciclo con cooldown vencido dispara de verdad; todos los
+    // siguientes deben quedar en no-op, y por una buena razón: esto no
+    // llama a animController_->Advance() por su cuenta, así que el
+    // controller nunca vuelve a Idle solo dentro de esta corrida). Cada
+    // ciclo: un salto de tiempo (corto, 1/4 de intervalo, en la mayoría
+    // de los ciclos; largo, más de un intervalo completo, cada 4º ciclo),
+    // luego "entra" (hoverActive=true) y "sale" (hoverActive=false),
+    // simulando el jitter real de varios SDL_EVENT_MOUSE_MOTION seguidos
+    // mientras el mouse se mueve ligeramente sin salir del área.
+    double simulatedNowMs = static_cast<double>(SDL_GetTicks());
+    nextPassiveDeadlineMs_ = simulatedNowMs;  // vencido de entrada -- el primer ciclo largo ya puede disparar
+    const double shortStepMs = passiveIntervalSecondsEffective_ * 1000.0 / 4.0;
+    const double longStepMs = passiveIntervalSecondsEffective_ * 1000.0 + 1.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        simulatedNowMs += (i % 4 == 0) ? longStepMs : shortStepMs;
+        MaybeTriggerHoverPassiveAction(true, simulatedNowMs);
+        simulatedNowMs += 1.0;
+        MaybeTriggerHoverPassiveAction(false, simulatedNowMs);
+    }
+
+    // Restaura el deadline ambiente a un valor real de wall-clock antes
+    // de devolver el control -- el tiempo simulado de arriba pudo dejar
+    // nextPassiveDeadlineMs_ muy por detrás del reloj real, lo que
+    // dispararía una acción pasiva real inesperada apenas arranque el
+    // loop principal si este smoke test se corre como parte de una
+    // sesión interactiva real en vez de una verificación aislada.
+    nextPassiveDeadlineMs_ = static_cast<double>(SDL_GetTicks()) + passiveIntervalSecondsEffective_ * 1000.0;
+
+    SDL_Log("nimvlets: DEV hover smoke test complete — %zu hover cycle(s) requested", count);
+}
+
 void SpikeApp::Shutdown() {
     // Flushea primero, antes de desmontar cualquier otra cosa — ver el
     // comentario de FlushPersistedState(): el shutdown limpio siempre
@@ -855,6 +961,13 @@ void SpikeApp::PollHover() {
 
     UpdateClickThrough(cursorOverOpaque);
 
+    // Mismo disparo de acción pasiva por hover que el camino de hit-test
+    // nativo (SDL_EVENT_MOUSE_MOTION en HandleEvent()) — ver
+    // MaybeTriggerHoverPassiveAction()'s doc comment. Reutiliza
+    // cursorOverOpaque, ya calculado arriba para UpdateClickThrough(),
+    // sin ningún cálculo adicional.
+    MaybeTriggerHoverPassiveAction(cursorOverOpaque, nowMs);
+
     hoverScheduler_.OnFramePresented(nowMs);
 }
 
@@ -958,23 +1071,41 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
         }
 
         case SDL_EVENT_MOUSE_MOTION: {
-            if (!dragClassifier_.IsActive()) {
-                break;
-            }
             const core::Point localCurrent{
                 static_cast<double>(event.motion.x),
                 static_cast<double>(event.motion.y),
             };
-            dragClassifier_.Update(localCurrent);
 
-            if (dragClassifier_.IsDragging()) {
-                float globalX = 0.0f;
-                float globalY = 0.0f;
-                SDL_GetGlobalMouseState(&globalX, &globalY);
-                const int newWinX = static_cast<int>(std::lround(static_cast<double>(globalX) - dragGrabOffsetX_));
-                const int newWinY = static_cast<int>(std::lround(static_cast<double>(globalY) - dragGrabOffsetY_));
-                SDL_SetWindowPosition(window_, newWinX, newWinY);
+            if (dragClassifier_.IsActive()) {
+                // Prioridad click/drag > hover/pasiva > estática (Block
+                // 04.3, corrección post-QA — ver
+                // MaybeTriggerHoverPassiveAction()'s doc comment): un
+                // gesto en curso ni siquiera llega a tocar
+                // hoverPassiveGate_ más abajo.
+                dragClassifier_.Update(localCurrent);
+
+                if (dragClassifier_.IsDragging()) {
+                    float globalX = 0.0f;
+                    float globalY = 0.0f;
+                    SDL_GetGlobalMouseState(&globalX, &globalY);
+                    const int newWinX = static_cast<int>(std::lround(static_cast<double>(globalX) - dragGrabOffsetX_));
+                    const int newWinY = static_cast<int>(std::lround(static_cast<double>(globalY) - dragGrabOffsetY_));
+                    SDL_SetWindowPosition(window_, newWinX, newWinY);
+                }
+                break;
             }
+
+            // Camino de hit-test nativo (macOS — ver
+            // usingNativeShapeHitTest_): este evento ya solo llega
+            // cuando el cursor está sobre el shape que le pasamos a
+            // SDL_SetWindowShape, pero se revalida con
+            // IsPointInteractive() de todos modos (mismo "defense in
+            // depth" que MOUSE_BUTTON_DOWN ya practica) para no asumir
+            // ciegamente esa garantía y para que este mismo call site
+            // siga siendo correcto si algún día corre en el fallback
+            // poll-driven, donde SÍ pueden llegar motion events fuera
+            // del sprite.
+            MaybeTriggerHoverPassiveAction(IsPointInteractive(localCurrent), static_cast<double>(SDL_GetTicks()));
             break;
         }
 
@@ -1043,11 +1174,19 @@ int SpikeApp::Run() {
     RunDevDirectionSmokeTestIfRequested();
 
     // Idem para NIMVLETS_DEV_CLICK_TEST_COUNT (Block 04.2, segunda
-    // pasada) — ver el comentario del método. Corre último a
-    // propósito: si tanto un switch/dirección como un click DEV están
-    // pedidos en la misma corrida, el click actúa sobre el pet/
-    // dirección ya resueltos por los dos anteriores.
+    // pasada) — ver el comentario del método. Corre antes que el smoke
+    // test de hover (más abajo) porque actúa sobre el pet/dirección ya
+    // resueltos por los dos anteriores, y el de hover en cambio maneja
+    // su propio tiempo simulado de forma completamente independiente
+    // del estado que deje este.
     RunDevClickSmokeTestIfRequested();
+
+    // Idem para NIMVLETS_DEV_HOVER_TEST_COUNT (Block 04.3, corrección
+    // post-QA — política de hover) — ver el comentario del método.
+    // Corre último: restaura nextPassiveDeadlineMs_ a un valor real de
+    // wall-clock antes de salir, así que el orden relativo a los tres
+    // anteriores no importa para ningún estado real que dejen atrás.
+    RunDevHoverSmokeTestIfRequested();
 
     bool running = true;
 
@@ -1150,8 +1289,13 @@ int SpikeApp::Run() {
             // action that arrives mid-click-reaction is simply skipped
             // for this cycle rather than queued or fired late.
             if (animController_->State() == content::ControllerState::kIdle && !pet_.passiveActions.empty()) {
-                animController_->TriggerPassiveAction(nextPassiveActionIndex_, afterMs);
-                nextPassiveActionIndex_ = (nextPassiveActionIndex_ + 1) % pet_.passiveActions.size();
+                // Selección ponderada 70/30 (Block 04.3, corrección
+                // post-QA) en vez del ciclado round-robin que este
+                // camino tenía en bloques anteriores — ver el
+                // comentario de passiveActionRng_ en SpikeApp.h y
+                // content::ChooseWeightedPassiveActionIndex().
+                const std::size_t index = content::ChooseWeightedPassiveActionIndex(pet_, NextUniformRandom01());
+                animController_->TriggerPassiveAction(index, afterMs);
                 needsRedraw_ = true;
             }
             nextPassiveDeadlineMs_ = afterMs + passiveIntervalSecondsEffective_ * 1000.0;

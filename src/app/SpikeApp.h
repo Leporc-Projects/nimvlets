@@ -8,6 +8,7 @@
 #include "core/AlphaMask.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
+#include "core/HoverPassiveGate.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
@@ -15,6 +16,7 @@
 #include <SDL3/SDL.h>
 
 #include <optional>
+#include <random>
 
 namespace nimvlets::app {
 
@@ -190,6 +192,88 @@ private:
     // corriendo de verdad. Sin la variable de entorno, no-op total.
     void RunDevClickSmokeTestIfRequested();
 
+    // Política de hover (Block 04.3, corrección post-QA — el owner pidió
+    // que reposar el cursor sobre el Nimvlet, sin hacer click, también
+    // pueda disparar una acción pasiva; ver docs/ANIMATION_RUNTIME.md,
+    // "política de hover"). Distinto del click: nunca toca clickCount_,
+    // appState_.clickBalance, ni la persistencia — solo dispara la MISMA
+    // TriggerPassiveAction() que el timer ambiente ya usa.
+    //
+    // `cursorOverOpaque` es el resultado ya calculado de
+    // IsPointInteractive() para la muestra actual (desde
+    // SDL_EVENT_MOUSE_MOTION en el camino de hit-test nativo, o desde
+    // PollHover() en el camino de fallback poll-driven — ver los dos
+    // call sites); `nowMs` es el instante de esa muestra.
+    //
+    // Prioridad click/drag > hover/pasiva > estática: ningún gesto de
+    // click/drag en curso (dragClassifier_.IsActive()) alimenta nunca
+    // hoverPassiveGate_ — la comprobación se hace ANTES de tocar el
+    // gate, así que un click/drag en curso ni siquiera puede "consumir"
+    // el flanco de subida por accidente.
+    //
+    // hoverPassiveGate_ (ver core::HoverPassiveGate) solo decide SI el
+    // cursor acaba de empezar a estar sobre el sprite (el flanco de
+    // subida) — el cooldown real entre disparos lo provee el MISMO
+    // deadline ambiente que ya usa el disparo por timer
+    // (nextPassiveDeadlineMs_), compartido a propósito: "10 segundos" es
+    // así un único intervalo real que gobierna ambos caminos (timer y
+    // hover), tal como pidió el owner, en vez de dos relojes
+    // independientes que podrían solaparse y producir dos acciones
+    // pasivas seguidas con casi nada de idle estático entre medio. Igual
+    // que el camino del timer, dispara TriggerPassiveAction() (que ya es
+    // un no-op si el controller no está en Idle) y, si de verdad
+    // disparó, reprograma nextPassiveDeadlineMs_ igual que el timer —
+    // así, cuál de los dos caminos "gane" en un instante dado, el
+    // cooldown de 10s hacia la PRÓXIMA acción pasiva (por cualquiera de
+    // los dos caminos) queda correctamente reiniciado desde ese momento.
+    void MaybeTriggerHoverPassiveAction(bool cursorOverOpaque, double nowMs);
+
+    // Devuelve un double uniforme en [0, 1) de passiveActionRng_ — la
+    // única fuente de aleatoriedad real de todo este archivo. Extraído a
+    // su propio método (en vez de construir la distribución inline en
+    // cada call site) para que TriggerPassiveAction del timer ambiente y
+    // el disparo por hover usen exactamente la misma fuente/semántica.
+    // content::ChooseWeightedPassiveActionIndex() en sí es puro/
+    // determinista (ver su doc comment) — toda la aleatoriedad real vive
+    // acá, nunca ahí.
+    double NextUniformRandom01();
+
+    // Mecanismo solo-DEV para smoke-testear el disparo por hover de
+    // forma no interactiva contra el binario real, reflejando el mismo
+    // patrón que RunDevClickSmokeTestIfRequested()/
+    // RunDevDirectionSmokeTestIfRequested(). Este bloque no sintetiza
+    // eventos SDL_EVENT_MOUSE_MOTION reales (mismo motivo que el click
+    // dev: ver AGENTS.md §5) — en cambio llama directamente a
+    // MaybeTriggerHoverPassiveAction() con tiempo SIMULADO (no
+    // wall-clock real) que avanza en cada ciclo, mezclando saltos cortos
+    // (menos de un intervalo completo) y largos (más de uno).
+    //
+    // Comportamiento esperado y por qué (mismo límite que
+    // RunDevClickSmokeTestIfRequested() ya documenta: esto NO llama a
+    // animController_->Advance() por su cuenta, así que el controller
+    // nunca vuelve a Idle por sí solo dentro de esta corrida sincrónica):
+    // el PRIMER ciclo con el cooldown ya vencido dispara una acción
+    // pasiva real de verdad (loguea "hover-triggered passive action") y
+    // dispara los mismos side effects que un hover real (needsRedraw_,
+    // reprogramación de nextPassiveDeadlineMs_); TODOS los ciclos
+    // siguientes -- sean de salto corto (cooldown no vencido) o largo
+    // (cooldown vencido, pero el controller ya quedó en
+    // ControllerState::kPassiveAction del primer disparo y nada lo
+    // avanza de vuelta a Idle acá) -- deben quedar como no-op. Ese
+    // patrón ("dispara una vez, después se queda callado") es la
+    // observación correcta y ESPERADA en esta corrida, no un bug: prueba
+    // exactamente lo que hace falta probar acá -- que el hover NUNCA
+    // hace spam de acciones pasivas seguidas -- sin duplicar la cobertura
+    // de "el cooldown deja pasar un disparo nuevo tras un intervalo
+    // completo", que ya cubren tests/HoverPassiveGateTest.cpp (la
+    // detección de flanco en aislamiento) y el propio camino del timer
+    // ambiente (mismo mecanismo, en producción desde Block 02). Si
+    // NIMVLETS_DEV_HOVER_TEST_COUNT es un entero positivo válido,
+    // ejecuta esa cantidad de ciclos entrada+salida, logueando cada uno
+    // (un valor pequeño, p. ej. 2-4, ya alcanza para ver el patrón
+    // completo). Sin la variable de entorno, no-op total.
+    void RunDevHoverSmokeTestIfRequested();
+
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 
@@ -257,9 +341,36 @@ private:
     // see ComputeEffectivePassiveIntervalSeconds(). Computed once in
     // Init(); pet_.passiveIntervalSeconds (the pack's authored default)
     // is never mutated.
+    //
+    // Compartido por los DOS caminos que pueden disparar una acción
+    // pasiva (Block 04.3, corrección post-QA — política de hover): el
+    // timer ambiente de más abajo, que lo revisa incondicionalmente en
+    // cada vuelta del loop principal, Y MaybeTriggerHoverPassiveAction()
+    // (ver su doc comment), que lo revisa solo en el flanco de subida de
+    // un hover real. Cualquiera de los dos que dispare primero reprograma
+    // este MISMO deadline hacia adelante — un único cooldown real de
+    // ~10s hacia la próxima acción pasiva, gane quien gane, en vez de dos
+    // relojes independientes que podrían solaparse.
     double passiveIntervalSecondsEffective_ = 300.0;
     double nextPassiveDeadlineMs_ = 0.0;
-    std::size_t nextPassiveActionIndex_ = 0;
+
+    // Fuente real de aleatoriedad para elegir qué acción pasiva disparar
+    // (Block 04.3, corrección post-QA — política 70/30 pedida por el
+    // owner). Sembrado una sola vez en Init() desde std::random_device —
+    // ver NextUniformRandom01(). Reemplaza el ciclado round-robin
+    // determinista que este campo tenía en bloques anteriores: ahora
+    // content::ChooseWeightedPassiveActionIndex() decide el índice,
+    // ponderado por pet_.passiveActionWeights cuando el pack los define
+    // (vacío = selección uniforme, comportamiento idéntico al
+    // round-robin de antes en la práctica estadística, aunque ya no
+    // literalmente cíclico).
+    std::mt19937 passiveActionRng_;
+
+    // Detector de flanco de "el cursor acaba de entrar a la región
+    // interactiva" para el disparo de acción pasiva por hover (Block
+    // 04.3, corrección post-QA) — ver core::HoverPassiveGate y
+    // MaybeTriggerHoverPassiveAction().
+    core::HoverPassiveGate hoverPassiveGate_;
 
     // --- Block 03: persistencia local (ver docs/PERSISTENCE.md) ---
     // Se carga una vez en Init() (o queda en defaults seguros si aún
