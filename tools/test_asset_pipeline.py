@@ -162,10 +162,11 @@ class LogicalCanvasSizeTest(unittest.TestCase):
 
 class DisplaySizeScaleFactorTest(unittest.TestCase):
     """`prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR` -- la política de
-    tamaño visual GLOBAL (Block 04.3, candidato de QA del owner:
-    "~5% más grande para todos los Nimvlets"). Un solo valor, aplicado
+    tamaño visual GLOBAL (Block 04.3). Un solo valor, aplicado
     automáticamente por compute_logical_canvas_size() a cualquier pet
-    que la use -- revertir es cambiar este único valor a 1.0."""
+    que la use -- revertir es cambiar este único valor a 1.0. Vigente:
+    1.10 (~+10% vs. el baseline original de 160, tras dos rondas de QA
+    del owner -- ver el comentario junto a la constante)."""
 
     def test_default_call_applies_the_current_global_factor(self) -> None:
         with_default = prep_dev_sprite.compute_logical_canvas_size(160, 160)
@@ -177,7 +178,10 @@ class DisplaySizeScaleFactorTest(unittest.TestCase):
     def test_explicit_scale_factor_of_one_matches_pre_block_04_3_behavior(self) -> None:
         self.assertEqual(prep_dev_sprite.compute_logical_canvas_size(513, 525, scale_factor=1.0), (156, 160))
 
-    def test_current_global_factor_is_approximately_five_percent_larger(self) -> None:
+    def test_current_global_factor_matches_its_own_stated_magnitude(self) -> None:
+        # Verifica que el factor VIGENTE (cualquiera que sea -- este
+        # test no lo hardcodea) se aplique correctamente contra el
+        # baseline sin factor, no que sea un valor específico.
         unscaled = prep_dev_sprite.compute_logical_canvas_size(513, 525, scale_factor=1.0)
         scaled = prep_dev_sprite.compute_logical_canvas_size(513, 525)
         self.assertGreater(scaled[0], unscaled[0])
@@ -187,10 +191,26 @@ class DisplaySizeScaleFactorTest(unittest.TestCase):
         self.assertAlmostEqual(ratio_w, prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, delta=0.02)
         self.assertAlmostEqual(ratio_h, prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, delta=0.02)
 
+    def test_scale_factor_is_absolute_against_original_baseline_not_compounded(self) -> None:
+        # Requisito explícito del owner: pasar de +5% a +10% debe dar
+        # un resultado ~1.10x el baseline ORIGINAL (160), NO ~1.05x
+        # aplicado sobre el ~1.05x anterior (lo que daría ~1.1025x,
+        # sutilmente distinto -- una diferencia real aunque pequeña,
+        # que un pipeline "acumulativo" (guardar solo el candidato
+        # vigente y multiplicar de nuevo) introduciría con el tiempo).
+        # Como este valor SIEMPRE se define/aplica contra
+        # REFERENCE_LOGICAL_SIZE (160) -- nunca contra el resultado de
+        # una corrida anterior -- el factor efectivo es exactamente
+        # 1.10, no 1.1025. Se verifica el valor de la propia constante,
+        # no solo el resultado redondeado (que puede coincidir por
+        # casualidad de redondeo en una resolución dada).
+        self.assertAlmostEqual(prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, 1.10, places=6)
+        self.assertNotAlmostEqual(prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR, 1.05 * 1.05, places=6)
+
     def test_scale_factor_preserves_aspect_ratio(self) -> None:
         native_width, native_height = 624, 612
         unscaled = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.0)
-        scaled = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.05)
+        scaled = prep_dev_sprite.compute_logical_canvas_size(native_width, native_height, scale_factor=1.10)
         self.assertAlmostEqual(unscaled[0] / unscaled[1], scaled[0] / scaled[1], delta=0.01)
         with self.assertRaises(ValueError):
             prep_dev_sprite.compute_logical_canvas_size(100, -1)
@@ -245,6 +265,80 @@ class ResizeRgbaNearestTest(unittest.TestCase):
         pixels = _solid_frame(4, 4, (1, 2, 3), (0, 0, 4, 4))
         with self.assertRaises(ValueError):
             prep_dev_sprite.resize_rgba_nearest(4, 4, pixels, 0, 4)
+
+
+class ResizeRgbaAreaAverageTest(unittest.TestCase):
+    """`prep_dev_sprite.resize_rgba_area_average()` -- Block 04.3,
+    corrección post-QA: box filter de calidad para downscales reales,
+    reemplazando nearest-neighbor específicamente donde QA manual
+    encontró pérdida real de detalle (docs/BUNNY_CONTENT.md)."""
+
+    def test_output_has_requested_dimensions(self) -> None:
+        pixels = _solid_frame(8, 8, (10, 20, 30), (2, 2, 6, 6))
+        resized = prep_dev_sprite.resize_rgba_area_average(8, 8, pixels, 4, 4)
+        self.assertEqual(len(resized), 4 * 4 * 4)
+
+    def test_identity_resize_preserves_pixels_exactly(self) -> None:
+        pixels = _solid_frame(5, 5, (42, 84, 126), (1, 1, 4, 4))
+        resized = prep_dev_sprite.resize_rgba_area_average(5, 5, pixels, 5, 5)
+        self.assertEqual(resized, pixels)
+
+    def test_never_drops_a_single_opaque_pixel_entirely(self) -> None:
+        # El caso real que motivó esta función: un detalle fino de 1
+        # pixel de ancho no debe desaparecer por completo al reducir,
+        # a diferencia de nearest-neighbor (que sí puede saltárselo por
+        # mala suerte de en qué columna cae la muestra). Una franja
+        # opaca de 1px de ancho en un frame ancho, reducido a la mitad,
+        # debe seguir contribuyendo alpha > 0 en algún pixel de salida.
+        w, h = 20, 4
+        pixels = bytearray(w * h * 4)
+        for y in range(h):
+            off = (y * w + 3) * 4  # columna 3, 1px de ancho
+            pixels[off : off + 4] = bytes([200, 100, 50, 255])
+        resized = prep_dev_sprite.resize_rgba_area_average(w, h, bytes(pixels), 10, 4)
+        alphas = [resized[i] for i in range(3, len(resized), 4)]
+        self.assertTrue(any(a > 0 for a in alphas), "el detalle de 1px no debería desaparecer por completo")
+
+    def test_transparent_pixel_noise_does_not_bleed_into_visible_color(self) -> None:
+        # Pixeles completamente transparentes con RGB "ruidoso"
+        # (arbitrario) no deberían contaminar el color de los pixeles
+        # visibles vecinos al promediar -- el promedio de RGB está
+        # ponderado por alpha, así que un peso de alpha=0 no debería
+        # aportar nada.
+        w, h = 4, 4
+        pixels = bytearray(w * h * 4)
+        for y in range(h):
+            for x in range(w):
+                off = (y * w + x) * 4
+                if x < 2:
+                    pixels[off : off + 4] = bytes([255, 0, 0, 255])  # rojo opaco
+                else:
+                    pixels[off : off + 4] = bytes([0, 255, 0, 0])  # "ruido" verde, transparente
+        resized = prep_dev_sprite.resize_rgba_area_average(w, h, bytes(pixels), 2, 2)
+        # Cada pixel de salida promedia una región 2x2 -- la mitad
+        # izquierda (roja, opaca) y la mitad derecha (verde, transparente)
+        # caen en columnas de destino DISTINTAS (columna 0 y columna 1),
+        # así que cada pixel de salida debería seguir siendo puramente
+        # rojo u puramente transparente, nunca una mezcla rojo/verde.
+        for i in range(0, len(resized), 4):
+            r, g, b, a = resized[i], resized[i + 1], resized[i + 2], resized[i + 3]
+            if a > 0:
+                self.assertEqual(g, 0, "el verde 'ruidoso' de un pixel transparente no debería mezclarse")
+
+    def test_result_is_deterministic(self) -> None:
+        pixels = _solid_frame(10, 10, (5, 6, 7), (2, 2, 8, 8))
+        first = prep_dev_sprite.resize_rgba_area_average(10, 10, pixels, 4, 4)
+        second = prep_dev_sprite.resize_rgba_area_average(10, 10, pixels, 4, 4)
+        self.assertEqual(first, second)
+
+    def test_rejects_wrong_buffer_size(self) -> None:
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.resize_rgba_area_average(4, 4, b"\x00" * 10, 2, 2)
+
+    def test_rejects_non_positive_target_dimensions(self) -> None:
+        pixels = _solid_frame(4, 4, (1, 2, 3), (0, 0, 4, 4))
+        with self.assertRaises(ValueError):
+            prep_dev_sprite.resize_rgba_area_average(4, 4, pixels, 0, 4)
 
 
 class ContentBboxTest(unittest.TestCase):

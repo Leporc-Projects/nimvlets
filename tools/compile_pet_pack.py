@@ -38,7 +38,8 @@ Manifest schema (JSON):
       ],
       "passive_action_direction_overrides": [                  # optional, see below
         {"passive_action_index": 0, "direction": "left", ...AnimationManifest...}, ...
-      ]
+      ],
+      "passive_action_weights": [0.7, 0.3]                     # optional, see below
     }
 
 The three `*_direction_overrides` keys (Block 04.2, see
@@ -67,6 +68,21 @@ content::PetPackLoader.cpp's ByteReader::HasMoreData() for how the
 loader tells an old-format pack (no trailing section at all) apart from
 a new one, without needing a schema-version bump.
 
+`passive_action_weights` (Block 04.3, corrección post-QA -- see
+docs/DECISION_LOG.md) is a FOURTH optional trailing section,
+independent of the three `*_direction_overrides` sections above (not
+coupled to them -- absent entirely if the manifest doesn't define this
+key, regardless of whether any direction overrides are present).
+One float weight per entry of `passive_actions`, same order, same
+length (enforced at compile time and again at load time). Read at
+runtime by content::ChooseWeightedPassiveActionIndex() to pick which
+passive action to trigger, weighted-random instead of the simpler
+round-robin this ran on before -- e.g. `[0.7, 0.3]` makes the first
+`passive_actions` entry fire ~70% of the time, the second ~30%. Absent
+(the default) means "every passive_actions entry has equal weight" --
+byte-for-byte identical to every pack compiled before this feature
+existed.
+
 AnimationManifest:
     {
       "id": "click_reaction",
@@ -90,19 +106,33 @@ Usage:
 docs/NIDIR_CONTENT.md) is an OPTIONAL, purely compile-time downscale:
 if set, every decoded frame (across idle/click/passive and every
 direction override) whose longer side exceeds this value is resized
-via prep_dev_sprite.resize_rgba_nearest() (deterministic
-nearest-neighbor, aspect-ratio preserved) before being written into the
-compiled pack -- the canonical source PNGs on disk are NEVER touched,
-only the bytes that end up inside the ".nvpack" file. Absent (the
-default, and what Bunny's manifest still uses) means "store frames at
-their native decoded resolution," identical to every pack compiled
-before this feature existed. This is independent of `canvas_width`/
+before being written into the compiled pack -- the canonical source
+PNGs on disk are NEVER touched, only the bytes that end up inside the
+".nvpack" file. Absent (the default) means "store frames at their
+native decoded resolution," identical to every pack compiled before
+this feature existed. This is independent of `canvas_width`/
 `canvas_height` (the pet's LOGICAL on-screen size, in points) -- see
 tools/prep_dev_sprite.py's compute_logical_canvas_size() for how a
 generator script should derive that from a pet's native art
 resolution and aspect ratio, and docs/NIDIR_CONTENT.md for why the two
 are deliberately separate knobs (display size vs. stored pixel
 resolution).
+
+Real downscales (`runtime_max_frame_dimension`'s trigger, and a
+`normalize_visual_scale` content_scale below 1.0 -- see below) use
+`prep_dev_sprite.resize_rgba_area_average()` (a deterministic box
+filter, alpha-weighted to avoid color fringing at transparent
+boundaries) instead of plain nearest-neighbor -- added in Block 04.3's
+correction pass after QA manual found real visual quality loss/fine
+detail dropping out during Bunny's animation playback (nearest-
+neighbor can, by bad luck of exactly where its single sample point
+falls, skip a thin detail -- like a 1-2px outline -- entirely; a box
+filter never ignores real content, only blurs it slightly). Upscales
+(content_scale > 1.0, a rarer case) still use
+prep_dev_sprite.resize_rgba_nearest() -- a box filter doesn't apply to
+upscaling. This is purely a texture-byte quality improvement; the
+runtime hit-mask (`core::AlphaMask::FromAlphaChannel`) is untouched and
+still nearest-neighbor, matching the C++ side exactly as before.
 
 `normalize_visual_scale` (Block 04.3, see docs/NIDIR_CONTENT.md,
 "clipping y tamaño visual inconsistente entre animaciones") is an
@@ -196,7 +226,16 @@ def _compile_frame(
         if abs(content_scale - 1.0) > 1e-9:
             target_w = max(1, round(width * content_scale))
             target_h = max(1, round(height * content_scale))
-            pixels = prep_dev_sprite.resize_rgba_nearest(width, height, pixels, target_w, target_h)
+            # Downscale real (content_scale < 1.0) usa el box filter de
+            # calidad -- ver el docstring de
+            # prep_dev_sprite.resize_rgba_area_average(): nearest-
+            # neighbor en un downscale puede saltarse por completo
+            # detalles finos (encontrado en QA manual de Bunny, Block
+            # 04.3, corrección post-QA -- ver docs/BUNNY_CONTENT.md).
+            # Un upscale (content_scale > 1.0, caso raro) sigue usando
+            # nearest-neighbor -- un box filter no tiene sentido ahí.
+            resize_fn = prep_dev_sprite.resize_rgba_area_average if content_scale < 1.0 else prep_dev_sprite.resize_rgba_nearest
+            pixels = resize_fn(width, height, pixels, target_w, target_h)
             width, height = target_w, target_h
         pixels = prep_dev_sprite.compose_on_canvas(width, height, pixels, working_width, working_height, offset_x, offset_y)
         width, height = working_width, working_height
@@ -206,12 +245,15 @@ def _compile_frame(
     # van directo al pack compilado. anchor_x/anchor_y por defecto se
     # calculan DESPUÉS del downscale (mitad del tamaño ya reducido),
     # para que un manifest que no especifica anchor explícito siga
-    # centrando correctamente sin importar si hubo downscale o no.
+    # centrando correctamente sin importar si hubo downscale o no. Este
+    # paso SIEMPRE es un downscale real cuando se dispara (el `if` de
+    # abajo solo entra cuando el frame excede el límite) -- usa el box
+    # filter de calidad, no nearest-neighbor (mismo motivo que arriba).
     if runtime_max_frame_dimension is not None and max(width, height) > runtime_max_frame_dimension:
         scale = runtime_max_frame_dimension / max(width, height)
         target_w = max(1, round(width * scale))
         target_h = max(1, round(height * scale))
-        pixels = prep_dev_sprite.resize_rgba_nearest(width, height, pixels, target_w, target_h)
+        pixels = prep_dev_sprite.resize_rgba_area_average(width, height, pixels, target_w, target_h)
         width, height = target_w, target_h
 
     anchor_x = float(frame_manifest.get("anchor_x", width / 2.0))
@@ -438,6 +480,24 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
             out += struct.pack("<I", passive_action_index)
             out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
             out += _compile_animation(om, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
+
+    # Cuarta sección final, opcional e INDEPENDIENTE de las tres de
+    # arriba (Block 04.3, corrección post-QA -- política 70/30 de
+    # selección de acción pasiva). Ausente por completo si el manifest
+    # no define "passive_action_weights" -- ningún byte se escribe,
+    # byte-idéntico a un pack de antes de este feature (el reader la
+    # gatea con HasMoreData(), como las otras tres). Si está presente,
+    # su longitud DEBE calzar con la cantidad de passive_actions.
+    if "passive_action_weights" in manifest:
+        weights = manifest["passive_action_weights"]
+        if len(weights) != len(passive_manifests):
+            raise PackCompileError(
+                f"manifest: passive_action_weights has {len(weights)} entries, "
+                f"but passive_actions has {len(passive_manifests)}"
+            )
+        out += struct.pack("<I", len(weights))
+        for w in weights:
+            out += struct.pack("<d", float(w))
 
     with open(output_path, "wb") as f:
         f.write(out)

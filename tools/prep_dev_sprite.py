@@ -175,18 +175,28 @@ def mirror_rgba_horizontal(width: int, height: int, pixels: bytes) -> bytes:
 # desktop companion" en vez de quedar implícito en un solo script.
 REFERENCE_LOGICAL_SIZE = 160
 
-# Factor de escala visual GLOBAL (Block 04.3, candidato de QA del
-# owner: "probar todos los Nimvlets ~5% más grandes mientras se evalúa
-# si el tamaño actual de Nidir era preferible"). Se aplica DENTRO de
+# Factor de escala visual GLOBAL (Block 04.3). Se aplica DENTRO de
 # compute_logical_canvas_size() -- automáticamente, para CUALQUIER pet
-# que use esa función (Nidir y, desde este mismo bloque, Bunny real),
-# sin ninguna constante específica por pet y sin tocar ningún PNG
-# fuente. **Para revertir al tamaño anterior: cambiar este único valor
-# a 1.0 y volver a correr el generate_<pet>_pack.py de cada pet** --
-# ningún otro cambio de código hace falta. 1.05 = ~5% más grande en
-# cada eje que el tamaño de referencia "clase 160" ya establecido
-# (DEC-045).
-DISPLAY_SIZE_SCALE_FACTOR = 1.05
+# que use esa función (Nidir y Bunny real), sin ninguna constante
+# específica por pet y sin tocar ningún PNG fuente. **Para revertir al
+# tamaño original: cambiar este único valor a 1.0 y volver a correr el
+# generate_<pet>_pack.py de cada pet** -- ningún otro cambio de código
+# hace falta.
+#
+# Historial (valor ABSOLUTO respecto al baseline original de 160, NUNCA
+# multiplicativo/acumulado sobre el candidato anterior -- ver
+# docs/NIDIR_CONTENT.md, "tamaño visual global"):
+#   - Primera pasada de corrección: 1.05 (~+5% vs. baseline original,
+#     el owner confirmó que le gustó).
+#   - Segunda pasada de corrección (ESTE valor): 1.10 (~+10% vs.
+#     baseline original -- el owner pidió otro +5% adicional partiendo
+#     de 1.05, y el resultado debía quedar en +10% total respecto al
+#     baseline, no en un +5% adicional compuesto sobre el +5% anterior,
+#     es decir NO ~1.1025). Como este valor siempre se aplica contra el
+#     REFERENCE_LOGICAL_SIZE original (160), no contra el candidato
+#     previamente vigente, simplemente asignar 1.10 aquí ya produce el
+#     resultado correcto sin ningún cálculo adicional.
+DISPLAY_SIZE_SCALE_FACTOR = 1.10
 
 
 def compute_logical_canvas_size(
@@ -262,6 +272,83 @@ def resize_rgba_nearest(width: int, height: int, pixels: bytes, target_width: in
             src_off = src_row + sx * 4
             dst_off = (ty * target_width + tx) * 4
             out[dst_off : dst_off + 4] = pixels[src_off : src_off + 4]
+    return bytes(out)
+
+
+def resize_rgba_area_average(width: int, height: int, pixels: bytes, target_width: int, target_height: int) -> bytes:
+    """Downscale de calidad, determinista (box filter -- promedia todos
+    los pixeles fuente que caen dentro del área de cada pixel destino,
+    misma fórmula de mapeo proporcional destino->fuente que
+    `resize_rgba_nearest`, solo que sobre un RANGO en vez de un único
+    punto muestra). Agregado en Block 04.3 (corrección post-QA) para
+    reemplazar `resize_rgba_nearest` específicamente en los pasos de
+    compilación que son downscales reales (`runtime_max_frame_dimension`,
+    y el reescalado de `content_scale` cuando reduce) -- nearest-neighbor
+    en un downscale real puede, por mala suerte de en qué punto cae la
+    muestra, saltarse por completo detalles finos (p. ej. un contorno
+    delgado de 1-2px) que SÍ existen en el frame fuente, produciendo el
+    efecto de "pixeles que desaparecen" que QA manual reportó para
+    Bunny -- un box filter que promedia TODO el área, en cambio, nunca
+    ignora contenido real por completo, solo lo difumina levemente.
+
+    RGB se promedia PONDERADO por alpha (no un promedio simple) --
+    necesario porque los pixeles completamente transparentes pueden
+    tener valores RGB arbitrarios/ruidosos sin ningún efecto visual
+    (ver docs/NIDIR_CONTENT.md, "first/last frame contract"); promediar
+    RGB sin ponderar dejaría que ese ruido contamine el color de los
+    pixeles visibles vecinos al reducir la imagen (un artefacto de
+    "fringing" de color en los bordes). Alpha se promedia sin ponderar
+    (es la propia cantidad que decide el peso de todo lo demás).
+
+    Determinista: mismo resultado siempre para la misma entrada. NO
+    reemplaza a `resize_rgba_nearest` en general -- esa sigue siendo la
+    función correcta para upscales (donde un box filter degenera) y
+    para cualquier caso que deba coincidir exactamente con el muestreo
+    nearest-neighbor de `core::AlphaMask::FromAlphaChannel` en runtime
+    (esta función es solo para compilar bytes de PIXELES de textura,
+    nunca para el hit-mask, que sigue sin cambios)."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(
+            f"resize_rgba_area_average: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8"
+        )
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError(f"resize_rgba_area_average: target dimensions must be positive, got {target_width}x{target_height}")
+
+    src_stride = width * 4
+    out = bytearray(target_width * target_height * 4)
+    for ty in range(target_height):
+        y0 = (ty * height) // target_height
+        y1 = max(y0 + 1, ((ty + 1) * height) // target_height)
+        y1 = min(y1, height)
+        for tx in range(target_width):
+            x0 = (tx * width) // target_width
+            x1 = max(x0 + 1, ((tx + 1) * width) // target_width)
+            x1 = min(x1, width)
+
+            r_sum = g_sum = b_sum = 0
+            a_sum = 0
+            alpha_weight_sum = 0
+            sample_count = 0
+            for sy in range(y0, y1):
+                row_off = sy * src_stride
+                for sx in range(x0, x1):
+                    off = row_off + sx * 4
+                    a = pixels[off + 3]
+                    r_sum += pixels[off] * a
+                    g_sum += pixels[off + 1] * a
+                    b_sum += pixels[off + 2] * a
+                    a_sum += a
+                    alpha_weight_sum += a
+                    sample_count += 1
+
+            dst_off = (ty * target_width + tx) * 4
+            if alpha_weight_sum > 0:
+                out[dst_off] = round(r_sum / alpha_weight_sum)
+                out[dst_off + 1] = round(g_sum / alpha_weight_sum)
+                out[dst_off + 2] = round(b_sum / alpha_weight_sum)
+            # si no, el área es completamente transparente -- RGB queda
+            # en 0 (todo-ceros por defecto), sin efecto visual.
+            out[dst_off + 3] = round(a_sum / sample_count) if sample_count > 0 else 0
     return bytes(out)
 
 
