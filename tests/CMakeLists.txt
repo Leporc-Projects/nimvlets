@@ -13,8 +13,8 @@ add_executable(nimvlets_tests
   StatefulBehaviorTest.cpp
   DragClassifierTest.h
   DragClassifierTest.cpp
-  HoverPassiveGateTest.h
-  HoverPassiveGateTest.cpp
+  HoverDwellTrackerTest.h
+  HoverDwellTrackerTest.cpp
   FrameSchedulerTest.h
   FrameSchedulerTest.cpp
   SilhouetteTest.h

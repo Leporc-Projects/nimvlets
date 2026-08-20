@@ -8,7 +8,7 @@
 #include "core/AlphaMask.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
-#include "core/HoverPassiveGate.h"
+#include "core/HoverDwellTracker.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
@@ -43,6 +43,14 @@ public:
     // clean shutdown, non-zero if SDL initialization or content loading
     // failed).
     int Run();
+
+    // Segundos de dwell continuo requeridos para que hover dispare
+    // (Block 05, corrección de comportamiento — ver
+    // MaybeTriggerHoverAction()). `static constexpr` (no un anonymous-
+    // namespace constant en el .cpp) porque tanto el inicializador de
+    // hoverDwellTracker_ como el cálculo de hoverDwellDeadlineMs_ en
+    // SpikeApp.cpp lo necesitan.
+    static constexpr double kHoverDwellSeconds = 5.0;
 
 private:
     bool Init();
@@ -161,27 +169,32 @@ private:
     // interactiva. Ver NIMVLETS_DEV_CLICK_TEST_COUNT.
     void RunDevClickSmokeTestIfRequested();
 
-    // Política de hover: reposar el cursor sobre el Nimvlet, sin hacer
-    // click, dispara la MISMA TriggerHoverAction() que también puede
-    // disparar el timer ambient (vía el pool efectivo de hover del
-    // estado activo — ver content::EffectiveHoverActions()). Nunca
-    // toca clickCount_/appState_.clickBalance/persistencia.
+    // Política de hover (Block 05, corrección de comportamiento real
+    // #2 — reemplaza el diseño de flanco+cooldown de la corrección
+    // anterior). El owner pidió explícitamente: "no quiero que se
+    // dispare una animación apenas el mouse entra" — hover ahora exige
+    // DWELL: el cursor debe permanecer CONTINUAMENTE sobre la región
+    // interactiva durante kHoverDwellSeconds (5s) antes de disparar.
+    // Si sale antes, el contador se reinicia por completo (ver
+    // core::HoverDwellTracker). Sigue disparando la MISMA
+    // TriggerHoverAction() que el timer ambient puede disparar (vía el
+    // pool efectivo de hover del estado activo — ver
+    // content::EffectiveHoverActions()); nunca toca
+    // clickCount_/appState_.clickBalance/persistencia; sigue
+    // completamente desacoplado de ambientDeadlineMs_ (ningún reloj
+    // compartido).
     //
-    // Block 05, corrección de comportamiento real: el owner pidió
-    // explícitamente que hover NO quede bloqueado solo porque el timer
-    // ambient todavía no venció — así que, a diferencia de Block 04.3,
-    // este cooldown es su PROPIO deadline independiente
-    // (hoverCooldownUntilMs_), nunca el mismo que gobierna el disparo
-    // por timer (ambientDeadlineMs_). "leaving and re-entering should
-    // re-arm hover after a small independent cooldown": el flanco de
-    // subida de hoverPassiveGate_ sigue siendo necesario (nunca spam
-    // en un hover sostenido), pero además debe haber pasado al menos
-    // kHoverCooldownSeconds desde el ÚLTIMO disparo por hover — nunca
-    // desde el último disparo ambient.
-    //
-    // Prioridad click/drag > hover/pasiva > estática: un gesto de
-    // click/drag en curso nunca alimenta hoverPassiveGate_.
+    // Prioridad click/drag > hover/pasiva > estática: un click, un
+    // drag, o un cambio de BehaviorState reinician el dwell (ver
+    // ResetHoverDwell()) incluso si el cursor sigue físicamente
+    // encima — el owner lo pidió explícitamente ("si hay click, drag o
+    // cambio de estado, el dwell-hover debe resetearse").
     void MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs);
+
+    // Reinicia hoverDwellTracker_ Y limpia hoverDwellDeadlineMs_ — el
+    // único punto que un click, el inicio de un drag, o una transición
+    // de BehaviorState real usan para invalidar un dwell en curso.
+    void ResetHoverDwell();
 
     // Devuelve un double uniforme en [0, 1) de passiveActionRng_ — la
     // única fuente de aleatoriedad real de todo este archivo.
@@ -238,17 +251,32 @@ private:
     // RearmAmbientDeadline().
     std::optional<double> ambientDeadlineMs_;
 
-    // Cooldown INDEPENDIENTE del disparo por hover (Block 05 — ver el
-    // comentario de MaybeTriggerHoverAction()). Nunca compartido con
-    // ambientDeadlineMs_.
-    double hoverCooldownUntilMs_ = 0.0;
+    // Tracker de dwell continuo (Block 05 — ver el comentario de
+    // MaybeTriggerHoverAction()). Reemplaza al viejo par
+    // hoverPassiveGate_/hoverCooldownUntilMs_ (flanco + cooldown
+    // corto) por un requisito real de permanencia continua.
+    core::HoverDwellTracker hoverDwellTracker_{kHoverDwellSeconds};
+
+    // Deadline de wall-clock en el que el dwell EN CURSO cruzaría el
+    // umbral de kHoverDwellSeconds -- nullopt si no hay ningún dwell
+    // activo ahora mismo. Necesario porque, a diferencia del timer
+    // ambient, hover en el camino nativo (macOS/Linux-X11) solo se
+    // alimenta de eventos SDL_EVENT_MOUSE_MOTION reales -- si el
+    // cursor se queda PERFECTAMENTE quieto sobre el pet (el caso
+    // exacto que "dwell" debe detectar), ningún evento de motion
+    // nuevo llega para volver a chequear el umbral. El loop principal
+    // arma un wakeup en este deadline (igual que ambientDeadlineMs_/
+    // confirmRedrawDeadlineMs_) y, al llegar, vuelve a MUESTREAR la
+    // posición real del cursor (SampleCursor(), la misma función que
+    // ya usa el fallback poll-driven de Windows) en vez de asumir que
+    // sigue encima -- así el mecanismo es correcto sin importar si el
+    // mouse se movió o no durante esos 5 segundos.
+    std::optional<double> hoverDwellDeadlineMs_;
 
     // Fuente real de aleatoriedad para elegir qué WeightedAction
     // disparar (ambient/hover/click, política ponderada). Sembrado una
     // sola vez en Init() desde std::random_device.
     std::mt19937 passiveActionRng_;
-
-    core::HoverPassiveGate hoverPassiveGate_;
 
     persistence::AppState appState_;
     std::optional<persistence::AppStateStore> appStateStore_;

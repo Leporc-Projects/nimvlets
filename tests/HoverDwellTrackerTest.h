@@ -4,6 +4,6 @@
 
 namespace nimvlets::tests {
 
-void RegisterHoverPassiveGateTests(testing::TestRunner& runner);
+void RegisterHoverDwellTrackerTests(testing::TestRunner& runner);
 
 }  // namespace nimvlets::tests

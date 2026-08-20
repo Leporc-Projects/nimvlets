@@ -2,8 +2,7 @@ add_library(nimvlets_core STATIC
   Geometry.h
   DragClassifier.h
   DragClassifier.cpp
-  HoverPassiveGate.h
-  HoverPassiveGate.cpp
+  HoverDwellTracker.h
   FrameScheduler.h
   FrameScheduler.cpp
   Silhouette.h

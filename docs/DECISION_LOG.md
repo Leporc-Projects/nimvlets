@@ -1816,3 +1816,31 @@ este bloque, nunca ejercitada por ningún test hasta ahora porque
 ninguno de los tests Python anteriores compilaba un manifest real de
 extremo a extremo con `normalize_visual_scale: true` sobre el nuevo
 esquema de estados/acciones.
+
+### DEC-072 — Hover: de "cooldown independiente de 2s" a "dwell continuo de 5s"
+**Status:** DECIDIDO · Block 05, pasada de corrección post-QA #2 —
+supersede el diseño de DEC-065 (que sigue histórico) — ver
+`docs/ANIMATION_RUNTIME.md` §8.1 para el mecanismo completo.
+
+El owner precisó el requisito de hover tras probar el resultado de
+DEC-065: no alcanza con "un cooldown corto e independiente" — el
+disparo segundo tras entrar sigue siendo demasiado inmediato/
+sorpresivo. Requisito nuevo, más preciso: el cursor debe permanecer
+CONTINUAMENTE sobre el Nimvlet durante 5 segundos reales antes de que
+hover dispare algo; salir antes reinicia el contador por completo; un
+click, un drag, o un cambio real de `BehaviorState` TAMBIÉN lo
+reinician, incluso si el cursor nunca salió físicamente de la región.
+
+`core::HoverDwellTracker` (nueva, reemplaza a `core::HoverPassiveGate`)
+implementa esto de forma pura -- ver su propio comentario de clase y
+`tests/HoverDwellTrackerTest.cpp` (9 casos). El desafío real de
+integración: en el camino nativo (macOS/Linux-X11), hover solo se
+alimentaba de eventos de motion reales -- un cursor perfectamente
+quieto sobre el pet nunca generaría un evento nuevo para volver a
+chequear el umbral de 5s. Se agregó `SpikeApp::hoverDwellDeadlineMs_`
+(mismo patrón que `ambientDeadlineMs_`/`confirmRedrawDeadlineMs_`,
+consultado en el cálculo de `waitMs` del loop principal) que arma un
+wakeup exacto para ese momento y, al llegar, vuelve a MUESTREAR la
+posición real del cursor (reusando `SampleCursor()`, la misma función
+que ya usa el fallback poll-driven de Windows) en vez de asumir que
+sigue encima.

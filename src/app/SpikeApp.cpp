@@ -71,15 +71,6 @@ constexpr const char* kDevDumpFramesDirEnvVar = "NIMVLETS_DEV_DUMP_FRAMES_DIR";
 // de asentarse entre presents.
 constexpr double kConfirmRedrawDelayMs = 120.0;
 
-// Cooldown INDEPENDIENTE del disparo por hover (Block 05 -- ver el
-// comentario de MaybeTriggerHoverAction()). Deliberadamente chico y
-// desacoplado del intervalo ambient (15s, dato por-pet) -- el owner
-// pidió explícitamente que hover no quede bloqueado por el timer
-// ambient. Valor genérico, no por-pet: evita que un hover
-// entrando/saliendo repetidamente en el borde exacto del hit-mask
-// dispare una acción nueva en cada flanco.
-constexpr double kHoverCooldownSeconds = 2.0;
-
 constexpr const char* kPrefPathOrg = "Leporc Projects";
 constexpr const char* kPrefPathApp = "Nimvlets";
 
@@ -634,23 +625,40 @@ double SpikeApp::NextUniformRandom01() {
 
 void SpikeApp::MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs) {
     if (dragClassifier_.IsActive()) {
+        // Un gesto en curso resetea el dwell -- "arrastrando" no
+        // cuenta como reposo tranquilo, y el owner pidió
+        // explícitamente que un drag reinicie el contador.
+        ResetHoverDwell();
         return;
     }
-    if (!hoverPassiveGate_.Update(cursorOverOpaque)) {
-        return;  // no es un flanco de subida -- nada que hacer
+
+    const bool crossedThreshold = hoverDwellTracker_.Update(cursorOverOpaque, nowMs);
+
+    // Mantiene armado (o limpia) hoverDwellDeadlineMs_ para que el
+    // loop principal pueda despertar exactamente cuando el dwell EN
+    // CURSO cruzaría el umbral, incluso sin más eventos de motion --
+    // ver el comentario del campo en SpikeApp.h.
+    if (hoverDwellTracker_.IsDwelling()) {
+        if (!hoverDwellDeadlineMs_.has_value()) {
+            hoverDwellDeadlineMs_ = nowMs + kHoverDwellSeconds * 1000.0;
+        }
+    } else {
+        hoverDwellDeadlineMs_.reset();
     }
-    if (nowMs < hoverCooldownUntilMs_) {
-        // Cooldown INDEPENDIENTE del timer ambient (Block 05) -- ver el
-        // comentario de este método en SpikeApp.h. Nunca consulta
-        // ambientDeadlineMs_.
+
+    if (!crossedThreshold) {
         return;
     }
 
     if (animController_->TriggerHoverAction(NextUniformRandom01(), nowMs)) {
-        hoverCooldownUntilMs_ = nowMs + kHoverCooldownSeconds * 1000.0;
         MarkNeedsRedraw(nowMs);
-        SDL_Log("nimvlets: hover-triggered action (state='%s')", animController_->CurrentStateId().c_str());
+        SDL_Log("nimvlets: hover-triggered action after %.0fs dwell (state='%s')", kHoverDwellSeconds, animController_->CurrentStateId().c_str());
     }
+}
+
+void SpikeApp::ResetHoverDwell() {
+    hoverDwellTracker_.Reset();
+    hoverDwellDeadlineMs_.reset();
 }
 
 void SpikeApp::RunDevHoverSmokeTestIfRequested() {
@@ -669,28 +677,29 @@ void SpikeApp::RunDevHoverSmokeTestIfRequested() {
 
     SDL_Log("nimvlets: DEV hover smoke test active — %s=%zu", kDevHoverTestCountEnvVar, count);
 
-    // Tiempo SIMULADO, no wall-clock real. Igual que antes: el PRIMER
-    // ciclo con el cooldown ya vencido dispara de verdad; los
-    // siguientes deben quedar en no-op -- ahora porque el controller
-    // queda en modo AmbientOrHoverAction (nada lo avanza de vuelta a
-    // kBase dentro de esta corrida sincrónica), no porque el cooldown
-    // independiente siga vigente. Ese patrón ("dispara una vez, después
-    // se queda callado") sigue siendo la observación correcta: prueba
-    // que el hover nunca hace spam de acciones seguidas.
+    // Tiempo SIMULADO, no wall-clock real. Cada ciclo: el cursor
+    // "entra" (arranca el dwell, no dispara todavía), permanece
+    // encima kHoverDwellSeconds completos (cruza el umbral -- dispara,
+    // solo en el primer ciclo real: los siguientes quedan en no-op
+    // porque el controller pasa a modo AmbientOrHoverAction y nada lo
+    // avanza de vuelta a Base dentro de esta corrida sincrónica --
+    // mismo patrón honesto que antes: "dispara una vez, después se
+    // queda callado", prueba que nunca hace spam), y luego "sale"
+    // (resetea el dwell) antes del próximo ciclo.
     double simulatedNowMs = static_cast<double>(SDL_GetTicks());
-    hoverCooldownUntilMs_ = simulatedNowMs;  // vencido de entrada
-    const double shortStepMs = kHoverCooldownSeconds * 1000.0 / 4.0;
-    const double longStepMs = kHoverCooldownSeconds * 1000.0 + 1.0;
     for (std::size_t i = 0; i < count; ++i) {
-        simulatedNowMs += (i % 4 == 0) ? longStepMs : shortStepMs;
-        MaybeTriggerHoverAction(true, simulatedNowMs);
         simulatedNowMs += 1.0;
-        MaybeTriggerHoverAction(false, simulatedNowMs);
+        MaybeTriggerHoverAction(true, simulatedNowMs);  // entra -- arranca el dwell
+        simulatedNowMs += kHoverDwellSeconds * 1000.0 + 1.0;
+        MaybeTriggerHoverAction(true, simulatedNowMs);  // cruza el umbral de 5s
+        simulatedNowMs += 1.0;
+        MaybeTriggerHoverAction(false, simulatedNowMs);  // sale -- resetea
     }
 
-    // Restaura el cooldown a un valor real de wall-clock antes de
-    // devolver el control.
-    hoverCooldownUntilMs_ = static_cast<double>(SDL_GetTicks());
+    // Deja un estado limpio de wall-clock antes de devolver el control
+    // -- el tiempo simulado de arriba no debe dejar ningún deadline de
+    // dwell pendiente que dispare inesperadamente en el loop real.
+    ResetHoverDwell();
 
     SDL_Log("nimvlets: DEV hover smoke test complete — %zu hover cycle(s) requested", count);
 }
@@ -901,6 +910,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             }
 
             dragClassifier_.Begin(localOrigin);
+            // Un click/drag que arranca reinicia cualquier dwell de
+            // hover en curso -- el owner lo pidió explícitamente,
+            // incluso si termina siendo un click corto (no un drag) y
+            // el cursor nunca sale de la región interactiva.
+            ResetHoverDwell();
 
             int winX = 0;
             int winY = 0;
@@ -1002,6 +1016,13 @@ int SpikeApp::Run() {
         if (confirmRedrawDeadlineMs_) {
             waitMs = std::min(waitMs, *confirmRedrawDeadlineMs_ - nowMs);
         }
+        if (hoverDwellDeadlineMs_) {
+            // Ver el comentario del campo en SpikeApp.h -- despierta el
+            // loop exactamente cuando un dwell en curso cruzaría el
+            // umbral de 5s, incluso sin más eventos de motion reales
+            // (el caso de un cursor perfectamente quieto).
+            waitMs = std::min(waitMs, *hoverDwellDeadlineMs_ - nowMs);
+        }
         if (usingPollDrivenClickThrough_) {
             waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
         }
@@ -1040,6 +1061,11 @@ int SpikeApp::Run() {
         if (animController_->CurrentStateId() != lastKnownStateId_) {
             lastKnownStateId_ = animController_->CurrentStateId();
             RearmAmbientDeadline(afterMs);
+            // "Si hay... cambio de estado, el dwell-hover debe
+            // resetearse" -- un cambio de postura real (p. ej. Frin
+            // seated -> lying) invalida cualquier dwell acumulado
+            // contra el estado ANTERIOR.
+            ResetHoverDwell();
         }
 
         if (ambientDeadlineMs_ && afterMs >= *ambientDeadlineMs_) {
@@ -1052,6 +1078,21 @@ int SpikeApp::Run() {
                 MarkNeedsRedraw(afterMs);
             }
             RearmAmbientDeadline(afterMs);
+        }
+
+        if (hoverDwellDeadlineMs_ && afterMs >= *hoverDwellDeadlineMs_) {
+            // El dwell en curso (si sigue vigente) cruza el umbral
+            // justo ahora -- pero no asumimos que el cursor SIGUE
+            // encima solo porque nadie mandó un evento de motion
+            // nuevo (podría haberse quedado perfectamente quieto
+            // encima, o podría haberse ido sin que llegara ningún
+            // evento adicional en este camino). Se vuelve a muestrear
+            // la posición real -- misma función que ya usa el
+            // fallback poll-driven de Windows, ver SampleCursor() -- y
+            // se alimenta por el mismo camino que cualquier otra
+            // muestra de hover.
+            const CursorSample sample = SampleCursor(window_);
+            MaybeTriggerHoverAction(IsPointInteractive(sample.localPoint), afterMs);
         }
 
         if (const std::optional<double> flushDeadline = persistenceScheduler_.NextFlushDeadlineMs();

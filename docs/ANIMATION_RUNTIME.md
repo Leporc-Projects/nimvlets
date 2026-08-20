@@ -332,7 +332,7 @@ waitMs = min(
     ambientDeadlineMs_ - now,                     // std::optional (Block 05) — absent entirely
                                                     // for a state with no ambientActions (e.g. Frin
                                                     // "lying"), present otherwise (~15s Bunny/Nidir,
-                                                    // ~45s Frin "seated")
+                                                    // ~15s Frin "seated" -- unificado, ver DEC-074)
     animController.NextFrameDeadlineMs() - now,    // absent (nullopt) while the base pose is static
     confirmRedrawDeadlineMs_ - now,                // absent unless an animation transition just armed it (§8.2)
     persistenceScheduler.NextFlushDeadlineMs() - now,  // absent unless something is actually dirty
@@ -369,7 +369,7 @@ global constant.
 
 ## 8. DEV overrides
 
-Manual QA cannot reasonably wait a real ~15-45s (per-state ambient
+Manual QA cannot reasonably wait a real ~15s (per-state ambient
 interval) or navigate a real product UI (which doesn't exist yet) to
 see a specific pet. Two independent, opt-in, env-var-gated DEV
 mechanisms:
@@ -390,45 +390,83 @@ as a valid positive number, that value replaces *this run's* ambient
 interval for EVERY state that has one — the pack's own authored
 per-state default is never mutated.
 
-## 8.1 Política de hover (Block 04.3, corregida en Block 05)
+## 8.1 Política de hover — dwell continuo de 5s (Block 04.3 → Block 05, dos correcciones)
 
-El owner pidió que reposar el cursor sobre el Nimvlet — sin hacer
-click — también pueda disparar una acción, sin "spamear" mientras el
-mouse se queda quieto encima, Y (requisito nuevo, Block 05) **sin
-quedar bloqueado solo porque el timer ambient todavía no venció**.
+Historial honesto (ninguna pasada se reescribe, cada una superó a la
+anterior con un requisito más preciso del owner):
+- Block 04.3: hover comparte deadline con el timer ambient (edge +
+  cooldown compartido).
+- Block 05, primera corrección: cooldown propio de 2s, independiente
+  del timer ambient (todavía disparaba EN EL INSTANTE en que el cursor
+  entraba).
+- Block 05, **segunda corrección (estado actual)**: el owner pidió,
+  con más precisión, que hover NO dispare apenas el cursor entra —
+  debe permanecer **continuamente** sobre la región interactiva
+  durante 5 segundos reales antes de disparar. Si sale antes de los
+  5s, el contador se reinicia por completo (no queda ningún crédito
+  parcial). Un click, un drag, o un cambio real de `BehaviorState`
+  TAMBIÉN reinician el contador, incluso si el cursor nunca salió
+  físicamente de la región.
 
-**Detección de flanco, no de estado sostenido** (sin cambios desde
-Block 04.3). `core::HoverPassiveGate` (`src/core/HoverPassiveGate.h/.cpp`,
-testeada en aislamiento en `tests/HoverPassiveGateTest.cpp`) solo
-responde "¿el cursor ACABA de entrar a la región interactiva?" — el
-flanco de subida, nunca un hover sostenido.
+**Mecanismo: `core::HoverDwellTracker`** (`src/core/HoverDwellTracker.h`,
+reemplaza a la vieja `core::HoverPassiveGate`) — pura, sin SDL, testeada
+con timestamps fabricados en `tests/HoverDwellTrackerTest.cpp`.
+`Update(isOverOpaque, nowMs)` retorna `true` exactamente una vez por
+episodio de dwell continuo, en la muestra donde `nowMs -
+dwellStartMs_ >= kHoverDwellSeconds*1000` se cumple por primera vez —
+nunca antes, nunca de nuevo mientras el cursor sigue quieto encima
+después de disparar. Cualquier muestra con `isOverOpaque == false`
+reinicia el tracker (`dwellStartMs_` vuelve a `nullopt`). `Reset()`
+hace lo mismo explícitamente, sin necesitar una muestra "afuera" — el
+mecanismo que usan los resets por click/drag/cambio-de-estado.
 
-**Cooldown INDEPENDIENTE (Block 05, corrección de comportamiento real).**
-Block 04.3 compartía deliberadamente el mismo deadline entre el timer
-ambient y el disparo por hover — pero eso significaba que, si el timer
-ambient acababa de disparar, hover quedaba BLOQUEADO hasta que el
-intervalo ambient completo (ahora 15s/45s) volviera a vencer, algo que
-el owner pidió explícitamente corregir: "hover must not be blocked
-simply because the ambient timer has not expired". `SpikeApp::
-MaybeTriggerHoverAction()` ahora usa `hoverCooldownUntilMs_`, un
-deadline propio y chico (2s, `kHoverCooldownSeconds`), completamente
-independiente de `ambientDeadlineMs_` — ninguno de los dos caminos
-consulta el reloj del otro. "Leaving and re-entering should re-arm
-hover after a small independent cooldown": el flanco de subida sigue
-siendo necesario, pero además debe haber pasado al menos ese cooldown
-chico desde el ÚLTIMO disparo por hover (nunca desde el último disparo
-ambient) para que uno nuevo cuente.
+**El problema del cursor perfectamente quieto — y por qué hace falta
+un deadline propio en el loop principal.** En el camino nativo (macOS/
+Linux-X11), hover solo se alimentaba históricamente de eventos
+`SDL_EVENT_MOUSE_MOTION` reales — pero si el cursor se queda
+PERFECTAMENTE quieto sobre el pet (exactamente el caso que "dwell"
+debe detectar), ningún evento de motion nuevo llega para volver a
+chequear si ya pasaron los 5 segundos. `SpikeApp::hoverDwellDeadlineMs_`
+(un `std::optional<double>`, el mismo patrón que
+`ambientDeadlineMs_`/`confirmRedrawDeadlineMs_`) se arma en cuanto un
+dwell arranca y se agrega al cálculo de `waitMs` del loop principal
+(`SpikeApp::Run()`) — así el loop despierta exactamente cuando ese
+dwell cruzaría el umbral, sin importar si el mouse se movió o no
+durante esos 5 segundos. Al despertar por ese deadline, el loop vuelve
+a MUESTREAR la posición real del cursor (`SampleCursor()`, la misma
+función que ya usa el fallback poll-driven de Windows) en vez de
+asumir que el cursor sigue encima — así el mecanismo es correcto sin
+importar la plataforma o si llegaron eventos de motion intermedios.
+
+**Reset por click/drag/cambio-de-estado (pedido explícito del owner).**
+`SpikeApp::ResetHoverDwell()` es el único punto que estos tres casos
+usan: (1) `SDL_EVENT_MOUSE_BUTTON_DOWN` sobre la región interactiva
+(el inicio de CUALQUIER gesto, sea click o drag, antes incluso de
+saber cuál de los dos terminará siendo), y (2) el loop principal, cada
+vez que detecta que `AnimationController::CurrentStateId()` cambió de
+verdad (una transición real de `BehaviorState`, p. ej. Frin
+seated → lying — nunca un self-loop ordinario como un click en Bunny,
+que deja el mismo estado activo y por lo tanto NO reinicia ningún
+dwell en curso).
+
+**Sigue completamente desacoplado del timer ambient** — ninguno de los
+dos caminos (`ambientDeadlineMs_`/`hoverDwellDeadlineMs_`) consulta el
+reloj del otro, requisito que se mantiene sin cambios desde la primera
+corrección de este bloque.
 
 **Prioridad click/drag > hover/pasiva > estática** (sin cambios). Un
-gesto de click/drag en curso nunca alimenta `hoverPassiveGate_`.
-`TriggerHoverAction()` es, por diseño, un no-op fuera de `kBase` —
-click siempre gana sobre cualquier disparo pasivo pendiente.
+gesto de click/drag en curso nunca alimenta `hoverDwellTracker_` (lo
+resetea en cambio, ver arriba). `TriggerHoverAction()` es, por diseño,
+un no-op fuera de `kBase` — click siempre gana sobre cualquier disparo
+pasivo pendiente.
 
 **Verificado** con `NIMVLETS_DEV_HOVER_TEST_COUNT` contra el binario
-real (mismo mecanismo que antes, ahora ejercitando el cooldown
-independiente en vez del compartido) y con `tests/StatefulBehaviorTest.cpp`
-(`InvalidHoverTriggerIsNoOpWhenStateDefinesNoHoverPool` — Frin no
-define ningún pool de hover todavía).
+real (simula ciclos completos de entrada + 5s de dwell + salida) y con
+`tests/HoverDwellTrackerTest.cpp` (9 casos: no dispara al entrar, sí
+exactamente al cruzar el umbral, nunca dos veces mientras se queda
+quieto, un reset explícito exige un umbral completo nuevo aunque el
+cursor nunca haya salido, ciclos repetidos de entrada/salida cada uno
+dispara una vez).
 
 ## 8.2 Redraw de confirmación — de solo-dirección a toda transición (Block 05)
 
