@@ -244,7 +244,7 @@ def main() -> int:
     # frames DERIVADOS (espejados, "right"); el override "left" usa los
     # frames REALES importados -- ver el docstring del módulo.
     manifest = {
-        "id": "bunny_dev",
+        "id": "bunny",
         "display_name": "Bunny",
         "variant_group": "",
         "canvas_width": canvas_width,

@@ -1,0 +1,17 @@
+Frin (macho) — rasgos físicos estables
+
+Lobo de tamaño grande, complexión robusta. Pelaje blanco/crema uniforme,
+con tonos beige tenues en el contorno de orejas y hocico. Ojos azul
+claro. Nariz y almohadillas negras. Orejas erguidas, triangulares.
+Cola larga y tupida. Postura sentada de referencia (master.png):
+mirando de frente, patas delanteras apoyadas, cola enrollada hacia un
+costado.
+
+Dirección canónica de este variante: LEFT (el export real del owner
+usa "left" — ver docs/ANIMATION_RUNTIME.md/docs/NIDIR_CONTENT.md para
+la convención de dirección canónica y su inversión en el manifest).
+
+Frin es un Nimvlet lógico único con dos variantes visuales (macho/
+hembra) — ver docs/CATALOG.md. Estos rasgos son específicos del
+variante macho; no hay diferencia de comportamiento entre variantes,
+solo de arte.

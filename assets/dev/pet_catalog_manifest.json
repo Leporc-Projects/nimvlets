@@ -2,7 +2,7 @@
   "schema_version": 1,
   "entries": [
     {
-      "pet_id": "bunny_dev",
+      "pet_id": "bunny",
       "variant_id": "",
       "display_name": "Bunny",
       "pack_path": "assets/dev/bunny_pack.nvpack",
@@ -13,6 +13,20 @@
       "variant_id": "",
       "display_name": "Nidir",
       "pack_path": "assets/dev/nidir_pack.nvpack",
+      "is_default": false
+    },
+    {
+      "pet_id": "frin",
+      "variant_id": "male",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_male_pack.nvpack",
+      "is_default": false
+    },
+    {
+      "pet_id": "frin",
+      "variant_id": "female",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_female_pack.nvpack",
       "is_default": false
     }
   ]

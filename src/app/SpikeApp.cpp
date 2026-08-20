@@ -126,6 +126,10 @@ SDL_Surface* BuildHitTestShapeSurface(const core::AlphaMask& mask) {
     return surface;
 }
 
+#ifndef NDEBUG
+// Solo usado por el log de diagnóstico transition-only del loop
+// principal (compilado fuera en Release, igual que el resto de la
+// instrumentación #ifndef NDEBUG de este archivo).
 const char* ControllerModeName(content::ControllerMode mode) {
     switch (mode) {
         case content::ControllerMode::kBase:
@@ -137,6 +141,7 @@ const char* ControllerModeName(content::ControllerMode mode) {
     }
     return "Unknown";
 }
+#endif  // NDEBUG
 
 }  // namespace
 

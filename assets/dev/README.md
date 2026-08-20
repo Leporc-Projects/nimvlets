@@ -1,67 +1,67 @@
 # assets/dev
 
-Reserved for development-only placeholder assets (never final art —
-see `docs/PET_CONTENT_SPEC.md` and `AGENTS.md` §11).
+Artefactos de runtime **compilados** (packs `.nvpack`/catálogo `.nvcat`)
+generados por `tools/` a partir de la fuente real en
+`assets/source/nimvlets/` (ver ese directorio's README). El nombre
+"dev" describe el pipeline de generación (herramientas Python, dev
+tooling — ver `docs/PET_CONTENT_SPEC.md`), no que el contenido sea
+sintético: desde Block 04.2/04.3/05 todo lo que vive acá es arte real
+compilado, nunca placeholders. Se mantiene el nombre del directorio
+por continuidad — ver `docs/DECISION_LOG.md` para la decisión
+explícita de Block 05 de NO renombrarlo (el riesgo de tocar una ruta
+hardcodeada en `src/app/SpikeApp.cpp` y en cada `generate_<pet>_pack.py`
+no se justificaba frente a ningún beneficio real).
 
-## Contents
+## Contenido actual
 
-- **`bunny_source.png`** — a real, non-analytic illustrated asset
-  ("Bunny"), supplied by the repository owner as a **temporary QA
-  fixture** for Block 01's macOS closure testing (see
-  `docs/DECISION_LOG.md` DEC-018 and `docs/PLATFORM_SPIKE.md` §6).
-  Resized to 320×320 (`sips`, alpha preserved) from the original
-  1254×1254 source. **Not** the start of the real content-loading
-  system `docs/PET_CONTENT_SPEC.md` describes, not a Nimvlet, and not
-  referenced by product docs (`docs/PRD_V1.md`) — used solely to
-  validate hit-testing against real alpha data, first directly (Block
-  01) and now as the source image Block 02's derived DEV pack below is
-  generated from.
-- **`bunny_pack/`** — the Bunny **DEV animation pack**'s source
-  material (Block 02, see `docs/ANIMATION_RUNTIME.md` §5): `frames/*.png`
-  (7 deterministically-derived PNG frames — idle, click squash/stretch/
-  settle, passive lean-left/lean-right/settle) plus `manifest.json`
-  (the `tools/compile_pet_pack.py` input describing how they combine
-  into idle/click-reaction/passive animations). Regenerated in full by
-  `tools/generate_bunny_dev_pack.py`; never hand-edited.
-- **`bunny_pack.nvpack`** — the compiled runtime pack, built from
-  `bunny_pack/manifest.json` by `tools/compile_pet_pack.py`. Binary,
-  not meant to be read directly — see `docs/ANIMATION_RUNTIME.md` §4
-  for the exact on-disk format.
-- **`pet_catalog_manifest.json`** — the Block 04 catalog manifest (see
-  `docs/CATALOG.md`): a single entry, Bunny, marked default. Hand-
-  written, not generated — there's no derivation step for a catalog
-  the way there is for pixel frames.
-- **`pet_catalog.nvcat`** — the compiled catalog `src/app` actually
-  loads at startup (`catalog::LoadCatalogFromFile`), built from
-  `pet_catalog_manifest.json` by `tools/compile_pet_catalog.py`.
-  Binary, not meant to be read directly — see `docs/CATALOG.md` §3 for
-  the exact on-disk format. Regenerate after editing the manifest:
+- **`bunny_pack.nvpack`** — pack compilado de Bunny (arte real, ver
+  `docs/BUNNY_CONTENT.md`), generado por `tools/generate_bunny_pack.py`
+  desde `assets/source/nimvlets/bunny/`.
+- **`nidir_pack.nvpack`** — pack compilado de Nidir (arte real, ver
+  `docs/NIDIR_CONTENT.md`), generado por `tools/generate_nidir_pack.py`
+  desde `assets/source/nimvlets/nidir/`.
+- **`frin_male_pack.nvpack`** / **`frin_female_pack.nvpack`** — los dos
+  packs compilados de Frin (Block 05, arte real, ver el informe de ese
+  bloque), generados por `tools/generate_frin_pack.py` desde
+  `assets/source/nimvlets/frin/{male,female}/`. Frin es UN Nimvlet
+  lógico con dos variantes — dos packs porque cada variante tiene su
+  propio contenido, pero el catálogo los agrupa bajo el mismo
+  `pet_id: "frin"` (`variant_id: "male"`/`"female"`) — ver
+  `docs/CATALOG.md`.
+- **`pet_catalog_manifest.json`** — el manifest del catálogo (ver
+  `docs/CATALOG.md`): hand-written, no generado — no hay paso de
+  derivación para un catálogo como sí lo hay para frames de pixeles.
+- **`pet_catalog.nvcat`** — el catálogo compilado que `src/app` carga
+  de verdad al arrancar (`catalog::LoadCatalogFromFile`), construido
+  desde `pet_catalog_manifest.json` por `tools/compile_pet_catalog.py`.
+  Binario, no pensado para leerse directamente. Regenerar tras editar
+  el manifest:
   `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
 
-Regenerate everything derived from `bunny_source.png` with one command:
+Todos los `.nvpack` de arriba son binarios grandes (arte real a
+resolución de hasta 320px por lado, ver `docs/NIDIR_CONTENT.md` §8) —
+no pensados para leerse directamente; regenerar corriendo el
+`generate_<pet>_pack.py` correspondiente después de tocar su fuente en
+`assets/source/nimvlets/`.
 
-```bash
-python3 tools/generate_bunny_dev_pack.py
-```
+`src/app/SpikeApp` carga `pet_catalog.nvcat` al arrancar y resuelve
+contra él qué pack cargar (ver `docs/CATALOG.md`); deriva el hit-test
+de click-through de cada frame desde su propio canal alpha real. Si el
+catálogo o el pack resuelto no cargan (p. ej. el proceso no se lanzó
+desde la raíz del repo, donde estas rutas relativas se resuelven), la
+app falla ruidosamente — loguea un error fatal específico y sale con
+código no-cero — en vez de caer a ninguna forma hardcodeada.
 
-This is deterministic — an unchanged `bunny_source.png` always produces
-byte-identical frame PNGs, manifest, and compiled pack.
+## Superseded / removido (Block 05)
 
-`src/app/SpikeApp` loads `pet_catalog.nvcat` at startup and resolves
-which pack to load against it (see `docs/CATALOG.md`) — with only one
-real entry, that's always `bunny_pack.nvpack` today. It derives every
-frame's click-through hit-test region from that frame's own real alpha
-channel (see `PetDefinition::alphaHitThreshold`, default 128). If
-either the catalog or the resolved pack can't be loaded (e.g. the
-process isn't launched from the repo root, where these relative paths
-resolve from), the app fails loudly — logs a specific fatal error and
-exits non-zero — rather than falling back to any hardcoded shape; see
-`docs/DECISION_LOG.md` DEC-023 and DEC-031.
-
-**Superseded, no longer present:** `bunny.rgba` (Block 01's single-frame
-uncompressed runtime format, loaded by the now-retired
-`graphics::DevSprite`) has been removed — nothing loads it anymore. Its
-producer function (`prep_dev_sprite.write_raw_rgba`) still exists in
-`tools/prep_dev_sprite.py` as a small, harmless historical utility, but
-that module's PNG codec functions (`read_png_rgba`/`write_png_rgba`) are
-what Block 02's pipeline actually reuses.
+El fixture sintético original de Bunny (Block 01/02 — `bunny_source.png`
++ `bunny_pack/` + `tools/generate_bunny_dev_pack.py`, un pack derivado
+por transformaciones de pixeles simples, nunca arte real) se **eliminó**
+en este bloque: Bunny tiene arte real de producción desde Block 04.3, y
+el generador sintético ya no podía producir un pack válido de todos
+modos (el formato de runtime cambió a "NVPACK2" — ver
+`docs/ANIMATION_RUNTIME.md` — y ese script nunca se actualizó a la
+nueva forma de manifest, por diseño: era explícitamente un artefacto
+histórico peligroso de re-ejecutar, según su propio docstring). Su
+valor histórico queda preservado en `git log`/DEC-018/DEC-023 sin
+necesidad de mantener el código corriendo.
