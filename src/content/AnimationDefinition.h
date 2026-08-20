@@ -184,6 +184,19 @@ struct PetDefinition {
     // which one to play by index (see TriggerPassiveAction()).
     std::vector<AnimationDefinition> passiveActions;
 
+    // Peso relativo de selección de cada entrada de `passiveActions`,
+    // por índice paralelo (Block 04.3, corrección post-QA — política
+    // 70/30 pedida por el owner: la primera acción pasiva de un pet
+    // 70% de las veces, la segunda 30%). Vacío (el caso por defecto,
+    // sin cambio de comportamiento para cualquier pet con un solo
+    // `passiveActions` o que no defina pesos) significa "todas las
+    // entradas con el mismo peso" — ver ChooseWeightedPassiveActionIndex().
+    // Si no está vacío, DEBE tener el mismo tamaño que `passiveActions`
+    // (validado en tiempo de carga — ver PetPackLoader.cpp). Genérico:
+    // no asume ningún número específico de acciones pasivas ni ninguna
+    // proporción particular más allá de lo que este vector diga.
+    std::vector<double> passiveActionWeights;
+
     // Variantes direccionales de entradas específicas de
     // `passiveActions` (Block 04.2 — ver docs/NIDIR_CONTENT.md). Lista
     // plana en vez de anidada dentro de `passiveActions` a propósito:
@@ -234,5 +247,23 @@ const AnimationDefinition& ResolveClickReaction(const PetDefinition& pet, Direct
 // AnimationController::TriggerPassiveAction() (que valida el índice
 // antes de llegar acá), esta función no revalida el rango.
 const AnimationDefinition& ResolvePassiveAction(const PetDefinition& pet, std::size_t passiveActionIndex, Direction direction);
+
+// Elige qué entrada de `pet.passiveActions` disparar, ponderada por
+// `pet.passiveActionWeights` (Block 04.3, corrección post-QA — política
+// 70/30). Pura y determinista: `uniformRandom01` es un valor en [0,1)
+// que el LLAMADOR provee (en producción, de un generador aleatorio
+// real; en tests, un valor fijo) — esta función nunca genera
+// aleatoriedad por sí misma, así que su resultado es 100% reproducible
+// dado el mismo input, igual que el resto de `content::` (ver
+// AnimationController::Advance(nowMs), que de la misma forma nunca
+// lee el reloj por su cuenta).
+//
+// Si `pet.passiveActionWeights` está vacío, todas las entradas de
+// `passiveActions` tienen peso igual (selección uniforme). Si no está
+// vacío, se usa tal cual (debe tener el mismo tamaño que
+// `passiveActions` — ver el comentario del campo). Precondición:
+// `pet.passiveActions` no está vacío (el llamador ya lo garantiza
+// antes de disparar cualquier acción pasiva).
+std::size_t ChooseWeightedPassiveActionIndex(const PetDefinition& pet, double uniformRandom01);
 
 }  // namespace nimvlets::content

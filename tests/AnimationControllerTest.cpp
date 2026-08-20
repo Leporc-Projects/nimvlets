@@ -176,6 +176,62 @@ bool LoopAnimationWrapsAndCanCatchUpMultipleFrameBoundariesInOneCall() {
     return true;
 }
 
+// --- ChooseWeightedPassiveActionIndex (Block 04.3, corrección post-QA
+// -- política 70/30) ---
+
+PetDefinition MakeTwoPassiveActionPet(double weight0, double weight1) {
+    PetDefinition pet = MakeTestPet();
+    AnimationDefinition second;
+    second.id = "passive_second";
+    second.kind = PlaybackKind::kOneShot;
+    second.returnsToIdle = true;
+    second.frames = {MakeFrame(50.0)};
+    pet.passiveActions.push_back(second);  // ahora 2 entradas: [0]=wiggle, [1]=second
+    pet.passiveActionWeights = {weight0, weight1};
+    return pet;
+}
+
+bool WeightedSelectionRespects70_30SplitAtBoundaries() {
+    PetDefinition pet = MakeTwoPassiveActionPet(0.7, 0.3);
+    // target = uniformRandom01 * totalWeight(=1.0); index 0 mientras
+    // target < 0.7, index 1 en cuanto target >= 0.7.
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.0) == 0);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.69) == 0);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.70) == 1);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.99) == 1);
+    return true;
+}
+
+bool WeightedSelectionIsDeterministicGivenSameInput() {
+    PetDefinition pet = MakeTwoPassiveActionPet(0.7, 0.3);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.42) == ChooseWeightedPassiveActionIndex(pet, 0.42));
+    return true;
+}
+
+bool WeightedSelectionFallsBackToUniformWithoutExplicitWeights() {
+    PetDefinition pet = MakeTestPet();  // 1 sola acción pasiva, sin pesos
+    NIMVLETS_CHECK(pet.passiveActionWeights.empty());
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.0) == 0);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.99) == 0);
+    return true;
+}
+
+bool WeightedSelectionFallsBackToUniformOnSizeMismatch() {
+    PetDefinition pet = MakeTwoPassiveActionPet(0.7, 0.3);
+    pet.passiveActionWeights = {1.0};  // tamaño inconsistente con 2 passiveActions -- defensivo
+    // Selección uniforme sobre 2 entradas: [0, 0.5) -> 0, [0.5, 1) -> 1.
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.0) == 0);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 0.6) == 1);
+    return true;
+}
+
+bool WeightedSelectionClampsOutOfRangeRandomInput() {
+    PetDefinition pet = MakeTwoPassiveActionPet(0.7, 0.3);
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, -1.0) == 0);   // clamp a 0.0 -> index 0
+    NIMVLETS_CHECK(ChooseWeightedPassiveActionIndex(pet, 5.0) == 1);    // clamp a <1.0 -> index 1
+    return true;
+}
+
 }  // namespace
 
 void RegisterAnimationControllerTests(testing::TestRunner& runner) {
@@ -192,6 +248,15 @@ void RegisterAnimationControllerTests(testing::TestRunner& runner) {
     runner.Add(
         "AnimationController/LoopAnimationWrapsAndCanCatchUpMultipleFrameBoundariesInOneCall",
         LoopAnimationWrapsAndCanCatchUpMultipleFrameBoundariesInOneCall);
+    runner.Add("AnimationController/WeightedSelectionRespects70_30SplitAtBoundaries", WeightedSelectionRespects70_30SplitAtBoundaries);
+    runner.Add("AnimationController/WeightedSelectionIsDeterministicGivenSameInput", WeightedSelectionIsDeterministicGivenSameInput);
+    runner.Add(
+        "AnimationController/WeightedSelectionFallsBackToUniformWithoutExplicitWeights",
+        WeightedSelectionFallsBackToUniformWithoutExplicitWeights);
+    runner.Add(
+        "AnimationController/WeightedSelectionFallsBackToUniformOnSizeMismatch",
+        WeightedSelectionFallsBackToUniformOnSizeMismatch);
+    runner.Add("AnimationController/WeightedSelectionClampsOutOfRangeRandomInput", WeightedSelectionClampsOutOfRangeRandomInput);
 }
 
 }  // namespace nimvlets::tests

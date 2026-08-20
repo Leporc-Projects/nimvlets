@@ -345,6 +345,43 @@ bool LoadPetPackFromMemory(const std::uint8_t* data, std::size_t size, PetDefini
         }
     }
 
+    // Cuarta sección final, opcional, independiente de las tres de
+    // arriba (Block 04.3, corrección post-QA — política 70/30 de
+    // selección de acción pasiva pedida por el owner). Un pack sin
+    // esta sección (cualquier pack compilado antes de este bloque,
+    // incluidos los packs de Nidir/Bunny recompilados en pasadas
+    // anteriores de Block 04.2/04.3 que todavía no la escribían)
+    // simplemente termina antes de llegar acá — `HasMoreData()` da
+    // false y `passiveActionWeights` queda vacío, exactamente el
+    // comportamiento "todas las acciones con el mismo peso" que
+    // `content::ChooseWeightedPassiveActionIndex()` ya define para ese
+    // caso. Si la sección SÍ existe, su cantidad debe calzar
+    // exactamente con `pet.passiveActions.size()` — un pack con un
+    // número de pesos distinto está corrupto/desalineado y falla
+    // ruidosamente en vez de usarse a medias.
+    pet.passiveActionWeights.clear();
+    if (reader.HasMoreData()) {
+        std::uint32_t weightCount = 0;
+        if (!reader.ReadUint32(weightCount)) {
+            outError = reader.Error();
+            return false;
+        }
+        if (weightCount != pet.passiveActions.size()) {
+            outError = "passiveActionWeights count (" + std::to_string(weightCount) +
+                       ") does not match passiveActions count (" + std::to_string(pet.passiveActions.size()) + ")";
+            return false;
+        }
+        pet.passiveActionWeights.reserve(weightCount);
+        for (std::uint32_t i = 0; i < weightCount; ++i) {
+            double weight = 0.0;
+            if (!reader.ReadFloat64(weight)) {
+                outError = reader.Error();
+                return false;
+            }
+            pet.passiveActionWeights.push_back(weight);
+        }
+    }
+
     if (pet.canvasWidth <= 0 || pet.canvasHeight <= 0) {
         outError = "invalid canvas size";
         return false;
