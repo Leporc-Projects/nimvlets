@@ -1086,3 +1086,142 @@ trabajo compartido para todas sus animaciones); y la consistencia
 izquierda/derecha (el factor es un escalar aplicado igual a ambas
 direcciones, no rompe la simetría del espejado).
 
+## 17. QA manual del owner sobre el estado de §15/§16, y siguiente corrección
+
+El owner hizo una segunda ronda de QA manual sobre el estado cerrado
+descrito en §15/§16 y confirmó, textualmente resumido: Nidir se ve
+bien -- animaciones correctas, sin partes faltantes, el click se ve
+bien; el candidato +5% de tamaño (§16) le gustó. El bug de §15 (sprite
+parcial tras un cambio de dirección) no reapareció en esta ronda de
+QA -- confirmación indirecta de que el fix de doble-present +
+`confirmRedrawDeadlineMs_` funciona en el binario real, algo que §15
+había dejado honestamente sin confirmar visualmente en su momento por
+falta de un método de captura real. El passive/idle periódico no se
+observó explícitamente en esta ronda breve de QA (no es una
+confirmación de que NO funcione, solo que no se ejercitó a propósito)
+-- ver §17.1 para la reverificación explícita que se corrió por eso.
+
+Con esa base confirmada, el owner pidió, para esta corrección:
+
+1. Otro +5% de tamaño, pero **absoluto contra el baseline original**
+   (160), no compuesto sobre el +5% ya aplicado -- ver §18.
+2. Una segunda animación de idle real para Nidir ("wing_stretch") con
+   selección ponderada 70/30 contra la existente -- ver §19.
+3. El intervalo pasivo a 10 segundos para AMBOS Nimvlets (reemplaza el
+   valor de 60s de §14) -- ver §19.
+4. Disparo por hover, además del disparo por timer -- ver
+   `docs/ANIMATION_RUNTIME.md` §8.1 (política genérica, no específica
+   de Nidir).
+
+### 17.1 Reverificación explícita del disparo pasivo por timer
+
+Como la QA manual breve del owner no ejercitó a propósito el passive/
+idle periódico, se corrió una reverificación explícita contra el
+binario real antes de dar por buena esta corrección:
+`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=2` (acorta el intervalo para
+una corrida de smoke test corta) produjo, en los logs de Debug, la
+secuencia esperada de transiciones de estado (`[diag] animation
+redraw: state=PassiveAction` seguido, tras que la secuencia completa
+termina de reproducirse, de `state=Idle`) -- confirmando que el
+mecanismo de timer sigue disparando correctamente sobre el pack real
+de Nidir tras todos los cambios de esta corrección (canvas de trabajo
+de 3 grupos, dos acciones pasivas, pesos 70/30).
+
+## 18. Tamaño visual global: +10% absoluto contra el baseline original (Block 04.3, corrección post-QA)
+
+El candidato +5% de §16 (`DISPLAY_SIZE_SCALE_FACTOR = 1.05`) fue
+confirmado por el owner en la QA de §17; esta corrección lo lleva a
+`1.10` -- **absoluto contra `REFERENCE_LOGICAL_SIZE` (160), no
+compuesto sobre el +5% ya aplicado**. Esta distinción importaba
+tenerla bien: `1.05 * 1.05 = 1.1025` habría sido un +10.25%
+compounding (un +5% adicional MULTIPLICADO sobre el +5% anterior, no
+lo que el owner pidió) si `DISPLAY_SIZE_SCALE_FACTOR` se hubiera
+aplicado sobre un tamaño ya candidato en vez de sobre el baseline
+original. Por construcción, esto YA era correcto antes de este
+cambio -- `compute_logical_canvas_size()` siempre multiplica
+`DISPLAY_SIZE_SCALE_FACTOR` contra `REFERENCE_LOGICAL_SIZE` (160)
+directamente, nunca contra un tamaño intermedio ya escalado -- así que
+simplemente asignar `1.10` a la constante produce el +10% absoluto
+correcto, sin ningún cambio de fórmula. Esta distinción está cubierta
+por un test dedicado
+(`tools/test_asset_pipeline.py::DisplaySizeScaleFactorTest::test_scale_factor_is_absolute_against_original_baseline_not_compounded`),
+que compara la constante directamente contra `1.10` Y contra `1.05 *
+1.05`, en vez de solo comparar dimensiones de canvas redondeadas (que,
+para algunas resoluciones, redondean igual para ambos factores y no
+discriminarían el bug).
+
+**Dimensiones lógicas resultantes, actualizando la tabla de §16:**
+
+| Pet | Canvas de trabajo | Canvas lógico (factor 1.0) | Canvas lógico (factor 1.05, §16) | Canvas lógico AHORA (factor 1.10) |
+|---|---|---|---|---|
+| Nidir | 624×612 (sin cambio al agregar `wing_stretch` -- ver §19) | 160×157 | 168×165 | **176×173** |
+| Bunny | 428×563 (sin cambio al agregar `groom` -- ver `docs/BUNNY_CONTENT.md` §9) | 122×160 | 128×168 | **134×176** |
+
+Mismos invariantes preservados que documentó §16 (PNG fuente intactos,
+normalización visual sin cambios de encuadre relativo, hit-mask
+alineado, sin cambios de mecanismo de click-through/high-DPI,
+simetría izquierda/derecha preservada) -- este cambio es puramente un
+ajuste del valor de la constante, no de ninguna fórmula ni política.
+
+## 19. Segunda animación de idle real: "wing_stretch", 70/30, intervalo de 10s (Block 04.3, corrección post-QA)
+
+El owner exportó una segunda animación de idle real de Nidir
+("estiramiento de alas") vía Ludo.ai, entregada en
+`local_imports/nidir/nidir-idle-wing-stretch-right/` (25 frames,
+624×519 nativo) y su spritesheet correspondiente
+(`local_imports/nidir/nidir-idle-wing-stretch-right-spritesheet/`,
+3120×2595 = 5×624 × 5×519, grilla 5×5 confirmada, no asumida) --
+**instrucción explícita del owner: usar `local_imports/` como staging
+en vez de `~/Downloads`** (el blocker histórico de §10 hacía de
+`~/Downloads` un lugar poco práctico para este flujo de todos modos).
+
+Copiado (nunca movido) a su ruta canónica,
+`assets/source/nimvlets/nidir/animations/wing_stretch/right/{frames,spritesheet}/`,
+verificado por checksum MD5 contra el staging antes de considerar el
+import completo. `tools/generate_nidir_pack.py` deriva "left" por el
+mismo espejado horizontal determinista que ya usa para idle/
+click_reaction (Nidir es canónicamente "right" -- sin inversión, a
+diferencia de Bunny).
+
+**Clipping, revisado con el mismo método que las demás animaciones**
+(bounding box unión de contenido a través de la secuencia completa):
+16/25 frames (frames 4-19) tocan el borde lateral izquierdo y/o
+derecho con margen EXACTAMENTE cero -- mucho más extenso que idle o
+click_reaction. Inspección visual directa de los frames más extremos
+(10 y 15, ambos marcados) muestra alas completas, de forma natural,
+con margen visible a ambos lados dentro del frame -- **no** el patrón
+de corte plano/antinatural que sí se encontró en el idle real de
+Bunny (ver `docs/BUNNY_CONTENT.md` §3.1). Conclusión: un export
+"ajustado pero no realmente recortado" (margen nativo cero, no una
+forma truncada a mitad de camino) -- las puntas de las alas
+simplemente llegan hasta el borde del canvas nativo durante la
+extensión completa del estiramiento, sin perder contenido real. No es
+un hallazgo que amerite reexportar, a diferencia del caso de Bunny.
+
+**Canvas de trabajo compartido:** agregar `wing_stretch` como tercer
+grupo a la política de normalización de §12 NO cambió el canvas de
+trabajo (sigue siendo 624×612, el mismo que ya dominaba idle/
+click_reaction) -- su contenido, aun con el margen lateral ajustado,
+cabe dentro de ese mismo canvas sin necesitar más espacio
+(`content_scale=1.0000`, `offset=(0,56)`).
+
+**Selección ponderada 70/30 y 10 segundos** -- ver
+`docs/ANIMATION_RUNTIME.md` para el mecanismo genérico
+(`content::ChooseWeightedPassiveActionIndex()`,
+`passive_action_weights` en el pack). Para Nidir específicamente:
+`passive_actions = [idle_breathing_right, wing_stretch_right]`,
+`passive_action_weights = [0.7, 0.3]`, `passive_interval_seconds =
+10.0` (reemplaza el valor de 60s de §14, pedido explícito del owner
+para AMBOS Nimvlets). `content_version` avanza a
+`"block04.3-nidir-3"`.
+
+**Verificado** contra el binario real: carga sin errores ni
+advertencias de cobertura de texturas (`AttachAllTextures()` ya
+itera genéricamente sobre `pet_.passiveActions`, sin ningún ajuste
+necesario para la segunda entrada); capturas de pantalla reales (ver
+el informe de esta corrección) de `wing_stretch` en reproducción
+muestran alas completas, sin pérdida de pixeles, consistente con el
+fix genérico de calidad de downscale descrito en `docs/BUNNY_CONTENT.md`
+§8 (que también beneficia a Nidir, cuyo canvas de trabajo 624×612
+también excede `runtime_max_frame_dimension`).
+

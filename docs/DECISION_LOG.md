@@ -1351,3 +1351,176 @@ estado Idle coherente). Re-confirmados pasando contra el binario
 actual -- ningún cambio de `AnimationController` fue necesario ni se
 hizo, siguiendo la instrucción explícita del brief de "avoid
 unnecessary changes" cuando el invariante ya está garantizado.
+
+### DEC-058 — Causa raíz real de Bunny "se ve mal": clipping de fuente (no corregible) + nearest-neighbor perdiendo detalle (sí corregible)
+**Status:** DECIDIDO · Block 04.3, segunda corrección post-QA — ver
+`docs/BUNNY_CONTENT.md` §3.1/§8.
+
+Segunda ronda de QA manual: el owner confirmó que Bunny ya no pierde
+partes al cambiar de dirección (DEC-054 funciona), pero sus animaciones
+"se ven mal" — pixeles que parecen desaparecer durante la reproducción.
+Instrucción explícita: diagnosticar la causa real, no asumir, no
+"maquillar" con un hack de Bunny.
+
+Por primera vez en este proyecto, el diagnóstico usó `screencapture`
+contra la ventana real corriendo (siempre con capturas acotadas a la
+región conocida de la ventana — nunca de pantalla completa, ver nota
+de seguridad más abajo), comparado pixel-a-pixel contra los frames
+fuente. Encontró DOS causas reales y concurrentes:
+
+1. **Clipping genuino en el export fuente** (la punta de la oreja
+   izquierda de Bunny se corta en un borde plano, `minx=0`, en
+   `idle/left/frame_019` y el tramo 018-021 consecutivo; también en
+   `click_reaction/left/frame_012`). Esto **corrige** la conclusión de
+   DEC-056/`docs/BUNNY_CONTENT.md` §3 original ("no se identificó
+   ningún hallazgo de clipping real") — esa conclusión se basó solo en
+   contar cuántos frames tocan qué borde, sin renderizar y mirar
+   ninguno de los frames marcados. No corregible por código; requiere
+   un nuevo export con más margen si el owner quiere eliminarlo.
+2. **Nearest-neighbor perdiendo detalle fino, genérico y corregible.**
+   `tools/compile_pet_pack.py` usaba un solo punto de muestreo por
+   pixel destino para dos downscales reales que Bunny es el primer
+   caso en ejercitar con `scale < 1.0` de verdad (la normalización de
+   escala por contenido, `content_scale=0.9586` en `click_reaction`, y
+   `runtime_max_frame_dimension`, que siempre se dispara para Bunny
+   porque su canvas de trabajo 428×563 excede 320) — compuesto DOS
+   veces seguidas. Nueva función
+   `prep_dev_sprite.resize_rgba_area_average()` (box filter
+   determinista, RGB ponderado por alpha para evitar fringing de color
+   en bordes de transparencia) reemplaza `resize_rgba_nearest` en
+   ambos sitios cuando el downscale es real — verificado
+   empíricamente: 35,934 → 36,125 pixeles opacos (~0.5% más contenido
+   preservado) en un caso de prueba real. El hit-mask de runtime
+   (`core::AlphaMask::FromAlphaChannel`) no se toca — solo bytes de
+   textura del pack compilado. Genérico (sin rama por pet); beneficia
+   también a Nidir (su canvas 624×612 también excede 320).
+
+**Nota de seguridad/privacidad:** la primera captura de este
+diagnóstico usó `screencapture` de pantalla completa por error y
+expuso brevemente contenido privado no relacionado del usuario (una
+conversación de navegador ajena a este proyecto) — el archivo se
+eliminó de inmediato al notarlo, se le avisó al usuario en el momento,
+y todas las capturas posteriores de esta sesión usan una región
+acotada (`-R<x>,<y>,<w>,<h>`) que coincide exactamente con la ventana
+propia y controlada de la app, nunca pantalla completa. Práctica
+vigente para cualquier captura futura de este proyecto.
+
+### DEC-059 — Segunda animación de idle real para Bunny y Nidir + selección ponderada 70/30 + intervalo de 10 segundos
+**Status:** DECIDIDO · Block 04.3, segunda corrección post-QA — ver
+`docs/BUNNY_CONTENT.md` §9, `docs/NIDIR_CONTENT.md` §19,
+`docs/ANIMATION_RUNTIME.md` §2/§6.
+
+El owner exportó una segunda animación de idle real para cada pet
+("groom" para Bunny, "wing_stretch" para Nidir), entregadas vía
+`local_imports/` — **instrucción explícita: usar `local_imports/` como
+staging de ahora en adelante, nunca más `~/Downloads`** (el blocker
+histórico de acceso a `~/Downloads`/`~/Documents` (DEC-047, §10 de
+`docs/NIDIR_CONTENT.md`) hacía de esa carpeta un lugar poco práctico
+de todos modos. Importadas con el mismo pipeline genérico ya
+establecido (checksum MD5 contra staging, espejado determinista para
+la dirección derivada, sin tocar `local_imports/` hasta verificar el
+import completo).
+
+Pedido explícito: 70% de probabilidad para la primera acción pasiva,
+30% para la segunda, con un intervalo objetivo de 10 segundos para
+AMBOS pets (reemplaza 300s de Bunny y 60s de Nidir, DEC-053). Se
+descartó deliberadamente un ciclado round-robin estricto (lo que este
+runtime hacía antes) porque no puede expresar una proporción 70/30 —
+requería una selección genuinamente ponderada.
+
+Implementado genéricamente en el modelo de contenido, no ad-hoc en
+`SpikeApp`: `content::PetDefinition::passiveActionWeights` (paralelo
+por índice a `passiveActions`, vacío = uniforme, DEBE calzar en
+tamaño si no está vacío — validado tanto al compilar como al cargar) +
+`content::ChooseWeightedPassiveActionIndex(pet, uniformRandom01)`
+(pura/determinista — el llamador provee el random, nunca lo genera
+ella misma, mismo patrón que `AnimationController::Advance(nowMs)`).
+Formato NVPACK1 extendido con una CUARTA sección final opcional,
+independiente de las tres `*_direction_overrides` existentes (Block
+04.2) — ausente por completo si el manifest no define
+`passive_action_weights`, byte-idéntico a cualquier pack compilado
+antes de este feature. `SpikeApp` reemplaza el ciclado
+`nextPassiveActionIndex_` por un `std::mt19937` sembrado una vez en
+`Init()` (`passiveActionRng_`/`NextUniformRandom01()`), usado tanto
+por el disparo por timer como por el disparo por hover (DEC-060).
+
+Cobertura de test: 5 tests nuevos en `AnimationControllerTest.cpp`
+(`WeightedSelection*` — límite exacto 0.7, determinismo, fallback
+uniforme sin pesos, fallback uniforme por tamaño inconsistente,
+clamping de input fuera de `[0,1)`).
+
+### DEC-060 — Disparo de acción pasiva por hover, cooldown compartido con el timer ambiente
+**Status:** DECIDIDO · Block 04.3, segunda corrección post-QA — ver
+`docs/ANIMATION_RUNTIME.md` §8.1.
+
+El owner pidió que reposar el cursor sobre el Nimvlet, sin hacer
+click, también pueda disparar una acción pasiva — distinto del click,
+sin spamear mientras el mouse queda quieto encima, con prioridad
+click/drag > hover/pasiva > estática.
+
+Diseño clave: se evaluó y descartó darle a hover su PROPIO cooldown
+independiente del timer ambiente (`nextPassiveDeadlineMs_`) — un
+cooldown separado permitiría que ambos caminos dispararan casi
+simultáneamente (p. ej. hover dispara en t=9.9s, el timer ya tenía
+pendiente t=10.0s, produciendo dos acciones pasivas casi seguidas,
+justo el "spam" que el owner pidió evitar). En cambio, hover reutiliza
+el MISMO `nextPassiveDeadlineMs_` que el timer — un único intervalo
+real de 10s gobierna ambos caminos, cualquiera que dispare primero
+reprograma el mismo deadline hacia adelante. `core::HoverPassiveGate`
+(nueva clase pura, sin SDL, mismo idioma que `core::DragClassifier`)
+tiene una única responsabilidad: detectar el FLANCO de subida ("el
+cursor acaba de entrar"), no un hover sostenido — evita que un hover
+prolongado (varios `SDL_EVENT_MOUSE_MOTION` por segundo) dispare
+repetidamente. Alimentada desde los DOS call sites existentes
+(`SDL_EVENT_MOUSE_MOTION` del camino de hit-test nativo, y
+`PollHover()` del fallback poll-driven) vía un único helper
+compartido, `SpikeApp::MaybeTriggerHoverPassiveAction()`.
+
+Prioridad click/drag > hover garantizada por construcción, sin código
+nuevo dedicado: ningún gesto en curso (`dragClassifier_.IsActive()`)
+alimenta jamás el gate, y `TriggerPassiveAction()` ya es un no-op
+fuera de `Idle` desde Block 02 (mismo invariante que DEC-057 ya
+verificó para el timer).
+
+Verificado contra el binario real con un mecanismo solo-DEV nuevo,
+`NIMVLETS_DEV_HOVER_TEST_COUNT` (mismo patrón que
+`NIMVLETS_DEV_CLICK_TEST_COUNT`): de 8 ciclos simulados de entrada/
+salida, exactamente 1 disparo real — confirma que el mecanismo nunca
+hace spam. 6 tests nuevos en `tests/HoverPassiveGateTest.cpp` cubren
+la detección de flanco en aislamiento.
+
+### DEC-061 — Tamaño visual global: +10% absoluto contra el baseline original, no compuesto
+**Status:** DECIDIDO · Block 04.3, segunda corrección post-QA — ver
+`docs/NIDIR_CONTENT.md` §18.
+
+El candidato +5% de DEC-055 fue confirmado por el owner; pidió OTRO
++5%, con la intención explícita de terminar en +10% TOTAL respecto del
+baseline original (160), no un +5% adicional compuesto
+multiplicativamente sobre el +5% ya aplicado (`1.05 * 1.05 = 1.1025`,
+un +10.25% que NO es lo pedido). `DISPLAY_SIZE_SCALE_FACTOR` pasa de
+`1.05` a `1.10` — por construcción, ya correcto sin ningún cambio de
+fórmula: `compute_logical_canvas_size()` siempre multiplica el factor
+contra `REFERENCE_LOGICAL_SIZE` (160) directamente, nunca contra un
+tamaño intermedio ya escalado, así que asignar `1.10` produce el +10%
+absoluto correcto. Verificado con un test dedicado que compara la
+constante directamente contra `1.10` y contra `1.05 * 1.05`, en vez de
+solo comparar dimensiones de canvas redondeadas (que, para algunas
+resoluciones, redondean igual para ambos factores). Resultado: Nidir
+168×165 -> 176×173; Bunny 128×168 -> 134×176. Sigue siendo reversible
+(cambiar la constante y volver a correr los `generate_<pet>_pack.py`),
+mismo mecanismo que DEC-055.
+
+### DEC-062 — Import de contenido nuevo solo desde `local_imports/`, nunca más `~/Downloads`
+**Status:** DECIDIDO (preferencia del owner, vigente hacia adelante) ·
+Block 04.3, segunda corrección post-QA.
+
+El owner pidió explícitamente que todo staging de exports nuevos de
+Ludo.ai use `local_imports/` (ya gitignored, ver `.git/info/exclude`)
+en vez de `~/Downloads`/`~/Documents` — el blocker histórico de acceso
+a esas carpetas (§10 de `docs/NIDIR_CONTENT.md`) ya las hacía
+impracticas de todos modos. Sin cambio de código: el pipeline de
+import (checksum MD5, copiado manual documentado, nunca mover/destruir
+el staging antes de verificar) es idéntico sin importar de qué
+directorio se lea — solo cambia la convención operativa hacia
+adelante. Los dos imports de esta corrección (`groom` de Bunny,
+`wing_stretch` de Nidir) ya siguieron esta convención.

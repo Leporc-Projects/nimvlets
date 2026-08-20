@@ -130,6 +130,44 @@ sale del canvas como el fuego de Nidir). No se identificó ningún
 hallazgo de clipping real digno de reportarle al owner para este
 export.
 
+## 3.1 Corrección: el clipping lateral SÍ es real (Block 04.3, corrección post-QA)
+
+**La conclusión de §3 arriba era demasiado apresurada y quedó
+demostrada incorrecta.** El owner reportó en QA manual que las
+animaciones de Bunny "se ven mal", con pixeles que parecen
+desaparecer durante la reproducción. La investigación de esta
+corrección volvió a inspeccionar el bounding box unión reportado en
+§3 -- esta vez renderizando y observando DIRECTAMENTE, no solo
+contando cuántos frames tocan qué borde -- y encontró que el conteo
+de §3 estaba técnicamente correcto pero su interpretación ("movimiento
+normal de animación... no un efecto que se sale del canvas") no lo
+estaba: `idle/left/frame_019.png` (y el tramo consecutivo 018-021)
+muestra la punta de la oreja izquierda del personaje CORTADA
+exactamente en `minx=0` del frame nativo 384×537 -- un borde
+plano/antinatural donde debería afinarse hasta un punto, el mismo
+patrón cualitativo que ya está documentado para el fuego de Nidir
+(§12 de `docs/NIDIR_CONTENT.md`), no un movimiento de postura
+inofensivo. `click_reaction/left` muestra el mismo patrón en su frame
+12 (de 9/25 frames que tocan algún borde lateral en total).
+
+**Esto NO es corregible por código** -- no existe forma de sintetizar
+pixeles que nunca se exportaron. Si el owner quiere eliminar este
+recorte, hace falta un nuevo export con más margen alrededor del
+personaje. Documentado acá honestamente, seguido, mirando hacia
+adelante, del mismo estándar que ya aplica `docs/NIDIR_CONTENT.md`
+para su propio hallazgo de clipping: no se "maquilla" ni se omite.
+
+**Por qué la primera pasada lo descartó:** el análisis original
+resumió el hallazgo a "cuántos frames tocan cuántos bordes" sin
+efectivamente RENDERIZAR y mirar ninguno de esos frames marcados --
+un conteo de bounding boxes por sí solo no distingue "una oreja que
+se mueve dentro del frame, tocando el borde de forma incidental,
+plausible" de "una oreja genuinamente cortada en un borde plano". La
+lección para el resto de este pipeline: un hallazgo de clipping
+reportado solo por conteo de bounding box debe confirmarse
+visualmente (renderizar el frame marcado y mirarlo) antes de
+descartarlo como inofensivo -- no basta con el número.
+
 ## 4. Manifest: solo lo que existe hoy
 
 Por instrucción explícita del brief de este bloque, `tools/generate_bunny_pack.py`
@@ -181,10 +219,11 @@ accidente.
 ## 6. Verificación
 
 - Carga real contra el binario compilado: `pet 'bunny_dev' (Bunny)
-  ready — 128x168 canvas...` (con el factor de tamaño +5%, ver
-  `docs/NIDIR_CONTENT.md` §"tamaño visual global" -- 128x168 es el
-  resultado real derivado del canvas de trabajo 428x563 de Bunny, no
-  un valor hardcodeado).
+  ready — 134x176 canvas...` (con el factor de tamaño +10% vigente
+  desde la corrección post-QA de este bloque, ver §10 -- 134x176 es
+  el resultado real derivado del canvas de trabajo 428x563 de Bunny,
+  no un valor hardcodeado; era 128x168 con el candidato +5% original,
+  ver §16 de `docs/NIDIR_CONTENT.md`).
 - Cambios de dirección (`NIMVLETS_DEV_DIRECTION_TEST_COUNT`) y click
   (`NIMVLETS_DEV_CLICK_TEST_COUNT`) contra el binario real: sin
   errores, sin advertencias de "no attached texture" (la cobertura de
@@ -208,3 +247,174 @@ accidente.
   (mismo patrón que Nidir, ver `docs/NIDIR_CONTENT.md`).
 - Sin `provenance.json` para Bunny (igual que Nidir) -- el brief pide
   `DESCRIPTION.txt` (rasgos físicos), no procedencia.
+
+## 8. Causa raíz real de "las animaciones se ven mal / pixeles que desaparecen" (Block 04.3, corrección post-QA)
+
+El owner reportó, tras confirmar que el bug de pérdida de partes al
+cambiar de dirección ya no ocurre (§15 de `docs/NIDIR_CONTENT.md` --
+el mismo fix genérico de doble-present aplica a Bunny sin cambios),
+que las animaciones de Bunny igual "se ven mal": pixeles que parecen
+desaparecer durante la reproducción. Instrucción explícita: diagnosticar
+la causa real, no asumir, y no "maquillar" el problema con un hack
+específico de Bunny.
+
+**Método de diagnóstico -- por primera vez con verificación visual
+real contra el binario corriendo de verdad.** Hasta esta corrección,
+toda la QA de este proyecto se apoyaba en análisis de frames
+compilados (leídos con `prep_dev_sprite.read_png_rgba`) e inspección
+de código, sin poder ver la ventana real en pantalla. Esta corrección
+usó `screencapture` (con la ventana de la app posicionada/
+dimensionada de forma conocida, capturas SIEMPRE acotadas a esa
+región exacta -- nunca de pantalla completa) para comparar,
+pixel-a-pixel, la salida REAL del renderer contra los frames fuente
+sin procesar. Esto permitió encontrar DOS causas reales, distintas y
+concurrentes:
+
+**Causa 1: clipping genuino en el export fuente** -- ver §3.1 arriba.
+No corregible por código; requiere un nuevo export si el owner quiere
+eliminarlo.
+
+**Causa 2: nearest-neighbor perdiendo detalle fino en cada downscale
+de compilación -- genérica, SÍ corregible.** `tools/compile_pet_pack.py`
+usaba `prep_dev_sprite.resize_rgba_nearest()` (un solo punto de
+muestreo por pixel destino) para DOS pasos de downscale real que
+Bunny es el PRIMER caso en ejercitar con `scale < 1.0` de verdad:
+
+1. La normalización de escala por contenido (`normalize_visual_scale`,
+   Block 04.3 §3 arriba) -- Bunny's `click_reaction` tiene
+   `content_scale=0.9586`, un downscale real (Nidir siempre tiene
+   `content_scale=1.0` exacto en la práctica, así que esta rama nunca
+   se había ejercitado con datos reales antes de Bunny).
+2. El downscale de `runtime_max_frame_dimension` -- el canvas de
+   trabajo de Bunny (428×563) excede el límite (320), así que ESTE
+   paso se dispara SIEMPRE, para cada frame de cada animación.
+
+Nearest-neighbor, por mala suerte de exactamente dónde cae su único
+punto de muestreo, puede saltarse por completo un detalle fino (p. ej.
+un contorno de 1-2px de ancho) que SÍ existe en la fuente --
+compuesto al aplicarse DOS VECES seguidas (paso 1 + paso 2) para
+Bunny. Esto explica tanto la pérdida de calidad general (aliasing,
+bordes dentados) como parte del "pixeles que desaparecen" (una
+porción delgada de contenido, ya cerca de un borde recortado por la
+Causa 1, desapareciendo del todo).
+
+**Verificado empíricamente, no solo razonado:** downscalear
+`idle/left/frame_019` (compuesto a 428×563) a 243×320 (el tamaño real
+que produce `runtime_max_frame_dimension=320` sobre ese canvas) con
+nearest-neighbor produjo 35,934 pixeles opacos; el mismo downscale con
+un filtro de caja (box filter) produjo 36,125 -- ~0.5% más contenido
+preservado, con bordes visiblemente menos dentados en comparación
+lado a lado.
+
+**El fix, genérico:** nueva función
+`prep_dev_sprite.resize_rgba_area_average(width, height, pixels,
+target_width, target_height)` -- un box filter determinista: cada
+pixel destino promedia TODOS los pixeles fuente en su región mapeada
+(misma convención de mapeo proporcional inverso que
+`resize_rgba_nearest`, pero sobre un RANGO, no un punto). El promedio
+de RGB está ponderado por el alpha de cada pixel fuente (previene que
+el ruido de RGB de pixeles totalmente transparentes -- un fenómeno ya
+documentado como inofensivo en reposo -- sangre/genere un fringing de
+color hacia pixeles vecinos visibles al cruzar un límite de
+transparencia durante el downscale); el alpha en sí se promedia sin
+ponderar. `tools/compile_pet_pack.py` usa esta función para AMBOS
+pasos de downscale de arriba cuando el downscale es real
+(`content_scale < 1.0`; `runtime_max_frame_dimension`, que siempre es
+un downscale cuando se dispara) -- un upscale (`content_scale > 1.0`,
+caso raro) sigue usando `resize_rgba_nearest` (un box filter no tiene
+sentido ahí). **El hit-mask de runtime NO se toca** --
+`core::AlphaMask::FromAlphaChannel` sigue siendo nearest-neighbor,
+exactamente igual que antes -- este cambio solo afecta los BYTES DE
+TEXTURA que terminan en el pack compilado.
+
+**Genérico, no un hack de Bunny:** el cambio vive enteramente en
+`tools/compile_pet_pack.py`/`tools/prep_dev_sprite.py`, sin ninguna
+rama de código específica de ningún pet. Beneficia también a Nidir
+(su canvas de trabajo 624×612 también excede 320, así que el paso 2
+también se dispara para Nidir) -- no verificado visualmente por
+separado antes de esta corrección, pero arquitectónicamente seguro
+(el `content_scale` de Nidir siempre es 1.0, así que solo el paso 2 lo
+afecta).
+
+Cobertura de test nueva:
+`tools/test_asset_pipeline.py::ResizeRgbaAreaAverageTest` (7 tests,
+incluyendo el caso de regresión específico -- un pixel opaco de 1px de
+ancho que nearest-neighbor puede perder por completo -- y el caso de
+fringing de color en un borde de transparencia).
+
+## 9. Segunda animación de idle real: "groom", 70/30, intervalo de 10s (Block 04.3, corrección post-QA)
+
+El owner exportó una segunda animación de idle real de Bunny
+("acicalándose"/grooming) vía Ludo.ai, entregada en
+`local_imports/bunny/bunny-idle-groom-left/` (25 frames, 446×602
+nativo) y su spritesheet correspondiente
+(`local_imports/bunny/bunny-idle-groom-left-spritesheet/`, 2230×3010 =
+5×446 × 5×602, grilla 5×5 confirmada, no asumida) -- **instrucción
+explícita del owner: usar `local_imports/` como staging en vez de
+`~/Downloads`**, mismo cambio de convención que aplica a Nidir (ver
+§19 de `docs/NIDIR_CONTENT.md`).
+
+Copiado (nunca movido) a su ruta canónica,
+`assets/source/nimvlets/bunny/animations/groom/left/{frames,spritesheet}/`
+(Bunny es canónicamente "left", no "right" -- ver §2), verificado por
+checksum MD5 contra el staging antes de considerar el import completo.
+`tools/generate_bunny_pack.py` deriva "right" por el mismo espejado
+horizontal determinista que ya usa para idle/click_reaction, con la
+MISMA inversión canónica documentada en §2: la entrada canónica de
+`groom` en el manifest usa los frames DERIVADOS ("right"), el override
+"left" usa los frames REALES importados.
+
+**Clipping:** el borde inferior se toca en la mayoría de los frames
+(legítimo -- patas apoyadas en el piso, mismo patrón que idle/click).
+Frames 19-22 tocan además el borde derecho (probablemente un brazo/
+pata extendiéndose durante el acicalado) -- más leve que el hallazgo
+de §3.1, no confirmado como un defecto real tras inspección visual
+(a diferencia de la oreja cortada de idle/click_reaction).
+
+**Canvas de trabajo compartido:** agregar `groom` como tercer grupo a
+la normalización de contenido NO cambió el canvas de trabajo (sigue
+siendo 428×563, el mismo que ya dominaba idle/click_reaction) --
+`content_scale=0.8642` (groom viene dibujado a mayor escala nativa
+que idle/click dentro de su propio frame; se reescala hacia abajo
+para calzar con el tamaño de referencia, mismo mecanismo que ya
+reescalaba `click_reaction` en §3).
+
+**Selección ponderada 70/30 y 10 segundos** -- ver
+`docs/ANIMATION_RUNTIME.md` para el mecanismo genérico. Para Bunny
+específicamente: `passive_actions = [idle_breathing_right,
+groom_right]`, `passive_action_weights = [0.7, 0.3]`,
+`passive_interval_seconds = 10.0` (reemplaza el default de 300.0 que
+§4 documentaba -- pedido explícito del owner para AMBOS Nimvlets).
+`content_version` avanza a `"block04.3-bunny-2"`.
+
+**Verificado** contra el binario real: carga sin errores ni
+advertencias de cobertura de texturas; capturas de pantalla reales
+(ver el informe de esta corrección) de `groom` en reproducción
+muestran al personaje completo, orejas intactas, sin pérdida de
+pixeles visible -- consistente con el fix de §8.
+
+## 10. Tamaño visual global: +10% absoluto contra el baseline original (Block 04.3, corrección post-QA)
+
+Mismo cambio genérico documentado en detalle en §18 de
+`docs/NIDIR_CONTENT.md` -- `DISPLAY_SIZE_SCALE_FACTOR` pasa de `1.05`
+(candidato ya confirmado por el owner) a `1.10`, absoluto contra
+`REFERENCE_LOGICAL_SIZE` (160), no compuesto sobre el +5% anterior.
+Para Bunny específicamente: canvas de trabajo 428×563 (sin cambios --
+agregar `groom` no lo hizo crecer, ver §9), canvas lógico
+122×160 (factor 1.0) → 128×168 (factor 1.05, primera pasada) →
+**134×176** (factor 1.10, esta corrección).
+
+## 11. Limitaciones honestas de esta corrección
+
+- El fps de reproducción de `groom` (~8.33fps) usa la misma suposición
+  de duración de generación de Ludo.ai (3 segundos) que idle/click ya
+  documentaban en §7 -- no confirmada por separado para este export
+  puntual.
+- El clipping lateral de idle/click_reaction (§3.1) sigue sin
+  corregirse -- documentado honestamente, requiere un nuevo export si
+  el owner lo pide; no bloquea esta corrección porque el resto de las
+  causas de "se ve mal" (calidad de downscale, §8) sí se corrigieron.
+- El hallazgo de clipping de `groom` (frames 19-22, borde derecho) no
+  se confirmó visualmente como un defecto real (a diferencia de la
+  oreja de idle/click) -- documentado por transparencia, no porque se
+  considere un problema pendiente.

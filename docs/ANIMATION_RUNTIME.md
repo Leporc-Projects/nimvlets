@@ -58,8 +58,14 @@ PetDefinition
   clickReaction: AnimationDefinition — required, at least 1 frame
   clickReactionDirectionOverrides: [DirectionalAnimationOverride]  — Block 04.2, zero or more
   passiveActions: [AnimationDefinition]  — zero or more
+  passiveActionWeights: [double]    — Block 04.3, corrección post-QA; paralelo por índice a
+                                       passiveActions. Vacío (default) = todas las entradas con
+                                       igual peso; si no está vacío DEBE tener el mismo tamaño que
+                                       passiveActions (validado al cargar) — ver más abajo.
   passiveActionDirectionOverrides: [PassiveActionDirectionalOverride]  — Block 04.2, zero or more
-  passiveIntervalSeconds           — target average seconds between passive actions (default 300.0)
+  passiveIntervalSeconds           — target average seconds between passive actions (default 300.0;
+                                       Bunny y Nidir usan 10.0 desde la corrección post-QA de
+                                       Block 04.3 — ver docs/BUNNY_CONTENT.md/docs/NIDIR_CONTENT.md)
   contentVersion                   — schema-only, not read by anything yet
 
 AnimationDefinition
@@ -100,6 +106,27 @@ No pet identity ever appears as a C++ enum value or `if (petId ==
 which `.nvpack` file `SpikeApp::kPetPackPath` points at swaps the pet
 with zero other code changes — the Bunny DEV pack is what happens to be
 loaded in this block, not a special case the runtime knows about.
+
+**Selección ponderada de acción pasiva — política 70/30 (Block 04.3,
+corrección post-QA).** El owner pidió que, con dos acciones pasivas
+por pet, la primera dispare ~70% de las veces y la segunda ~30% — no
+un ciclado round-robin estricto (lo que este runtime hacía antes de
+esta corrección). `content::ChooseWeightedPassiveActionIndex(pet,
+uniformRandom01)` (`src/content/AnimationDefinition.h/.cpp`) implementa
+esto: pura y determinista — el LLAMADOR provee el valor aleatorio en
+`[0,1)` (en producción, `SpikeApp::NextUniformRandom01()`, un
+`std::mt19937` sembrado una vez en `Init()`; en tests, un valor fijo)
+—, nunca genera aleatoriedad por sí misma, mismo principio que
+`AnimationController::Advance(nowMs)` nunca lee el reloj por su
+cuenta. Si `passiveActionWeights` está vacío o su tamaño no calza con
+`passiveActions` (defensivo — `PetPackLoader` ya debería haber
+rechazado esto último al cargar), cae a selección uniforme —
+comportamiento idéntico, en la práctica estadística, al round-robin
+anterior para cualquier pet que no defina pesos explícitos. Ver
+`tests/AnimationControllerTest.cpp` (`WeightedSelection*`) para la
+cobertura de límites exactos (0.7 es el punto de corte), fallback
+uniforme, fallback por tamaño inconsistente, y clamping de un input
+fuera de `[0,1)`.
 
 ## 3. Animation Player / State Machine
 
@@ -336,6 +363,69 @@ production behavior:
 ```bash
 NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5 ./build/macos-debug/src/app/nimvlets_spike
 ```
+
+## 8.1 Política de hover (Block 04.3, corrección post-QA)
+
+El owner pidió que reposar el cursor sobre el Nimvlet — sin hacer
+click — también pueda disparar una acción pasiva, distinta del click y
+sin "spamear" mientras el mouse se queda quieto encima. Implementado
+enteramente en `src/app/SpikeApp.cpp` (`MaybeTriggerHoverPassiveAction()`,
+`core::HoverPassiveGate`), sin ningún cambio al modelo de contenido ni
+al formato del pack — es lógica de runtime pura.
+
+**Detección de flanco, no de estado sostenido.** `core::HoverPassiveGate`
+(`src/core/HoverPassiveGate.h/.cpp`, mismo idioma que `core::DragClassifier`
+— una clase pura, sin SDL, testeada en aislamiento en
+`tests/HoverPassiveGateTest.cpp`) solo responde "¿el cursor ACABA de
+entrar a la región interactiva?" — el flanco de subida, nunca un hover
+sostenido. Sin esto, cada `SDL_EVENT_MOUSE_MOTION` durante un hover
+prolongado (varios por segundo mientras el mouse tiembla ligeramente
+sin salir del área) dispararía una acción pasiva nueva cada vez.
+
+**Cooldown compartido con el timer ambiente, no uno propio.** A
+propósito, `HoverPassiveGate` NO administra ningún tiempo/cooldown por
+sí mismo — `SpikeApp::MaybeTriggerHoverPassiveAction()` reutiliza el
+MISMO `nextPassiveDeadlineMs_` que ya gobierna el disparo por timer:
+si el flanco de subida llega antes de que ese deadline haya vencido,
+hover no dispara; si dispara, reprograma ese mismo deadline hacia
+adelante (`nowMs + passiveIntervalSecondsEffective_ * 1000`), igual
+que el timer. Un único intervalo real (10s, ver
+`docs/BUNNY_CONTENT.md`/`docs/NIDIR_CONTENT.md`) gobierna así AMBOS
+caminos de disparo — nunca dos relojes independientes que podrían
+solaparse y producir dos acciones pasivas seguidas con casi nada de
+idle estático entre medio.
+
+**Prioridad click/drag > hover/pasiva > estática.** Ningún gesto de
+click/drag en curso alimenta jamás `hoverPassiveGate_` — la
+comprobación (`dragClassifier_.IsActive()`) se hace antes de tocar el
+gate, así que un click en curso ni siquiera puede "consumir" el
+flanco de subida por accidente. Y, como el timer ambiente,
+`MaybeTriggerHoverPassiveAction()` solo dispara de verdad si
+`AnimationController::State() == kIdle` — `TriggerPassiveAction()` ya
+es, por diseño desde Block 02, un no-op mientras una click reaction
+está en curso (ver `tests/AnimationControllerTest.cpp`,
+`PassiveActionNeverInterruptsClickReaction`), así que un click
+reaction siempre gana sobre cualquier disparo pasivo pendiente
+(timer o hover), sin código nuevo para esa parte de la regla.
+
+**Dos call sites, un único mecanismo compartido.** `hoverPassiveGate_`
+se alimenta desde `HandleEvent()`'s `SDL_EVENT_MOUSE_MOTION` (camino
+de hit-test nativo, macOS) Y desde `PollHover()` (fallback poll-driven,
+Windows) — mismo helper, sin duplicar la lógica de decisión en los dos
+lugares. En el camino nativo, `IsPointInteractive()` se revalida
+explícitamente sobre las coordenadas del propio evento (mismo
+"defense in depth" que `SDL_EVENT_MOUSE_BUTTON_DOWN` ya practica),
+en vez de asumir ciegamente que recibir el evento ya implica estar
+sobre el sprite.
+
+**Verificado** con `NIMVLETS_DEV_HOVER_TEST_COUNT` (mecanismo solo-DEV,
+mismo patrón que `NIMVLETS_DEV_CLICK_TEST_COUNT`/
+`NIMVLETS_DEV_DIRECTION_TEST_COUNT` — ver
+`SpikeApp::RunDevHoverSmokeTestIfRequested()`'s doc comment para el
+comportamiento exacto esperado) contra el binario real: de varios
+ciclos de entrada/salida simulados, exactamente uno dispara una acción
+pasiva real — confirmando que el hover nunca hace spam, sin importar
+cuántas veces el cursor entre y salga.
 
 ## 9. Fail-loudly content loading
 
