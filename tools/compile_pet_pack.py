@@ -260,6 +260,39 @@ def _compile_direction_overrides(
     return bytes(out)
 
 
+def _weighted_action_context(state_id: str, trigger_name: str, action_id: str) -> str:
+    """La ÚNICA fuente de verdad para cómo se nombra (como `context`,
+    la clave del plan de normalización) una entrada compilable de tipo
+    WeightedAction -- usada TANTO por `_build_normalization_plan()`
+    (para construir las claves del plan) COMO por
+    `_compile_weighted_actions()` (para buscarlas), así las dos pasadas
+    SIEMPRE calzan por construcción.
+
+    Bug real corregido acá (ver docs/DECISION_LOG.md): antes de esto,
+    `_build_normalization_plan()` guardaba cada acción bajo
+    `f"state[{id}].{trigger}[{action_id}]"`, pero
+    `_compile_weighted_action()` la buscaba bajo
+    `f"state[{id}].{trigger} ('{action_id}')"` -- un formato DISTINTO
+    escrito a mano en dos lugares que nunca coincidía. El resultado:
+    `normalization_plan.get(...)` devolvía `None` para TODA acción
+    ambient/hover/click de TODO pet con `normalize_visual_scale: true`
+    -- ninguna pasaba nunca por `compose_on_canvas()`, así que cada una
+    terminaba compilada a su propia resolución/encuadre NATIVO en vez
+    del canvas de trabajo compartido del pet. Visualmente: el personaje
+    se veía a un tamaño/posición distintos (típicamente más grande,
+    a veces con proporciones distorsionadas) en cualquier animación
+    disparada por click/ambient/hover frente a la pose base estática
+    (que SÍ usaba la clave correcta) -- exactamente el defecto
+    reportado ("quieto se ve chico, animando se ve grande") y la causa
+    más probable de la corrupción visual observada en Frin al quedar
+    acostado (un salto de escala/posición real en la transición
+    sit_to_lie -> lying). Fijar esto en una única función compartida
+    hace que esta clase de bug sea estructuralmente imposible de
+    reintroducir -- ninguna de las dos pasadas puede divergir por
+    copiar el formato a mano en el otro lugar."""
+    return f"state[{state_id}].{trigger_name}[{action_id}]"
+
+
 def _compile_weighted_action(
     action_manifest: dict,
     manifest_dir: str,
@@ -267,18 +300,19 @@ def _compile_weighted_action(
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
 ) -> bytes:
+    """`context` ya es la clave COMPLETA y correcta de esta acción (ver
+    `_weighted_action_context()`) -- este helper no le agrega nada."""
     action_id = _require(action_manifest, "id", context)
-    full_context = f"{context} ('{action_id}')"
     weight = float(action_manifest.get("weight", 1.0))
-    target_state_id = _require(action_manifest, "target_state_id", full_context)
+    target_state_id = _require(action_manifest, "target_state_id", context)
 
     out = bytearray()
     out += _pack_string(action_id)
     out += struct.pack("<d", weight)
     out += _pack_string(target_state_id)
-    out += _compile_animation(action_manifest, manifest_dir, full_context, runtime_max_frame_dimension, normalization_plan)
+    out += _compile_animation(action_manifest, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
     out += _compile_direction_overrides(
-        action_manifest.get("direction_overrides", []), manifest_dir, full_context, runtime_max_frame_dimension, normalization_plan
+        action_manifest.get("direction_overrides", []), manifest_dir, context, runtime_max_frame_dimension, normalization_plan
     )
     return bytes(out)
 
@@ -286,13 +320,16 @@ def _compile_weighted_action(
 def _compile_weighted_actions(
     action_manifests: list[dict],
     manifest_dir: str,
-    context: str,
+    state_id: str,
+    trigger_name: str,
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
 ) -> bytes:
     out = bytearray()
     out += struct.pack("<I", len(action_manifests))
     for am in action_manifests:
+        action_id = am.get("id", "?")
+        context = _weighted_action_context(state_id, trigger_name, action_id)
         out += _compile_weighted_action(am, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
     return bytes(out)
 
@@ -356,7 +393,7 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
     def add_actions(action_manifests: list[dict], state_id: str, trigger_name: str) -> None:
         for am in action_manifests:
             action_id = am.get("id", "?")
-            context = f"state[{state_id}].{trigger_name}[{action_id}]"
+            context = _weighted_action_context(state_id, trigger_name, action_id)
             group = f"state[{state_id}].{trigger_name}.{action_id}"
             add_animation(am, context, group)
             for i, om in enumerate(am.get("direction_overrides", [])):
@@ -442,7 +479,7 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
 
         out += struct.pack("<d", float(state.get("ambient_interval_seconds", 300.0)))
         out += _compile_weighted_actions(
-            state.get("ambient_actions", []), manifest_dir, f"state[{state_id}].ambient_actions", runtime_max_frame_dimension,
+            state.get("ambient_actions", []), manifest_dir, state_id, "ambient_actions", runtime_max_frame_dimension,
             normalization_plan
         )
 
@@ -455,11 +492,11 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
             )
         out += struct.pack("<B", 1 if hover_uses_ambient_actions else 0)
         out += _compile_weighted_actions(
-            hover_actions, manifest_dir, f"state[{state_id}].hover_actions", runtime_max_frame_dimension, normalization_plan
+            hover_actions, manifest_dir, state_id, "hover_actions", runtime_max_frame_dimension, normalization_plan
         )
 
         out += _compile_weighted_actions(
-            state.get("click_actions", []), manifest_dir, f"state[{state_id}].click_actions", runtime_max_frame_dimension,
+            state.get("click_actions", []), manifest_dir, state_id, "click_actions", runtime_max_frame_dimension,
             normalization_plan
         )
 

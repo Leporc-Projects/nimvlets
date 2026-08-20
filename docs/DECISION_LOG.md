@@ -1745,3 +1745,74 @@ sigue sin confirmarse con certeza total (requiere una observación
 visual interactiva real en macOS, que este entorno de agente no tiene)
 — ver el informe de Block 05 para el detalle completo y la mitigación
 genérica aplicada (§8.2 de `docs/ANIMATION_RUNTIME.md`).
+
+### DEC-071 — Causa raíz real del tamaño visual inconsistente ("quieto chico, animando grande") y la corrupción de Frin al quedar acostado: bug de key-format en `_build_normalization_plan()`/`_compile_weighted_actions()`
+**Status:** DECIDIDO · Block 05, pasada de corrección post-QA #2 — ver
+el informe de esta pasada para la evidencia numérica completa.
+
+QA manual del owner tras el cierre inicial de Block 05 encontró que
+CUALQUIER animación disparada por ambient/hover/click (no la pose base
+estática) se mostraba a un tamaño visiblemente distinto — típicamente
+más grande, a veces con proporciones distorsionadas — que la pose base,
+para los 4 pets reales. Para Frin específicamente, esto se percibía
+como corrupción visual al llegar al estado "lying" (un salto real de
+tamaño/posición en la transición `sit_to_lie -> lying`).
+
+**Causa raíz, con evidencia:** `tools/compile_pet_pack.py`'s
+`_build_normalization_plan()` (el pre-pass que decide, para
+`normalize_visual_scale: true`, el content_scale/canvas de trabajo/
+offset de cada entrada compilable) guardaba cada `WeightedAction`
+(ambient/hover/click) bajo la clave
+`f"state[{id}].{trigger}[{action_id}]"`. La pasada REAL de compilación
+(`_compile_weighted_action()`) buscaba esa misma entrada bajo
+`f"state[{id}].{trigger} ('{action_id}')"` — un formato de string
+DISTINTO, escrito a mano por separado en el otro lugar, que nunca
+coincidía con el primero. `normalization_plan.get(...)` devolvía
+`None` para TODA acción de TODO pet con `normalize_visual_scale: true`
+— es decir, desde que Block 05 introdujo el grafo de comportamiento
+(`WeightedAction`), NINGUNA acción ambient/hover/click pasaba nunca por
+`compose_on_canvas()`: cada una se compilaba a su propio encuadre/
+resolución NATIVO (solo el downscale plano de
+`runtime_max_frame_dimension`, sin el canvas de trabajo compartido ni
+el content_scale relativo a la pose base) — exactamente el defecto de
+"cada animación se estira independientemente al mismo canvas fijo" que
+la política de canvas de trabajo compartido de Block 04.3 existe
+específicamente para prevenir. La pose base (`base_animation`) SÍ
+usaba el formato correcto (nunca pasaba por
+`_compile_weighted_action()`), así que ERA la única entidad
+correctamente normalizada — de ahí el patrón exacto reportado
+("quieto" == la pose base, correcta; "animando" == cualquier
+`WeightedAction`, incorrecta).
+
+Medido antes de la corrección (bbox de contenido, frame 0 de cada
+entrada, tras compilar): Frin macho `seated.base_animation`=196px,
+`click_actions[howl]`=317px (+62%), `ambient_actions[sit_to_lie]`=288px
+(+47%); Nidir `idle_breathing`=304px vs. `base_animation`=257px (+18%);
+Bunny `groom`=314px vs. `base_animation`=289px (+9%). Tras la
+corrección, los cuatro pets muestran `frame0_max_dim` esencialmente
+idéntico entre `base_animation` y CUALQUIER `WeightedAction` (dentro de
+±1px de redondeo) — ver el informe de esta pasada para la tabla
+completa.
+
+**Corrección:** `_weighted_action_context(state_id, trigger_name,
+action_id)`, una única función que ambas pasadas (`add_actions()` del
+pre-pass y `_compile_weighted_actions()` de la compilación real) usan
+para construir la clave — hace que este tipo de bug sea
+estructuralmente imposible de reintroducir (nunca dos formatos escritos
+a mano en dos lugares que puedan divergir). Test de regresión de
+integración nuevo,
+`tools/test_asset_pipeline.py`'s `CompileWeightedActionNormalizationTest`
+— compila un manifest real end-to-end y confirma que una acción
+ambient termina con las MISMAS dimensiones que `base_animation`;
+confirmado que este test FALLA si se reintroduce el formato viejo
+(verificado deliberadamente antes de dar la corrección por buena).
+
+**Nunca fue un problema de la fuente ni de un filtro de resample** —
+ninguna de las hipótesis de diagnóstico exploradas en el cierre
+anterior de Block 05 (aspect ratio, bilinear vs. box filter, primer
+render "frío") causaba esto; era, en los hechos, una regresión de
+integración introducida por el propio refactor a `WeightedAction` de
+este bloque, nunca ejercitada por ningún test hasta ahora porque
+ninguno de los tests Python anteriores compilaba un manifest real de
+extremo a extremo con `normalize_visual_scale: true` sobre el nuevo
+esquema de estados/acciones.

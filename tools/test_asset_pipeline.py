@@ -575,5 +575,176 @@ class FrameSequenceValidationTest(unittest.TestCase):
             validate_frame_sequence.validate_frame_sequence(self.tmpdir)
 
 
+class CompileWeightedActionNormalizationTest(unittest.TestCase):
+    """Test de regresión de integración (Block 05, corrección post-QA):
+    reproduce exactamente el bug real encontrado en QA manual --
+    `tools/compile_pet_pack.py`'s `_build_normalization_plan()` (el
+    pre-pass que decide content_scale/canvas de trabajo/offset) y
+    `_compile_weighted_actions()` (la pasada real de compilación)
+    construían el `context` de cada WeightedAction (ambient/hover/
+    click) con dos FORMATOS DE STRING distintos escritos a mano en dos
+    lugares -- nunca calzaban, así que `normalization_plan.get(context)`
+    devolvía `None` para TODA acción de TODO pet con
+    `normalize_visual_scale: true`, y cada una terminaba compilada a su
+    propia resolución/encuadre NATIVO en vez del canvas de trabajo
+    compartido -- el personaje se veía a un tamaño distinto (más
+    grande, típicamente) en cualquier animación disparada por click/
+    ambient/hover frente a la pose base estática. Ver
+    docs/DECISION_LOG.md y compile_pet_pack._weighted_action_context()
+    para el detalle completo y la corrección (una única función
+    compartida entre las dos pasadas, para que esta clase de bug sea
+    estructuralmente imposible de reintroducir).
+
+    Este test compila un manifest real (JSON en disco + PNG reales en
+    disco -- integración end-to-end, no solo las funciones primitivas
+    que las otras clases de este archivo ya cubren) con
+    `normalize_visual_scale: true` y una acción ambient cuyo frame
+    nativo es DELIBERADAMENTE más chico y con menos margen que la pose
+    base -- si la normalización se está aplicando de verdad, ambas
+    deben terminar compiladas al MISMO tamaño de canvas de trabajo
+    (compartido); si el bug reapareciera, la acción compilaría a su
+    propio tamaño nativo (distinto)."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_normalization_regression_")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import compile_pet_pack  # noqa: E402 (import tardío -- self-contido dentro del test)
+
+        self.compile_pet_pack = compile_pet_pack
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_frame(self, name: str, w: int, h: int, alpha_rect: tuple[int, int, int, int]) -> str:
+        path = os.path.join(self.tmpdir, name)
+        prep_dev_sprite.write_png_rgba(path, w, h, _solid_frame(w, h, (10, 20, 30), alpha_rect))
+        return name  # relativo al manifest_dir (== self.tmpdir), como pide compile_pet_pack
+
+    def _frame_entry(self, name: str) -> dict:
+        return {"source": name, "duration_ms": 0}
+
+    def test_weighted_action_shares_working_canvas_with_base_animation(self) -> None:
+        # Pose base: frame nativo grande (40x40), contenido 20x20 con
+        # margen generoso alrededor -- define el canvas de trabajo.
+        base_frame = self._write_frame("base.png", 40, 40, (10, 10, 30, 30))
+        # Acción ambient: frame nativo CHICO (20x20), contenido 18x18 --
+        # casi sin margen -- si compose_on_canvas() no se aplica de
+        # verdad, este frame termina compilado a ~20x20 (su propio
+        # tamaño nativo tras el downscale, que acá ni siquiera dispara
+        # porque runtime_max_frame_dimension es generoso), NUNCA al
+        # mismo tamaño que la base.
+        action_frame = self._write_frame("action.png", 20, 20, (1, 1, 19, 19))
+
+        manifest = {
+            "id": "regression_test_pet",
+            "display_name": "Regression Test Pet",
+            "canvas_width": 40,
+            "canvas_height": 40,
+            "normalize_visual_scale": True,
+            "states": [
+                {
+                    "id": "default",
+                    "base_animation": {
+                        "id": "base",
+                        "kind": "static",
+                        "frames": [self._frame_entry(base_frame)],
+                    },
+                    "ambient_actions": [
+                        {
+                            "id": "wiggle",
+                            "weight": 1.0,
+                            "target_state_id": "default",
+                            "kind": "one_shot",
+                            "frames": [self._frame_entry(action_frame)],
+                        }
+                    ],
+                    "click_actions": [],
+                }
+            ],
+        }
+        manifest_path = os.path.join(self.tmpdir, "pack_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            import json
+
+            json.dump(manifest, f)
+
+        output_path = os.path.join(self.tmpdir, "out.nvpack")
+        self.compile_pet_pack.compile_pack(manifest_path, output_path)
+
+        # Parsea el pack compilado (NVPACK2) directamente -- sin
+        # dependencias nuevas, mismo formato que
+        # src/content/PetPackLoader.cpp documenta.
+        base_dims, action_dims = _read_base_and_first_ambient_action_frame_dims(output_path)
+
+        self.assertEqual(
+            base_dims, action_dims,
+            f"la acción ambient compiló a {action_dims}, distinto del canvas de trabajo "
+            f"compartido de la pose base {base_dims} -- normalize_visual_scale no se está "
+            "aplicando a las acciones ponderadas (bug real de Block 05, ver DEC-071)",
+        )
+
+
+def _read_base_and_first_ambient_action_frame_dims(path: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Lector mínimo de un pack "NVPACK2", suficiente para extraer las
+    dimensiones (width, height) del frame 0 de `base_animation` y del
+    frame 0 de la primera entrada de `ambient_actions` del primer
+    estado -- usado solo por CompileWeightedActionNormalizationTest de
+    arriba. Espejo intencional (no una reutilización de código) del
+    formato que src/content/PetPackLoader.cpp implementa en C++ -- ver
+    docs/ANIMATION_RUNTIME.md para el layout binario completo."""
+    import struct
+
+    with open(path, "rb") as f:
+        buf = f.read()
+
+    def read_string(pos: int) -> tuple[str, int]:
+        (n,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        return buf[pos : pos + n].decode("utf-8"), pos + n
+
+    def read_animation_first_frame_dims(pos: int) -> tuple[tuple[int, int], int]:
+        _id, pos = read_string(pos)
+        pos += 1 + 8 + 1  # kind, fps, returnsToIdle
+        (frame_count,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        w, h = struct.unpack_from("<II", buf, pos)
+        pos += 4 + 4 + 8 + 8 + 8  # width, height, anchorX, anchorY, durationMs
+        pos += w * h * 4  # frame 0's pixels -- skip, only dims matter here
+        for _ in range(1, frame_count):
+            w2, h2 = struct.unpack_from("<II", buf, pos)
+            pos += 4 + 4 + 8 + 8 + 8 + w2 * h2 * 4
+        return (w, h), pos
+
+    def skip_direction_overrides(pos: int) -> int:
+        (count,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        for _ in range(count):
+            pos += 1  # direction byte
+            _dims, pos = read_animation_first_frame_dims(pos)
+        return pos
+
+    pos = 8  # magic
+    for _ in range(3):  # petId, displayName, variantGroup
+        _s, pos = read_string(pos)
+    pos += 4 + 4 + 1 + 8  # canvasWidth, canvasHeight, alphaHitThreshold, visualScale
+    _s, pos = read_string(pos)  # contentVersion
+    (state_count,) = struct.unpack_from("<I", buf, pos)
+    pos += 4
+    assert state_count >= 1
+    _state_id, pos = read_string(pos)
+    base_dims, pos = read_animation_first_frame_dims(pos)
+    pos = skip_direction_overrides(pos)
+    pos += 8  # ambientIntervalSeconds
+    (ambient_count,) = struct.unpack_from("<I", buf, pos)
+    pos += 4
+    assert ambient_count >= 1, "test manifest must define at least one ambient action"
+    _action_id, pos = read_string(pos)
+    pos += 8  # weight
+    _target_state_id, pos = read_string(pos)
+    action_dims, pos = read_animation_first_frame_dims(pos)
+
+    return base_dims, action_dims
+
+
 if __name__ == "__main__":
     unittest.main()
