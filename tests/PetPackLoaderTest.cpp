@@ -1,5 +1,6 @@
 #include "PetPackLoaderTest.h"
 
+#include "NvPack2TestBuilder.h"
 #include "content/PetPackLoader.h"
 
 #include <cstdint>
@@ -7,6 +8,7 @@
 #include <string>
 #include <vector>
 
+using nimvlets::content::Direction;
 using nimvlets::content::LoadPetPackFromMemory;
 using nimvlets::content::PetDefinition;
 
@@ -14,89 +16,10 @@ namespace nimvlets::tests {
 
 namespace {
 
-// Hand-builds pack byte buffers matching the exact "NVPACK1" format
-// (see src/content/PetPackLoader.cpp and docs/ANIMATION_RUNTIME.md) so
-// the C++ parser can be tested directly against synthetic valid *and*
-// malformed data — no filesystem, no Python compiler, no CWD
-// dependency.
-
-void AppendBytes(std::vector<std::uint8_t>& buf, const void* data, std::size_t n) {
-    const auto* bytes = static_cast<const std::uint8_t*>(data);
-    buf.insert(buf.end(), bytes, bytes + n);
-}
-
-void AppendUint8(std::vector<std::uint8_t>& buf, std::uint8_t v) {
-    buf.push_back(v);
-}
-
-void AppendUint32(std::vector<std::uint8_t>& buf, std::uint32_t v) {
-    AppendBytes(buf, &v, sizeof(v));
-}
-
-void AppendFloat64(std::vector<std::uint8_t>& buf, double v) {
-    AppendBytes(buf, &v, sizeof(v));
-}
-
-void AppendString(std::vector<std::uint8_t>& buf, const std::string& s) {
-    AppendUint32(buf, static_cast<std::uint32_t>(s.size()));
-    AppendBytes(buf, s.data(), s.size());
-}
-
-void AppendMagic(std::vector<std::uint8_t>& buf) {
-    const char magic[8] = {'N', 'V', 'P', 'A', 'C', 'K', '1', '\0'};
-    AppendBytes(buf, magic, sizeof(magic));
-}
-
-void AppendPetHeader(std::vector<std::uint8_t>& buf, const std::string& id = "p") {
-    AppendMagic(buf);
-    AppendString(buf, id);
-    AppendString(buf, "P");
-    AppendString(buf, "");  // variantGroup
-    AppendUint32(buf, 2);   // canvasWidth
-    AppendUint32(buf, 2);   // canvasHeight
-    AppendUint8(buf, 128);  // alphaHitThreshold
-    AppendFloat64(buf, 300.0);  // passiveIntervalSeconds
-    AppendString(buf, "");  // contentVersion
-}
-
-// Appends one AnimationBlock with `frameCount` frames, all `w` x `h`,
-// each frame's pixels filled with `fillByte` (so tests can identify
-// which frame ended up where after loading).
-void AppendAnimation(
-    std::vector<std::uint8_t>& buf,
-    const std::string& id,
-    std::uint8_t kind,
-    std::uint32_t frameCount,
-    std::uint32_t w,
-    std::uint32_t h,
-    std::uint8_t fillByte) {
-    AppendString(buf, id);
-    AppendUint8(buf, kind);
-    AppendFloat64(buf, 0.0);  // fps == 0 -> use per-frame durationMs
-    AppendUint8(buf, 1);      // returnsToIdle
-    AppendUint32(buf, frameCount);
-    for (std::uint32_t i = 0; i < frameCount; ++i) {
-        AppendUint32(buf, w);
-        AppendUint32(buf, h);
-        AppendFloat64(buf, 0.0);    // anchorX
-        AppendFloat64(buf, 0.0);    // anchorY
-        AppendFloat64(buf, 100.0);  // durationMs
-        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(w) * h * 4, fillByte);
-        AppendBytes(buf, pixels.data(), pixels.size());
-    }
-}
-
-std::vector<std::uint8_t> BuildMinimalValidPack() {
-    std::vector<std::uint8_t> buf;
-    AppendPetHeader(buf);
-    AppendAnimation(buf, "idle", 0 /*static*/, 1, 1, 1, 0x00);
-    AppendAnimation(buf, "click_reaction", 2 /*one-shot*/, 1, 1, 1, 0xFF);
-    AppendUint32(buf, 0);  // zero passive actions
-    return buf;
-}
+using namespace nvpack2;  // AppendBytes/AppendUint8/AppendUint32/AppendFloat64/AppendString/AppendMagic/...
 
 bool ValidMinimalPackLoadsSuccessfully() {
-    const std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+    const std::vector<std::uint8_t> bytes = BuildMinimalPackBytes("p", 0x00, 2, 2);
     PetDefinition pet;
     std::string error;
     NIMVLETS_CHECK(LoadPetPackFromMemory(bytes.data(), bytes.size(), pet, error));
@@ -104,14 +27,18 @@ bool ValidMinimalPackLoadsSuccessfully() {
     NIMVLETS_CHECK(pet.id == "p");
     NIMVLETS_CHECK(pet.canvasWidth == 2 && pet.canvasHeight == 2);
     NIMVLETS_CHECK(pet.alphaHitThreshold == 128);
-    NIMVLETS_CHECK(pet.idle.frames.size() == 1);
-    NIMVLETS_CHECK(pet.clickReaction.frames.size() == 1);
-    NIMVLETS_CHECK(pet.passiveActions.empty());
+    NIMVLETS_CHECK(pet.visualScale == 1.0);
+    NIMVLETS_CHECK(pet.states.size() == 1);
+    NIMVLETS_CHECK(pet.states[0].id == "default");
+    NIMVLETS_CHECK(pet.states[0].baseAnimation.frames.size() == 1);
+    NIMVLETS_CHECK(pet.states[0].clickActions.size() == 1);
+    NIMVLETS_CHECK(pet.states[0].ambientActions.empty());
+    NIMVLETS_CHECK(pet.states[0].hoverUsesAmbientActions);
     return true;
 }
 
 bool BadMagicIsRejected() {
-    std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+    std::vector<std::uint8_t> bytes = BuildMinimalPackBytes("p", 0x00);
     bytes[0] = 'X';
     PetDefinition pet;
     std::string error;
@@ -129,7 +56,7 @@ bool EmptyBufferIsRejected() {
 }
 
 bool TruncatedDataIsRejected() {
-    std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+    std::vector<std::uint8_t> bytes = BuildMinimalPackBytes("p", 0x00);
     bytes.resize(bytes.size() / 2);  // cut off partway through — must fail, not read garbage
     PetDefinition pet;
     std::string error;
@@ -139,7 +66,7 @@ bool TruncatedDataIsRejected() {
 }
 
 bool TruncatedMidPixelDataIsRejected() {
-    std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+    std::vector<std::uint8_t> bytes = BuildMinimalPackBytes("p", 0x00);
     bytes.pop_back();  // drop the very last pixel byte only
     PetDefinition pet;
     std::string error;
@@ -149,10 +76,20 @@ bool TruncatedMidPixelDataIsRejected() {
 
 bool MismatchedFrameDimensionsAreRejected() {
     std::vector<std::uint8_t> buf;
-    AppendPetHeader(buf);
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);  // stateCount
+    AppendString(buf, "default");
 
-    // idle animation with two frames of DIFFERENT dimensions.
-    AppendString(buf, "idle");
+    // base animation with two frames of DIFFERENT dimensions.
+    AppendString(buf, "base");
     AppendUint8(buf, 1);  // loop; playback kind is irrelevant to this check
     AppendFloat64(buf, 0.0);
     AppendUint8(buf, 1);
@@ -181,8 +118,18 @@ bool MismatchedFrameDimensionsAreRejected() {
 
 bool ZeroFrameAnimationIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendPetHeader(buf);
-    AppendString(buf, "idle");
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendString(buf, "base");
     AppendUint8(buf, 0);
     AppendFloat64(buf, 0.0);
     AppendUint8(buf, 1);
@@ -197,9 +144,20 @@ bool ZeroFrameAnimationIsRejected() {
 
 bool InvalidPlaybackKindByteIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendPetHeader(buf);
-    AppendString(buf, "idle");
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendString(buf, "base");
     AppendUint8(buf, 99);  // not a valid PlaybackKind value (0/1/2)
+
     PetDefinition pet;
     std::string error;
     NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
@@ -209,12 +167,27 @@ bool InvalidPlaybackKindByteIsRejected() {
 
 bool FramesLoadInDeterministicOrder() {
     std::vector<std::uint8_t> buf;
-    AppendPetHeader(buf);
-    AppendAnimation(buf, "idle", 0, 1, 1, 1, 0x00);
-
-    // click reaction with 3 frames, each tagged with a distinct fill
-    // byte so load order can be checked precisely.
-    AppendString(buf, "click_reaction");
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendAnimationBlock(buf, "base", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 300.0);
+    AppendUint32(buf, 0);  // ambientActionCount
+    AppendUint8(buf, 1);   // hoverUsesAmbientActions
+    AppendUint32(buf, 0);  // hoverActionCount
+    AppendUint32(buf, 1);  // clickActionCount
+    AppendWeightedActionHeader(buf, "click", 1.0, "default");
+    // click animation with 3 frames, each tagged with a distinct fill byte.
+    AppendString(buf, "click_anim");
     AppendUint8(buf, 2);  // one-shot
     AppendFloat64(buf, 0.0);
     AppendUint8(buf, 1);
@@ -228,55 +201,57 @@ bool FramesLoadInDeterministicOrder() {
         const std::vector<std::uint8_t> px = {fill, fill, fill, 255};
         AppendBytes(buf, px.data(), px.size());
     }
-    AppendUint32(buf, 0);
+    AppendEmptyDirectionOverrides(buf);
 
     PetDefinition pet;
     std::string error;
     NIMVLETS_CHECK(LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
-    NIMVLETS_CHECK(pet.clickReaction.frames.size() == 3);
-    NIMVLETS_CHECK(pet.clickReaction.frames[0].pixels[0] == 10);
-    NIMVLETS_CHECK(pet.clickReaction.frames[1].pixels[0] == 20);
-    NIMVLETS_CHECK(pet.clickReaction.frames[2].pixels[0] == 30);
+    const auto& frames = pet.states[0].clickActions[0].animation.frames;
+    NIMVLETS_CHECK(frames.size() == 3);
+    NIMVLETS_CHECK(frames[0].pixels[0] == 10);
+    NIMVLETS_CHECK(frames[1].pixels[0] == 20);
+    NIMVLETS_CHECK(frames[2].pixels[0] == 30);
     return true;
 }
 
-// Block 04.2: la sección final opcional de idleDirectionOverrides (ver
-// docs/NIDIR_CONTENT.md). BuildMinimalValidPack() de arriba NO la
-// incluye -- cada test que la usa (todos los de arriba de este
-// comentario) ya ejercita implícitamente "un pack sin la sección
-// nueva carga igual que antes"; el test explícito de abajo lo deja
-// documentado como un caso con nombre, no solo incidental.
-
-bool PackWithoutTrailingSectionLeavesOverridesEmpty() {
-    const std::vector<std::uint8_t> bytes = BuildMinimalValidPack();
+bool PackWithoutDirectionOverridesLeavesThemEmpty() {
+    const std::vector<std::uint8_t> bytes = BuildMinimalPackBytes("p", 0x00);
     PetDefinition pet;
     std::string error;
     NIMVLETS_CHECK(LoadPetPackFromMemory(bytes.data(), bytes.size(), pet, error));
-    NIMVLETS_CHECK(pet.idleDirectionOverrides.empty());
+    NIMVLETS_CHECK(pet.states[0].baseAnimationDirectionOverrides.empty());
     return true;
 }
 
-bool PackWithDirectionalIdleOverrideLoadsCorrectly() {
-    std::vector<std::uint8_t> buf = BuildMinimalValidPack();  // idle fillByte=0x00, click fillByte=0xFF
-    AppendUint32(buf, 1);  // directionalIdleOverrideCount = 1
-    AppendUint8(buf, 1);   // direction = kLeft
-    AppendAnimation(buf, "idle_left", 1 /*loop*/, 1, 1, 1, 0x42);
-
+bool PackWithDirectionalBaseOverrideLoadsCorrectly() {
+    const std::vector<std::uint8_t> bytes = BuildDirectionalPackBytes("p", 0x00, 0x42);
     PetDefinition pet;
     std::string error;
-    NIMVLETS_CHECK(LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(LoadPetPackFromMemory(bytes.data(), bytes.size(), pet, error));
     NIMVLETS_CHECK(error.empty());
-    NIMVLETS_CHECK(pet.idle.frames[0].pixels[0] == 0x00);  // idle canónico (kRight) sin tocar
-    NIMVLETS_CHECK(pet.idleDirectionOverrides.size() == 1);
-    NIMVLETS_CHECK(pet.idleDirectionOverrides[0].direction == nimvlets::content::Direction::kLeft);
-    NIMVLETS_CHECK(pet.idleDirectionOverrides[0].animation.frames[0].pixels[0] == 0x42);
+    NIMVLETS_CHECK(pet.states[0].baseAnimation.frames[0].pixels[0] == 0x00);  // canónico (kRight) sin tocar
+    NIMVLETS_CHECK(pet.states[0].baseAnimationDirectionOverrides.size() == 1);
+    NIMVLETS_CHECK(pet.states[0].baseAnimationDirectionOverrides[0].direction == Direction::kLeft);
+    NIMVLETS_CHECK(pet.states[0].baseAnimationDirectionOverrides[0].animation.frames[0].pixels[0] == 0x42);
     return true;
 }
 
 bool InvalidDirectionByteInOverrideIsRejected() {
-    std::vector<std::uint8_t> buf = BuildMinimalValidPack();
-    AppendUint32(buf, 1);   // directionalIdleOverrideCount = 1
-    AppendUint8(buf, 99);   // direction inválida (solo 0/1 son válidos)
+    std::vector<std::uint8_t> buf;
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendAnimationBlock(buf, "base", 0, 1, 1, 1, 0x00);
+    AppendUint32(buf, 1);  // baseAnimationDirectionOverrideCount = 1
+    AppendUint8(buf, 99);  // direction inválida (solo 0/1 son válidos)
 
     PetDefinition pet;
     std::string error;
@@ -289,20 +264,164 @@ bool InvalidCanvasSizeIsRejected() {
     std::vector<std::uint8_t> buf;
     AppendMagic(buf);
     AppendString(buf, "p");
-    AppendString(buf, "P");
+    AppendString(buf, "p");
     AppendString(buf, "");
     AppendUint32(buf, 0);  // canvasWidth == 0, invalid
     AppendUint32(buf, 2);
     AppendUint8(buf, 128);
-    AppendFloat64(buf, 300.0);
+    AppendFloat64(buf, 1.0);
     AppendString(buf, "");
-    AppendAnimation(buf, "idle", 0, 1, 1, 1, 0x00);
-    AppendAnimation(buf, "click_reaction", 2, 1, 1, 1, 0x00);
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendAnimationBlock(buf, "base", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 300.0);
     AppendUint32(buf, 0);
+    AppendUint8(buf, 1);
+    AppendUint32(buf, 0);
+    AppendUint32(buf, 0);  // clickActionCount = 0 (no click needed for this check)
 
     PetDefinition pet;
     std::string error;
     NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    return true;
+}
+
+bool InvalidVisualScaleIsRejected() {
+    std::vector<std::uint8_t> buf = BuildMinimalPackBytes("p", 0x00);
+    // visualScale lives right after alphaHitThreshold in the header —
+    // overwrite it in place with 0.0 (invalid, must be > 0).
+    // Layout: magic(8) + string("p")=4+1 + string("p")=4+1 +
+    // string("")=4 + canvasW(4) + canvasH(4) + alphaThreshold(1) + visualScale(8 @ this offset).
+    const std::size_t visualScaleOffset = 8 + (4 + 1) + (4 + 1) + 4 + 4 + 4 + 1;
+    double zero = 0.0;
+    std::memcpy(buf.data() + visualScaleOffset, &zero, sizeof(zero));
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
+bool UnknownTargetStateIdIsRejected() {
+    std::vector<std::uint8_t> buf;
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);  // stateCount = 1 -- but the click action below targets a state that doesn't exist
+    AppendString(buf, "default");
+    AppendAnimationBlock(buf, "base", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 300.0);
+    AppendUint32(buf, 0);
+    AppendUint8(buf, 1);
+    AppendUint32(buf, 0);
+    AppendUint32(buf, 1);  // clickActionCount = 1
+    AppendWeightedActionHeader(buf, "click", 1.0, "nonexistent_state");
+    AppendAnimationBlock(buf, "click_anim", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
+bool HoverUsingAmbientPoolWithNonEmptyHoverActionsIsRejected() {
+    std::vector<std::uint8_t> buf;
+    AppendMagic(buf);
+    AppendString(buf, "p");
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendUint32(buf, 1);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 1);
+    AppendString(buf, "default");
+    AppendAnimationBlock(buf, "base", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 300.0);
+    AppendUint32(buf, 0);
+    AppendUint8(buf, 1);   // hoverUsesAmbientActions = true ...
+    AppendUint32(buf, 1);  // ... but hoverActionCount = 1 too -- ambiguous, must be rejected
+    AppendWeightedActionHeader(buf, "hover", 1.0, "default");
+    AppendAnimationBlock(buf, "hover_anim", 0, 1, 1, 1, 0x00);
+    AppendEmptyDirectionOverrides(buf);
+    AppendUint32(buf, 0);  // clickActionCount
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(!LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
+// Un pack "forma Frin": dos estados (seated/lying) con una transición
+// real de seated -> lying, ejercitando stateCount > 1 y un
+// targetStateId que SÍ es distinto del estado de origen.
+bool MultiStatePackWithRealTransitionLoadsCorrectly() {
+    std::vector<std::uint8_t> buf;
+    AppendMagic(buf);
+    AppendString(buf, "frin_test");
+    AppendString(buf, "Frin Test");
+    AppendString(buf, "frin");
+    AppendUint32(buf, 4);
+    AppendUint32(buf, 4);
+    AppendUint8(buf, 128);
+    AppendFloat64(buf, 1.0);
+    AppendString(buf, "");
+    AppendUint32(buf, 2);  // stateCount = 2
+
+    // seated: base + ambient(sit_to_lie -> lying) + click(howl -> seated)
+    AppendString(buf, "seated");
+    AppendAnimationBlock(buf, "seated_base", 0, 1, 1, 1, 0x01);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 200.0);
+    AppendUint32(buf, 1);  // ambientActionCount
+    AppendWeightedActionHeader(buf, "sit_to_lie", 1.0, "lying");
+    AppendAnimationBlock(buf, "sit_to_lie_anim", 2, 1, 1, 1, 0x02);
+    AppendEmptyDirectionOverrides(buf);
+    AppendUint8(buf, 0);   // hoverUsesAmbientActions = false
+    AppendUint32(buf, 0);  // hoverActionCount
+    AppendUint32(buf, 1);  // clickActionCount
+    AppendWeightedActionHeader(buf, "howl", 1.0, "seated");
+    AppendAnimationBlock(buf, "howl_anim", 2, 1, 1, 1, 0x03);
+    AppendEmptyDirectionOverrides(buf);
+
+    // lying: base only, click(lie_to_sit -> seated), sin ambient.
+    AppendString(buf, "lying");
+    AppendAnimationBlock(buf, "lying_base", 0, 1, 1, 1, 0x04);
+    AppendEmptyDirectionOverrides(buf);
+    AppendFloat64(buf, 999.0);
+    AppendUint32(buf, 0);  // ambientActionCount = 0 -- sin timer mientras lying
+    AppendUint8(buf, 0);
+    AppendUint32(buf, 0);
+    AppendUint32(buf, 1);
+    AppendWeightedActionHeader(buf, "lie_to_sit", 1.0, "seated");
+    AppendAnimationBlock(buf, "lie_to_sit_anim", 2, 1, 1, 1, 0x05);
+    AppendEmptyDirectionOverrides(buf);
+
+    PetDefinition pet;
+    std::string error;
+    NIMVLETS_CHECK(LoadPetPackFromMemory(buf.data(), buf.size(), pet, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK(pet.states.size() == 2);
+    NIMVLETS_CHECK(pet.states[0].id == "seated");
+    NIMVLETS_CHECK(pet.states[0].ambientActions[0].targetStateId == "lying");
+    NIMVLETS_CHECK(pet.states[0].clickActions[0].targetStateId == "seated");
+    NIMVLETS_CHECK(pet.states[1].id == "lying");
+    NIMVLETS_CHECK(pet.states[1].ambientActions.empty());
+    NIMVLETS_CHECK(pet.states[1].clickActions[0].targetStateId == "seated");
     return true;
 }
 
@@ -319,9 +438,14 @@ void RegisterPetPackLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetPackLoader/InvalidPlaybackKindByteIsRejected", InvalidPlaybackKindByteIsRejected);
     runner.Add("PetPackLoader/FramesLoadInDeterministicOrder", FramesLoadInDeterministicOrder);
     runner.Add("PetPackLoader/InvalidCanvasSizeIsRejected", InvalidCanvasSizeIsRejected);
-    runner.Add("PetPackLoader/PackWithoutTrailingSectionLeavesOverridesEmpty", PackWithoutTrailingSectionLeavesOverridesEmpty);
-    runner.Add("PetPackLoader/PackWithDirectionalIdleOverrideLoadsCorrectly", PackWithDirectionalIdleOverrideLoadsCorrectly);
+    runner.Add("PetPackLoader/InvalidVisualScaleIsRejected", InvalidVisualScaleIsRejected);
+    runner.Add("PetPackLoader/PackWithoutDirectionOverridesLeavesThemEmpty", PackWithoutDirectionOverridesLeavesThemEmpty);
+    runner.Add("PetPackLoader/PackWithDirectionalBaseOverrideLoadsCorrectly", PackWithDirectionalBaseOverrideLoadsCorrectly);
     runner.Add("PetPackLoader/InvalidDirectionByteInOverrideIsRejected", InvalidDirectionByteInOverrideIsRejected);
+    runner.Add("PetPackLoader/UnknownTargetStateIdIsRejected", UnknownTargetStateIdIsRejected);
+    runner.Add(
+        "PetPackLoader/HoverUsingAmbientPoolWithNonEmptyHoverActionsIsRejected", HoverUsingAmbientPoolWithNonEmptyHoverActionsIsRejected);
+    runner.Add("PetPackLoader/MultiStatePackWithRealTransitionLoadsCorrectly", MultiStatePackWithRealTransitionLoadsCorrectly);
 }
 
 }  // namespace nimvlets::tests

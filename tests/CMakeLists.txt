@@ -7,6 +7,10 @@
 
 add_executable(nimvlets_tests
   TestRunner.h
+  TestPetFixtures.h
+  NvPack2TestBuilder.h
+  StatefulBehaviorTest.h
+  StatefulBehaviorTest.cpp
   DragClassifierTest.h
   DragClassifierTest.cpp
   HoverPassiveGateTest.h

@@ -17,28 +17,26 @@
 
 #include <optional>
 #include <random>
+#include <string>
 
 namespace nimvlets::app {
 
 // Dueña del ciclo de vida de ventana/renderer de SDL y del event loop
 // principal del pequeño runtime de contenido+animación+persistencia+
-// catálogo, data-driven, construido a través de Block 01 (spike de
-// plataforma), Block 02 (contenido/animación), Block 03 (persistencia
-// local de estado — ver docs/PERSISTENCE.md) y Block 04 (catálogo de
-// pets + switching en runtime — ver docs/CATALOG.md).
+// catálogo, data-driven, construido a través de Block 01-04 y
+// generalizado en Block 05 a un grafo de comportamiento por-estado
+// (ver docs/ANIMATION_RUNTIME.md) — el mismo mecanismo sirve tanto a un
+// pet "normal" de un solo estado (Bunny, Nidir) como a un pet con
+// postura/transiciones reales (Frin: seated/lying).
 //
 // This is still explicitly a foundation/spike executable, not the
 // product — see docs/PLATFORM_SPIKE.md, docs/ANIMATION_RUNTIME.md, and
-// the block briefs' NON-SCOPE lists for what it deliberately does not do
-// (Shop, Collection, onboarding, pet-selector UI, audio, global click
-// mode, final content for all 8 Nimvlets, ...).
+// the block briefs' NON-SCOPE lists.
 //
 // El pet activo es enteramente datos: cuál pack cargar se resuelve
-// contra catalog_ (ver Init() y TrySwitchActivePet()) — esta clase no
-// contiene ninguna rama específica de un pet, ninguna forma
-// hardcodeada, y ningún conocimiento de "Bunny" más allá de ser la
-// única entrada real del catálogo de dev de este bloque. Agregar un
-// pet nuevo al catálogo nunca requiere tocar este archivo.
+// contra catalog_ — esta clase no contiene ninguna rama específica de
+// un pet. Agregar un pet nuevo al catálogo nunca requiere tocar este
+// archivo.
 class SpikeApp {
 public:
     // Runs until the window is closed. Returns a process exit code (0 on
@@ -52,407 +50,216 @@ private:
 
     void HandleEvent(const SDL_Event& event, bool& running);
 
-    // Draws content::AnimationController::CurrentFrame()'s texture.
-    // Called only when needsRedraw_ is set — see that field's doc
-    // comment — never on a fixed per-frame tick.
+    // Draws content::AnimationController::CurrentFrame()'s texture,
+    // scaled into the pet's EFFECTIVE (visual-scale-adjusted) canvas
+    // rect. Called only when needsRedraw_ is set.
     void RenderFrame();
 
-    // Rebuilds activeHitMask_ from the controller's current frame (see
-    // core::AlphaMask::FromAlphaChannel) and, on platforms where it's
-    // render-safe (see platform::NativeShapeHitTestIsRenderSafe()),
-    // pushes it to the OS via SDL_SetWindowShape. Called alongside
-    // RenderFrame() only when the displayed frame actually changed —
-    // never every tick — so the window shape surface is rebuilt exactly
-    // as often as the picture it hit-tests against.
+    // Rebuilds activeHitMask_ from the controller's current frame at
+    // the pet's EFFECTIVE canvas size and, on platforms where it's
+    // render-safe, pushes it to the OS via SDL_SetWindowShape.
     void ApplyCurrentHitMask();
 
     void PollHover();
     void UpdateClickThrough(bool cursorOverOpaque);
 
+    // TEMP diagnostic-only (Block 05 Bunny root-cause investigation) —
+    // ver el comentario de kDevDumpFramesDirEnvVar en SpikeApp.cpp.
+    void DumpCurrentRenderedFrame(const std::string& dir);
+
+    // Marca needsRedraw_ Y arma confirmRedrawDeadlineMs_ (Block 05 —
+    // ver el comentario de ese campo en este header): el punto único
+    // que toda transición de animación/estado real (click, disparo
+    // ambient/hover, cambio de dirección, switch de pet) usa para
+    // pedir un redraw, en vez de asignar needsRedraw_ = true a mano en
+    // cada call site. Un simple frame-advance DENTRO de una animación
+    // ya en reproducción (AnimationController::Advance() devolviendo
+    // true sin que el estado/modo haya cambiado) NO pasa por acá —
+    // sigue usando needsRedraw_ = true directo, para no rearmar el
+    // redraw de confirmación en cada frame de una animación ya
+    // "caliente".
+    void MarkNeedsRedraw(double nowMs);
+
     // True if `localPoint` (window-local, logical coordinates) is over
     // the currently active pet frame's real alpha-derived hit region.
-    // Every hit-test in this file (the MOUSE_BUTTON_DOWN defense-in-
-    // depth check, the poll-driven fallback's hover check, and the
-    // SDL_SetWindowShape surface built in ApplyCurrentHitMask()) goes
-    // through this one predicate.
     bool IsPointInteractive(core::Point localPoint) const;
 
-    // Creates/releases one SDL_Texture per frame across pet_'s idle,
-    // every idle direction override (Block 04.2 — see
-    // docs/NIDIR_CONTENT.md), click-reaction, and every passive action
-    // — see graphics::AttachFrameTexture()/ReleaseFrameTexture().
+    // El tamaño EFECTIVO en pantalla (puntos lógicos) del pet activo —
+    // pet_.canvasWidth/Height multiplicado por pet_.visualScale y
+    // redondeado (Block 05, escala visual por-pet — ver el comentario
+    // de PetDefinition::visualScale). Éste, no pet_.canvasWidth/Height
+    // directamente, es lo que gobierna el tamaño de ventana, el
+    // render-target lógico, y las dimensiones del hit-mask — así los
+    // tres se mantienen alineados entre sí y con el alto-DPI sin
+    // importar la escala. El arte fuente y los bytes del pack
+    // compilado nunca se tocan: esto es puramente cuánto se estira al
+    // dibujar.
+    int EffectiveCanvasWidth() const;
+    int EffectiveCanvasHeight() const;
+
+    // Creates/releases one SDL_Texture per frame across TODAS las
+    // colecciones de animación de pet_ (cada BehaviorState::
+    // baseAnimation + sus overrides, y cada WeightedAction de
+    // ambient/hover/click + sus propios overrides) — ver
+    // graphics::AttachFrameTexture()/ReleaseFrameTexture() y el aviso
+    // junto a content::PetDefinition sobre por qué esta cobertura
+    // importa.
     void AttachAllTextures();
     void ReleaseAllTextures();
 
-    // Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS (if set to a valid
-    // positive number) to shorten the passive-action wait for manual QA,
-    // without ever touching pet_.passiveIntervalSeconds itself — the
-    // pack's authored ~300s default stays the production value in every
-    // build; this is purely an opt-in override for *this run*. See
-    // docs/ANIMATION_RUNTIME.md, "DEV passive-interval override".
-    double ComputeEffectivePassiveIntervalSeconds() const;
+    // Segundos objetivo de intervalo ambient para `state`, aplicando
+    // NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS si está seteada a un valor
+    // positivo válido (mecanismo solo-DEV, ver su comentario en
+    // SpikeApp.cpp) — nunca muta state.ambientIntervalSeconds en sí.
+    double ComputeEffectiveAmbientIntervalSeconds(const content::BehaviorState& state) const;
+
+    // (Re)arma ambientDeadlineMs_ a partir del BehaviorState ACTUAL de
+    // animController_: nullopt si ese estado no define ambientActions
+    // (p. ej. Frin "lying" — sin timer, nunca se despierta el loop para
+    // esto), o `nowMs + intervalo*1000` si sí. Se llama una vez tras
+    // cargar/cambiar de pet, y de nuevo cada vez que el loop principal
+    // detecta que el estado activo cambió (ver lastKnownStateId_) —
+    // así un pet con estados (Frin) rearma correctamente el timer al
+    // entrar/salir de un estado con/sin comportamiento ambient propio,
+    // sin ningún código específico de Frin acá.
+    void RearmAmbientDeadline(double nowMs);
 
     // Escribe appState_ vía appStateStore_ si — y solo si —
-    // persistenceScheduler_ está dirty en ese momento; no hace nada en
-    // caso contrario, y no hace nada si appStateStore_ nunca se
-    // inicializó (ver el comentario de Init() sobre el fallo de
-    // SDL_GetPrefPath()). Se llama tanto desde el event loop, cuando se
-    // alcanza el deadline de persistenceScheduler_, como
-    // incondicionalmente desde Shutdown() (el shutdown limpio siempre
-    // flushea lo que quede dirty, sin importar el deadline de
-    // debounce — ver docs/PERSISTENCE.md).
+    // persistenceScheduler_ está dirty en ese momento.
     void FlushPersistedState();
 
-    // La API de switching en runtime reutilizable (block brief §4):
-    // intenta cargar el pack de `target` según catalog_. Si `target` no
-    // está en el catálogo, o su pack no carga, retorna false, deja un
-    // log claro, y NO toca pet_/animController_/appState_ en absoluto —
-    // el pet activo anterior sigue completamente usable. Si carga con
+    // La API de switching en runtime reutilizable: intenta cargar el
+    // pack de `target` según catalog_. Si falla, retorna false y no
+    // toca pet_/animController_/appState_ en absoluto. Si carga con
     // éxito: suelta las texturas del pet anterior, reemplaza pet_,
     // reatacha texturas del nuevo, reconstruye animController_ (que
-    // arranca en Idle del pet nuevo — exactamente lo requerido),
-    // actualiza appState_.activePetId/activeVariantId, marca
-    // persistenceScheduler_ dirty, y pide un redraw. Ver
-    // docs/CATALOG.md.
+    // arranca en el estado[0]/kBase del pet nuevo), actualiza
+    // appState_.activePetId/activeVariantId, marca
+    // persistenceScheduler_ dirty, y pide un redraw.
     bool TrySwitchActivePet(const catalog::PetIdentity& target);
 
     // Mecanismo solo-DEV para smoke-testear el switching de forma no
-    // interactiva contra el binario real (block brief §4: "no debe
-    // convertirse en comportamiento de producto"). Si
-    // NIMVLETS_DEV_SWITCH_TEST_COUNT es un entero positivo válido,
-    // ejecuta esa cantidad de llamadas a TrySwitchActivePet() -- una
-    // detrás de otra, cicladas por catalog_.Entries() -- inmediatamente
-    // después de que Init() termina y antes de entrar al loop
-    // principal, logueando cada resultado. Sin la variable de entorno,
-    // esto es un no-op total: cero cambio de comportamiento en
-    // producción. Ver docs/CATALOG.md.
+    // interactiva contra el binario real. Ver
+    // NIMVLETS_DEV_SWITCH_TEST_COUNT.
     void RunDevSwitchSmokeTestIfRequested();
 
-    // El "runtime method to change direction" que pide el block brief
-    // 04.2 §7 — todavía sin ningún control de UI que lo dispare
-    // (explícitamente fuera de alcance de este bloque). Delega en
+    // El "runtime method to change direction" — delega en
     // content::AnimationController::SetDirection(); si el frame
-    // mostrado cambió de verdad, pide un redraw (el loop principal se
-    // encarga de RenderFrame()+ApplyCurrentHitMask() en su próxima
-    // vuelta, igual que TrySwitchActivePet() ya hace). No toca
-    // appState_ — ver el comentario de appState_ sobre por qué la
-    // dirección no se persiste en este bloque.
+    // mostrado cambió de verdad, pide un redraw.
     void SetActiveDirection(content::Direction direction);
 
-    // Política automática de dirección por mitad de pantalla (Block
-    // 04.3 — corrige la ausencia total de un disparador real para
-    // SetActiveDirection() que el brief de Block 04.2 dejaba
-    // explícitamente fuera de alcance). Calcula en qué mitad del
-    // display que contiene la ventana cae el CENTRO de la ventana
-    // (SDL_GetDisplayForWindow()/SDL_GetDisplayBounds()) y llama a
-    // SetActiveDirection() con el resultado — mitad derecha de la
-    // pantalla -> Direction::kRight, mitad izquierda -> kLeft. No
-    // depende de ningún estado propio del pet (funciona igual para
-    // cualquier pet futuro, direccional o no — SetActiveDirection() ya
-    // es un no-op seguro sin contenido direccional). Si no se puede
-    // determinar el display de la ventana (SDL_GetDisplayForWindow()
-    // devuelve 0), no toca la dirección actual — nunca asume un valor
-    // por defecto silenciosamente. Se llama una vez explícitamente
-    // justo después de posicionar la ventana en Init() (por si el
-    // evento SDL_EVENT_WINDOW_MOVED no llega para ese posicionamiento
-    // inicial en alguna plataforma) y de nuevo cada vez que
-    // HandleEvent() recibe SDL_EVENT_WINDOW_MOVED — que SDL dispara
-    // ante CUALQUIER cambio de posición, sea por drag del usuario o
-    // por una llamada programática a SDL_SetWindowPosition(), así que
-    // un único hook cubre ambos casos sin necesidad de instrumentar
-    // cada sitio que mueve la ventana por separado.
+    // Política automática de dirección por mitad de pantalla: calcula
+    // en qué mitad del display que contiene la ventana cae el CENTRO
+    // de la ventana y llama a SetActiveDirection() con el resultado.
     void UpdateDirectionFromWindowPosition();
 
-    // Mecanismo solo-DEV para smoke-testear cambios de dirección de
-    // forma no interactiva contra el binario real, reflejando
-    // exactamente el patrón ya establecido de
-    // RunDevSwitchSmokeTestIfRequested() (block brief §9: "repeated
-    // direction changes do not accumulate logical resources" necesita
-    // poder ejercitarse sin QA manual). Si
-    // NIMVLETS_DEV_DIRECTION_TEST_COUNT es un entero positivo válido,
-    // alterna esa cantidad de veces entre Direction::kRight/kLeft
-    // -- sincrónicamente, antes del loop principal -- logueando cada
-    // cambio. Sin la variable de entorno, no-op total.
+    // Mecanismo solo-DEV para smoke-testear cambios de dirección. Ver
+    // NIMVLETS_DEV_DIRECTION_TEST_COUNT.
     void RunDevDirectionSmokeTestIfRequested();
 
-    // Mecanismo solo-DEV para smoke-testear el click reaction de forma
-    // no interactiva contra el binario real -- este bloque no tiene
-    // ninguna forma de sintetizar un click de mouse real de forma
-    // segura/no invasiva (ver AGENTS.md §5), así que esto llama
-    // directamente a animController_->TriggerClick(), el mismo método
-    // que SDL_EVENT_MOUSE_BUTTON_UP ya llama para un click real -- ver
-    // HandleEvent(). Si NIMVLETS_DEV_CLICK_TEST_COUNT es un entero
-    // positivo válido, ejecuta esa cantidad de clicks sintéticos --
-    // uno detrás de otro, sincrónicamente, antes del loop principal --
-    // exactamente igual que RunDevSwitchSmokeTestIfRequested(). El
-    // último click deja al controller efectivamente en
-    // ControllerState::kClickReaction al momento en que el loop
-    // principal arranca, así que su reproducción real (frame a frame,
-    // deadline-driven) se puede observar/medir contra el binario
-    // corriendo de verdad. Sin la variable de entorno, no-op total.
+    // Mecanismo solo-DEV para smoke-testear el click de forma no
+    // interactiva. Ver NIMVLETS_DEV_CLICK_TEST_COUNT.
     void RunDevClickSmokeTestIfRequested();
 
-    // Política de hover (Block 04.3, corrección post-QA — el owner pidió
-    // que reposar el cursor sobre el Nimvlet, sin hacer click, también
-    // pueda disparar una acción pasiva; ver docs/ANIMATION_RUNTIME.md,
-    // "política de hover"). Distinto del click: nunca toca clickCount_,
-    // appState_.clickBalance, ni la persistencia — solo dispara la MISMA
-    // TriggerPassiveAction() que el timer ambiente ya usa.
+    // Política de hover: reposar el cursor sobre el Nimvlet, sin hacer
+    // click, dispara la MISMA TriggerHoverAction() que también puede
+    // disparar el timer ambient (vía el pool efectivo de hover del
+    // estado activo — ver content::EffectiveHoverActions()). Nunca
+    // toca clickCount_/appState_.clickBalance/persistencia.
     //
-    // `cursorOverOpaque` es el resultado ya calculado de
-    // IsPointInteractive() para la muestra actual (desde
-    // SDL_EVENT_MOUSE_MOTION en el camino de hit-test nativo, o desde
-    // PollHover() en el camino de fallback poll-driven — ver los dos
-    // call sites); `nowMs` es el instante de esa muestra.
+    // Block 05, corrección de comportamiento real: el owner pidió
+    // explícitamente que hover NO quede bloqueado solo porque el timer
+    // ambient todavía no venció — así que, a diferencia de Block 04.3,
+    // este cooldown es su PROPIO deadline independiente
+    // (hoverCooldownUntilMs_), nunca el mismo que gobierna el disparo
+    // por timer (ambientDeadlineMs_). "leaving and re-entering should
+    // re-arm hover after a small independent cooldown": el flanco de
+    // subida de hoverPassiveGate_ sigue siendo necesario (nunca spam
+    // en un hover sostenido), pero además debe haber pasado al menos
+    // kHoverCooldownSeconds desde el ÚLTIMO disparo por hover — nunca
+    // desde el último disparo ambient.
     //
-    // Prioridad click/drag > hover/pasiva > estática: ningún gesto de
-    // click/drag en curso (dragClassifier_.IsActive()) alimenta nunca
-    // hoverPassiveGate_ — la comprobación se hace ANTES de tocar el
-    // gate, así que un click/drag en curso ni siquiera puede "consumir"
-    // el flanco de subida por accidente.
-    //
-    // hoverPassiveGate_ (ver core::HoverPassiveGate) solo decide SI el
-    // cursor acaba de empezar a estar sobre el sprite (el flanco de
-    // subida) — el cooldown real entre disparos lo provee el MISMO
-    // deadline ambiente que ya usa el disparo por timer
-    // (nextPassiveDeadlineMs_), compartido a propósito: "10 segundos" es
-    // así un único intervalo real que gobierna ambos caminos (timer y
-    // hover), tal como pidió el owner, en vez de dos relojes
-    // independientes que podrían solaparse y producir dos acciones
-    // pasivas seguidas con casi nada de idle estático entre medio. Igual
-    // que el camino del timer, dispara TriggerPassiveAction() (que ya es
-    // un no-op si el controller no está en Idle) y, si de verdad
-    // disparó, reprograma nextPassiveDeadlineMs_ igual que el timer —
-    // así, cuál de los dos caminos "gane" en un instante dado, el
-    // cooldown de 10s hacia la PRÓXIMA acción pasiva (por cualquiera de
-    // los dos caminos) queda correctamente reiniciado desde ese momento.
-    void MaybeTriggerHoverPassiveAction(bool cursorOverOpaque, double nowMs);
+    // Prioridad click/drag > hover/pasiva > estática: un gesto de
+    // click/drag en curso nunca alimenta hoverPassiveGate_.
+    void MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs);
 
     // Devuelve un double uniforme en [0, 1) de passiveActionRng_ — la
-    // única fuente de aleatoriedad real de todo este archivo. Extraído a
-    // su propio método (en vez de construir la distribución inline en
-    // cada call site) para que TriggerPassiveAction del timer ambiente y
-    // el disparo por hover usen exactamente la misma fuente/semántica.
-    // content::ChooseWeightedPassiveActionIndex() en sí es puro/
-    // determinista (ver su doc comment) — toda la aleatoriedad real vive
-    // acá, nunca ahí.
+    // única fuente de aleatoriedad real de todo este archivo.
     double NextUniformRandom01();
 
-    // Mecanismo solo-DEV para smoke-testear el disparo por hover de
-    // forma no interactiva contra el binario real, reflejando el mismo
-    // patrón que RunDevClickSmokeTestIfRequested()/
-    // RunDevDirectionSmokeTestIfRequested(). Este bloque no sintetiza
-    // eventos SDL_EVENT_MOUSE_MOTION reales (mismo motivo que el click
-    // dev: ver AGENTS.md §5) — en cambio llama directamente a
-    // MaybeTriggerHoverPassiveAction() con tiempo SIMULADO (no
-    // wall-clock real) que avanza en cada ciclo, mezclando saltos cortos
-    // (menos de un intervalo completo) y largos (más de uno).
-    //
-    // Comportamiento esperado y por qué (mismo límite que
-    // RunDevClickSmokeTestIfRequested() ya documenta: esto NO llama a
-    // animController_->Advance() por su cuenta, así que el controller
-    // nunca vuelve a Idle por sí solo dentro de esta corrida sincrónica):
-    // el PRIMER ciclo con el cooldown ya vencido dispara una acción
-    // pasiva real de verdad (loguea "hover-triggered passive action") y
-    // dispara los mismos side effects que un hover real (needsRedraw_,
-    // reprogramación de nextPassiveDeadlineMs_); TODOS los ciclos
-    // siguientes -- sean de salto corto (cooldown no vencido) o largo
-    // (cooldown vencido, pero el controller ya quedó en
-    // ControllerState::kPassiveAction del primer disparo y nada lo
-    // avanza de vuelta a Idle acá) -- deben quedar como no-op. Ese
-    // patrón ("dispara una vez, después se queda callado") es la
-    // observación correcta y ESPERADA en esta corrida, no un bug: prueba
-    // exactamente lo que hace falta probar acá -- que el hover NUNCA
-    // hace spam de acciones pasivas seguidas -- sin duplicar la cobertura
-    // de "el cooldown deja pasar un disparo nuevo tras un intervalo
-    // completo", que ya cubren tests/HoverPassiveGateTest.cpp (la
-    // detección de flanco en aislamiento) y el propio camino del timer
-    // ambiente (mismo mecanismo, en producción desde Block 02). Si
-    // NIMVLETS_DEV_HOVER_TEST_COUNT es un entero positivo válido,
-    // ejecuta esa cantidad de ciclos entrada+salida, logueando cada uno
-    // (un valor pequeño, p. ej. 2-4, ya alcanza para ver el patrón
-    // completo). Sin la variable de entorno, no-op total.
+    // Mecanismo solo-DEV para smoke-testear el disparo por hover. Ver
+    // NIMVLETS_DEV_HOVER_TEST_COUNT.
     void RunDevHoverSmokeTestIfRequested();
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 
-    // --- Block 04: catálogo de pets (ver docs/CATALOG.md) ---
-    // Cargado una única vez en Init() desde kCatalogPath (ver
-    // SpikeApp.cpp) vía catalog::LoadCatalogFromFile(). Puro metadato
-    // -- nunca carga por adelantado los packs de otras entradas; el
-    // único pack efectivamente en memoria en todo momento es el de
-    // pet_ (ver TrySwitchActivePet()).
     catalog::PetCatalog catalog_;
 
-    // El pet activo actual, con todo su contenido data-driven --
-    // reemplazado por completo en cada switch exitoso (ver
-    // TrySwitchActivePet()), nunca mutado incrementalmente. Declarado
-    // antes de animController_ para que exista (default-construido, si
-    // aún no se cargó nada) en el momento en que el member-initializer
-    // de animController_ le enlaza una referencia -- ver el comentario
-    // de animController_ para por qué ese orden importa y por qué
-    // sigue siendo seguro incluso después de reemplazar pet_ en un
-    // switch (ver TrySwitchActivePet()).
+    // El pet activo actual, con todo su contenido data-driven —
+    // reemplazado por completo en cada switch exitoso.
     content::PetDefinition pet_;
 
-    // Constructed only after pet_ is successfully loaded (Init() calls
-    // animController_.emplace(pet_)) — std::optional rather than binding
-    // a reference to pet_ before it holds real content, so there is
-    // never a window where a reference exists to not-yet-loaded data.
     std::optional<content::AnimationController> animController_;
 
     // The rasterized hit-test region for animController_'s *current*
-    // frame — rebuilt by ApplyCurrentHitMask() only when the frame
-    // changes. 1x1 placeholder until Init() populates real content
-    // (never used as such: Init() always calls ApplyCurrentHitMask()
-    // before the window becomes interactive).
+    // frame, at EffectiveCanvasWidth()/Height() — rebuilt by
+    // ApplyCurrentHitMask() only when the frame changes.
     core::AlphaMask activeHitMask_{1, 1};
 
     core::DragClassifier dragClassifier_;
     int clickCount_ = 0;
 
-    // Set whenever something that affects the displayed picture happens
-    // (a frame-advance from animController_->Advance(), a
-    // TriggerClick()/TriggerPassiveAction() call, or an
-    // SDL_EVENT_WINDOW_EXPOSED asking us to repaint) and cleared right
-    // after RenderFrame()+ApplyCurrentHitMask() run for it. This is the
-    // mechanism that makes static idle render/redraw *nothing* — no
-    // fixed tick exists anymore (contrast Block 01's frameScheduler_).
-    // Starts true so the very first frame renders.
+    // Set whenever something that affects the displayed picture
+    // happens. Cleared right after RenderFrame()+ApplyCurrentHitMask()
+    // run for it. Starts true so the very first frame renders.
     bool needsRedraw_ = true;
 
     // Redraw de confirmación programado, con separación real de
-    // wall-clock (Block 04.3, corrección post-QA del bug de "sprite
-    // parcial tras un cambio de dirección"). Además del doble-present
-    // inmediato que RenderFrame() ya hace, un cambio de dirección
-    // mientras el pet está Idle también arma este deadline (ver
-    // SetActiveDirection()) para forzar un SEGUNDO redraw completo
-    // ~120ms más tarde -- una separación temporal real, más parecida a
-    // cómo una animación en reproducción (que ya se sabía que
-    // "arreglaba" el problema) naturalmente presenta varias veces
-    // separadas en el tiempo, en vez de depender de que el usuario
-    // dispare una animación por casualidad. `nullopt` la mayor parte
-    // del tiempo (sin costo real): el event loop nunca despierta por
-    // esto salvo que un cambio de dirección real lo haya armado.
+    // wall-clock (Block 04.3 originalmente solo para cambios de
+    // dirección; Block 05 lo generaliza a CUALQUIER transición de
+    // animación/estado — ver MarkNeedsRedraw() — tras encontrar, con
+    // un dump real de frames renderizados, que el primer render "frío"
+    // de una sesión puede leerse de vuelta vacío; ver el informe final
+    // para el detalle y sus límites honestos). `nullopt` la mayor
+    // parte del tiempo.
     std::optional<double> confirmRedrawDeadlineMs_;
 
-    // Effective seconds between sparse passive actions for this run —
-    // see ComputeEffectivePassiveIntervalSeconds(). Computed once in
-    // Init(); pet_.passiveIntervalSeconds (the pack's authored default)
-    // is never mutated.
-    //
-    // Compartido por los DOS caminos que pueden disparar una acción
-    // pasiva (Block 04.3, corrección post-QA — política de hover): el
-    // timer ambiente de más abajo, que lo revisa incondicionalmente en
-    // cada vuelta del loop principal, Y MaybeTriggerHoverPassiveAction()
-    // (ver su doc comment), que lo revisa solo en el flanco de subida de
-    // un hover real. Cualquiera de los dos que dispare primero reprograma
-    // este MISMO deadline hacia adelante — un único cooldown real de
-    // ~10s hacia la próxima acción pasiva, gane quien gane, en vez de dos
-    // relojes independientes que podrían solaparse.
-    double passiveIntervalSecondsEffective_ = 300.0;
-    double nextPassiveDeadlineMs_ = 0.0;
+    // Último BehaviorState::id conocido de animController_ — usado
+    // solo para detectar una transición de estado real en el loop
+    // principal y (re)armar ambientDeadlineMs_ en consecuencia (ver
+    // RearmAmbientDeadline()). No tiene ningún otro uso.
+    std::string lastKnownStateId_;
 
-    // Fuente real de aleatoriedad para elegir qué acción pasiva disparar
-    // (Block 04.3, corrección post-QA — política 70/30 pedida por el
-    // owner). Sembrado una sola vez en Init() desde std::random_device —
-    // ver NextUniformRandom01(). Reemplaza el ciclado round-robin
-    // determinista que este campo tenía en bloques anteriores: ahora
-    // content::ChooseWeightedPassiveActionIndex() decide el índice,
-    // ponderado por pet_.passiveActionWeights cuando el pack los define
-    // (vacío = selección uniforme, comportamiento idéntico al
-    // round-robin de antes en la práctica estadística, aunque ya no
-    // literalmente cíclico).
+    // Deadline del disparo ambient (timer) para el BehaviorState
+    // activo — nullopt si ese estado no define ambientActions (p. ej.
+    // Frin "lying"). Reemplaza al viejo nextPassiveDeadlineMs_ (un
+    // único valor por-pet); ahora es por-estado, re-armado por
+    // RearmAmbientDeadline().
+    std::optional<double> ambientDeadlineMs_;
+
+    // Cooldown INDEPENDIENTE del disparo por hover (Block 05 — ver el
+    // comentario de MaybeTriggerHoverAction()). Nunca compartido con
+    // ambientDeadlineMs_.
+    double hoverCooldownUntilMs_ = 0.0;
+
+    // Fuente real de aleatoriedad para elegir qué WeightedAction
+    // disparar (ambient/hover/click, política ponderada). Sembrado una
+    // sola vez en Init() desde std::random_device.
     std::mt19937 passiveActionRng_;
 
-    // Detector de flanco de "el cursor acaba de entrar a la región
-    // interactiva" para el disparo de acción pasiva por hover (Block
-    // 04.3, corrección post-QA) — ver core::HoverPassiveGate y
-    // MaybeTriggerHoverPassiveAction().
     core::HoverPassiveGate hoverPassiveGate_;
 
-    // --- Block 03: persistencia local (ver docs/PERSISTENCE.md) ---
-    // Se carga una vez en Init() (o queda en defaults seguros si aún
-    // no existe ningún save, o el save no se puede leer) y se muta
-    // mientras la app corre; nunca se relee desde disco hasta el
-    // *siguiente* arranque del proceso.
-    //
-    // La dirección activa (Block 04.2 — ver SetActiveDirection()) NO
-    // vive acá ni en ningún lado persistido: el block brief §7 es
-    // explícito ("Persistence of direction is not required unless
-    // essentially free and clearly justified") y agregar un campo acá
-    // exigiría tocar el formato NVSTATE1 (bump de schema, migración)
-    // por un beneficio que nadie pidió — no calza con "esencialmente
-    // gratis". animController_ arranca en Direction::kRight en cada
-    // Init()/TrySwitchActivePet(), sin excepción.
     persistence::AppState appState_;
-
-    // Se construye en Init() una vez que se resuelve el directorio de
-    // app-data por usuario vía SDL_GetPrefPath(). std::nullopt solo si
-    // esa resolución falla (raro — p. ej. un home directory sin
-    // permisos de escritura); en ese caso la app corre completamente
-    // normal, simplemente no carga ni guarda nada en esta sesión — ver
-    // el comentario de Init(). std::optional en vez de un miembro
-    // plano por la misma razón que animController_ arriba: no se
-    // conoce ninguna ruta hasta que Init() corre.
     std::optional<persistence::AppStateStore> appStateStore_;
-
-    // Aplica debounce a las escrituras a disco para que los clicks
-    // rápidos se coalescan en una sola escritura en vez de una por
-    // click — ver docs/PERSISTENCE.md y el comentario de
-    // FlushPersistedState().
     persistence::PersistenceScheduler persistenceScheduler_;
 
-    // True once Init() has successfully handed hit-testing to the
-    // platform's own native mechanism (SDL_SetWindowShape on macOS —
-    // see platform::NativeShapeHitTestIsRenderSafe()). When true, the
-    // poll-driven fallback below (hoverScheduler_, PollHover(),
-    // UpdateClickThrough()) is never invoked — the OS handles
-    // click-through on every real mouse event, with zero polling.
     bool usingNativeShapeHitTest_ = false;
-
-    // True once Init() has determined that the poll-driven fallback
-    // below is actually worth running — i.e. usingNativeShapeHitTest_
-    // is false AND platform::ClickThroughPollingIsMeaningful() says a
-    // poll-triggered SetWindowClickThrough() call could really change
-    // OS-level input delivery here. Added in Block 04.1: on Windows
-    // this always matches !usingNativeShapeHitTest_ (unchanged
-    // behavior — the poll fallback genuinely works there), but on
-    // Linux/Wayland neither the native shape path nor the poll
-    // fallback can do anything (see
-    // src/platform/linux/TransparentWindowSupport.cpp and
-    // docs/LINUX_PLATFORM.md), so this stays false there and the event
-    // loop never starts the ~60Hz wakeup loop at all — running it
-    // anyway, knowing in advance it could never change anything, would
-    // be exactly the permanent polling loop AGENTS.md §2 forbids.
     bool usingPollDrivenClickThrough_ = false;
 
-    // --- poll-driven click-through FALLBACK, used only when
-    // usingPollDrivenClickThrough_ is true (currently: Windows, and
-    // X11 in practice never reaches here either — see
-    // platform::NativeShapeHitTestIsRenderSafe()'s doc comment for why
-    // macOS/Linux-X11 don't need this). Unchanged in spirit from
-    // Block 01 — still a bounded SDL_WaitEventTimeout wakeup at ~60 Hz,
-    // never a busy-wait, still a cursor-*position* poll
-    // (SDL_GetGlobalMouseState), not a global input hook. See
-    // AGENTS.md's privacy rules. ---
     core::FrameScheduler hoverScheduler_{1000.0 / 60.0};
     bool currentlyClickThrough_ = false;
 
-    // Click-through pipeline instrumentation (fallback path only — see
-    // PollHover()'s and UpdateClickThrough()'s doc comments, and
-    // docs/PLATFORM_SPIKE.md's "click-through instrumentation"
-    // section). Tracks the last-logged value of each stage of the
-    // pipeline so PollHover()/UpdateClickThrough() can log a line ONLY
-    // when a stage's value actually changes — never once per poll/frame
-    // regardless of change, which would flood the log at 60 Hz.
-    // `diagHasValue_` guards the very first sample so it's always
-    // logged once, establishing a baseline. The fields themselves (not
-    // just the logging that uses them) are compiled out entirely in
-    // Release builds (#ifndef NDEBUG) — matching the call sites exactly
-    // avoids "unused private field" warnings there instead of just
-    // silencing them.
 #ifndef NDEBUG
     bool diagHasValue_ = false;
     float diagGlobalX_ = 0.0f;
@@ -465,24 +272,14 @@ private:
     bool diagActualIgnoresMouseEvents_ = false;
 #endif  // NDEBUG
 
-    // Manual window drag state. We deliberately do not use
-    // SDL_HITTEST_DRAGGABLE / OS-level window dragging: that would hand
-    // the whole gesture to the window manager and we would never see the
-    // button-down/motion/button-up sequence core::DragClassifier needs
-    // to tell a click from a drag.
     double dragGrabOffsetX_ = 0.0;
     double dragGrabOffsetY_ = 0.0;
+
+    // TEMP diagnostic-only — ver DumpCurrentRenderedFrame().
+    int devDumpFrameCount_ = 0;
 };
 
 // Returns true once a SIGINT/SIGTERM has been received.
-//
-// The spike window is intentionally borderless, NOT_FOCUSABLE, and
-// excluded from the Dock (see Init()) — that's correct for a desktop
-// companion, but it also means there is no window-chrome close button
-// and no way for it to ever receive Cmd+Q. This is the dev/QA exit path
-// (`kill -TERM <pid>` or Ctrl+C in the launching terminal) used to
-// verify "clean shutdown, no hung process" without adding any real UI.
-// It is not a product feature — see docs/PLATFORM_SPIKE.md.
 bool ShutdownRequested();
 
 }  // namespace nimvlets::app

@@ -16,6 +16,7 @@
 #include "PetPackLoaderTest.h"
 #include "PetSwitchingTest.h"
 #include "SilhouetteTest.h"
+#include "StatefulBehaviorTest.h"
 #include "TestRunner.h"
 
 int main() {
@@ -39,6 +40,7 @@ int main() {
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
+    nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 
     return runner.RunAll();
 }

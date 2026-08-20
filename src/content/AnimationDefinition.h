@@ -14,7 +14,7 @@ namespace nimvlets::content {
 enum class PlaybackKind : std::uint8_t {
     kStatic = 0,   // exactly one frame, never advances — no frame deadline ever exists.
     kLoop = 1,     // wraps back to frame 0 after the last frame.
-    kOneShot = 2,  // plays once, then the controller returns to Idle (see AnimationController).
+    kOneShot = 2,  // plays once, then the controller returns to a base state (see AnimationController).
 };
 
 // One displayable frame: pixel data plus enough metadata to place it
@@ -31,10 +31,8 @@ struct FrameDefinition {
 
     // The point (in this frame's own pixel coordinates) that should
     // align to the pet's canvas center when rendered — keeps frames
-    // with different internal content placement (e.g. a squash/stretch
-    // transform) from visually jittering relative to each other, even
-    // though every frame in this block's dev content happens to share
-    // one fixed canvas size. See docs/ANIMATION_RUNTIME.md.
+    // with different internal content placement from visually jittering
+    // relative to each other. See docs/ANIMATION_RUNTIME.md.
     core::Point anchor{};
 
     // Milliseconds this frame stays on screen when its
@@ -52,15 +50,12 @@ struct FrameDefinition {
     void* rendererHandle = nullptr;
 };
 
-// Dirección genérica de un Nimvlet direccional (Block 04.2 — ver
-// docs/NIDIR_CONTENT.md). Metadata/estado, no un concepto por-pet: un
-// pet sin arte direccional (Bunny) simplemente nunca puebla
-// `PetDefinition::idleDirectionOverrides`, y toda resolución de
-// dirección cae de forma determinista a `PetDefinition::idle` — ver
-// ResolveIdleAnimation() más abajo. `kRight` es la dirección default en
-// todo el runtime (AnimationController arranca ahí — ver
-// AnimationController.h) y la que `idle` representa implícitamente
-// cuando un pet sí tiene contenido direccional.
+// Dirección genérica de un Nimvlet direccional. Metadata/estado, no un
+// concepto por-pet: un pet sin arte direccional simplemente nunca
+// puebla ninguna lista de overrides, y toda resolución de dirección cae
+// de forma determinista a la animación canónica — ver ResolveAnimation()
+// más abajo. `kRight` es la dirección default de todo el runtime
+// (AnimationController arranca ahí).
 enum class Direction : std::uint8_t {
     kRight = 0,
     kLeft = 1,
@@ -81,8 +76,12 @@ struct AnimationDefinition {
     // == 0: each frame shows for its own frames[i].durationMs.
     double fps = 0.0;
 
-    // Whether AnimationController transitions back to Idle when this
-    // (one-shot) animation completes. Meaningless for kStatic/kLoop.
+    // Whether a finished kOneShot animation actually transitions
+    // (Advance() calls into AnimationController's state machine) or
+    // simply holds on its last frame forever. Meaningless for
+    // kStatic/kLoop. For a WeightedAction's animation (see below) this
+    // is normally true — see WeightedAction::targetStateId for *where*
+    // it transitions to.
     bool returnsToIdle = true;
 
     std::vector<FrameDefinition> frames;
@@ -94,176 +93,161 @@ struct AnimationDefinition {
     double FrameDurationMs(std::size_t frameIndex) const;
 };
 
-// Una variante de `PetDefinition::idle` para una dirección distinta de
-// la canónica que `idle` ya representa (ver el comentario de
-// Direction). Solo existen entradas para direcciones con arte propio
-// de verdad — Nidir (Block 04.2) tiene exactamente una, `kLeft`; un pet
-// no direccional (Bunny) no tiene ninguna. Ver ResolveIdleAnimation().
+// Una variante de una animación para una dirección distinta de la
+// canónica (Direction::kRight, ver el comentario de Direction). Solo
+// existen entradas para direcciones con arte propio de verdad. Ver
+// ResolveAnimation().
 struct DirectionalAnimationOverride {
     Direction direction = Direction::kRight;
     AnimationDefinition animation;
 };
 
-// Igual que DirectionalAnimationOverride, pero para una entrada
-// específica de `PetDefinition::passiveActions` (una lista, a
-// diferencia de `idle`/`clickReaction`) — `passiveActionIndex` dice a
-// cuál. Ver ResolvePassiveAction().
-struct PassiveActionDirectionalOverride {
-    std::size_t passiveActionIndex = 0;
-    Direction direction = Direction::kRight;
+// Resuelve qué AnimationDefinition mostrar para `direction`, dada una
+// animación canónica y su lista (posiblemente vacía) de overrides
+// direccionales. Política de fallback, documentada explícitamente:
+//   - Direction::kRight, o cualquier dirección sin entrada dedicada en
+//     `overrides`: retorna `canonical`.
+//   - Cualquier otra dirección CON una entrada dedicada: retorna esa
+//     animación.
+// Nunca falla. Genérica — reemplaza las antiguas ResolveIdleAnimation/
+// ResolveClickReaction/ResolvePassiveAction (Block 02/04.2): esta única
+// función cubre la pose base de un BehaviorState y la animación de
+// cualquier WeightedAction, sin importar a qué disparador pertenezcan.
+const AnimationDefinition& ResolveAnimation(
+    const AnimationDefinition& canonical, const std::vector<DirectionalAnimationOverride>& overrides, Direction direction);
+
+// Un disparo posible desde un trigger (click/ambient/hover) de un
+// BehaviorState: qué animación reproducir, con qué peso relativo frente
+// a otras entradas del mismo trigger, y a qué estado transicionar
+// cuando termine (puede ser el MISMO estado — un "self-loop", el caso
+// de un click reaction ordinario o una acción pasiva de un pet normal —
+// o uno DISTINTO — una transición real, el caso de Frin's
+// sit-to-lie/lie-to-sit). `animation` normalmente es PlaybackKind::
+// kOneShot; cuando termina (returnsToIdle == true), el controller
+// transiciona a `targetStateId`.
+struct WeightedAction {
+    std::string id;
+    double weight = 1.0;
+    std::string targetStateId;
     AnimationDefinition animation;
+    std::vector<DirectionalAnimationOverride> directionOverrides;
 };
 
-// Everything needed to run one kind of Nimvlet: its idle look, its
-// click reaction, its passive actions, and the thresholds/timing that
-// govern them. One logical Nimvlet — `variantGroup` exists so a future
-// block can express "Frin has male/female variants" in data, without
-// implementing selection/unlocking here (see docs/DECISION_LOG.md).
-// AVISO para quien agregue una colección de animaciones nueva acá
-// (idle/clickReaction/passiveActions y sus respectivos overrides
-// direccionales YA existentes son todas las que hay hoy): cada
-// colección de frames de este struct debe estar cubierta tanto por
-// `SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()`
-// (src/app/SpikeApp.cpp) como por cualquier futuro camino de
-// carga/descarga de texturas -- una colección nueva que se olvide ahí
-// se resuelve correctamente en `AnimationController` (los `Resolve*()`
-// de este archivo no tienen ningún problema) pero se renderiza
-// completamente transparente en runtime, en silencio (sin crash, sin
-// error visible más allá de un log de advertencia en
-// `SpikeApp::RenderFrame()`). Esto fue un bug real, no hipotético:
-// `clickReactionDirectionOverrides`/`passiveActionDirectionOverrides`
-// (agregados en la segunda pasada de Block 04.2) faltaban en
-// `AttachAllTextures()`/`ReleaseAllTextures()` hasta que se detectó al
-// importar el click-fire real de Nidir en la tercera pasada -- ver
-// docs/NIDIR_CONTENT.md, "bug de cobertura de texturas".
+// Elige qué entrada de `actions` disparar, ponderada por su
+// WeightedAction::weight. Pura y determinista: `uniformRandom01` es un
+// valor en [0,1) que el LLAMADOR provee — esta función nunca genera
+// aleatoriedad por sí misma. Reemplaza a
+// ChooseWeightedPassiveActionIndex (Block 04.3): la misma política
+// 70/30, ahora genérica sobre CUALQUIER lista de WeightedAction (ambient,
+// hover, o click), no solo `passiveActions`. Precondición: `actions` no
+// está vacío.
+std::size_t ChooseWeightedActionIndex(const std::vector<WeightedAction>& actions, double uniformRandom01);
+
+// Un estado de comportamiento con nombre: una pose base (mostrada en
+// reposo) más tres triggers posibles desde ahí (ambient/hover/click),
+// cada uno una lista ponderada de WeightedAction — posiblemente vacía,
+// lo que significa "ese trigger no hace nada mientras el pet está en
+// este estado" (p. ej. Frin no tiene ambient mientras está lying, y no
+// tiene ningún hover propio en ningún estado todavía).
+//
+// Un pet "normal" (Bunny, Nidir) tiene exactamente UN BehaviorState: su
+// baseAnimation es la pose estática de siempre, clickActions tiene una
+// entrada (el click reaction de siempre, self-loop), ambientActions
+// tiene las acciones pasivas ponderadas de siempre (self-loop), y
+// hoverUsesAmbientActions es true (mismo pool, sin duplicar datos — ver
+// su comentario). Un pet "stateful" (Frin) tiene dos o más
+// BehaviorState con transiciones reales entre ellos.
+struct BehaviorState {
+    std::string id;
+
+    AnimationDefinition baseAnimation;
+    std::vector<DirectionalAnimationOverride> baseAnimationDirectionOverrides;
+
+    // Segundos objetivo entre disparos ambient mientras el pet está en
+    // este estado — sin sentido si ambientActions está vacío (no hay
+    // ningún timer armado para un estado sin acciones ambient, ver
+    // AnimationController/SpikeApp). Reemplaza al viejo
+    // PetDefinition::passiveIntervalSeconds (que era un único valor
+    // global por pet) — ahora es por-estado, lo que Frin necesita
+    // (rest-delay solo aplica en "seated", nunca en "lying").
+    double ambientIntervalSeconds = 300.0;
+    std::vector<WeightedAction> ambientActions;
+
+    // Si true, un disparo por hover elige de ambientActions (mismo pool,
+    // sin duplicar frames/pixeles en el pack compilado) — la política
+    // por defecto para un pet normal ("hover uses the same available
+    // passive-action pool unless content says otherwise"). Si false, se
+    // usa hoverActions (posiblemente vacío = sin acción de hover en este
+    // estado, el caso de Frin hoy). Nunca ambas cosas a la vez — el
+    // loader rechaza un pack que ponga hoverUsesAmbientActions=true Y
+    // defina hoverActions no vacío, para no dejar ambigüedad sobre cuál
+    // gana.
+    bool hoverUsesAmbientActions = true;
+    std::vector<WeightedAction> hoverActions;
+
+    std::vector<WeightedAction> clickActions;
+};
+
+// El pool de acciones que un disparo de hover debe consultar realmente
+// para `state` — hoverActions si el estado define su propia lista,
+// ambientActions si hoverUsesAmbientActions (el caso normal). Un
+// helper trivial, pero centraliza la regla en un solo lugar en vez de
+// repetirla en AnimationController y en SpikeApp.
+const std::vector<WeightedAction>& EffectiveHoverActions(const BehaviorState& state);
+
+// Everything needed to run one kind of Nimvlet: its behavior graph
+// (estados + transiciones) y los thresholds/escala que lo gobiernan.
+// One logical Nimvlet — `variantGroup` exists so a pet can express
+// "Frin has male/female variants" in data (ver docs/CATALOG.md).
 struct PetDefinition {
     std::string id;
     std::string displayName;
-
-    // Empty string = no variant grouping. Non-empty = this pet is one
-    // variant among others sharing the same group id (e.g. "frin").
-    // Not used for anything yet in this block — schema-only, per the
-    // block brief.
     std::string variantGroup;
 
     int canvasWidth = 160;
     int canvasHeight = 160;
 
+    // Escala visual/de despliegue por-pet (Block 05). Multiplica el
+    // tamaño en pantalla (ventana, render, hit-mask) — nunca el arte
+    // fuente ni los bytes del pack compilado, y nunca por-animación:
+    // TODAS las animaciones de un mismo pet comparten esta única escala
+    // (ver SpikeApp::EffectiveCanvasWidth()/EffectiveCanvasHeight()).
+    // Default 1.0 — sin cambio de comportamiento para cualquier pet que
+    // no la defina explícitamente. Dato de contenido puro: ajustar el
+    // tamaño percibido de un pet es cambiar este único número y
+    // recompilar, nunca una rama de código por especie.
+    double visualScale = 1.0;
+
     // alpha >= this value counts as visible/interactive (see
     // core::AlphaMask::FromAlphaChannel). Configurable per pet, not a
-    // global constant — docs/ANIMATION_RUNTIME.md documents why 128 is
-    // the default.
+    // global constant.
     std::uint8_t alphaHitThreshold = 128;
 
-    // El idle canónico del pet. Para un pet no direccional (Bunny) es
-    // simplemente "el" idle. Para un pet direccional (Nidir) es, por
-    // convención, el idle de Direction::kRight — nunca hace falta una
-    // entrada explícita en idleDirectionOverrides para kRight, ver
-    // ResolveIdleAnimation().
-    AnimationDefinition idle;
+    // El grafo de comportamiento completo. states[0] es el estado
+    // inicial/default al arrancar (o al hacer switch a este pet) — ver
+    // AnimationController. Todo pet válido tiene al menos un estado
+    // (impuesto por PetPackLoader). Cada WeightedAction::targetStateId
+    // de cualquier estado DEBE referenciar un id presente en esta misma
+    // lista (validado al cargar) — nunca indexar states[] a mano fuera
+    // de AnimationController, usar sus accesores.
+    std::vector<BehaviorState> states;
 
-    // Variantes de idle para direcciones DISTINTAS de la que `idle`
-    // arriba ya representa (Block 04.2 — ver docs/NIDIR_CONTENT.md).
-    // Vacío para un pet no direccional. Nunca indexar directamente —
-    // usar ResolveIdleAnimation().
-    std::vector<DirectionalAnimationOverride> idleDirectionOverrides;
-
-    // El click reaction canónico del pet (Direction::kRight por
-    // convención, igual que `idle`). Ver clickReactionDirectionOverrides
-    // y ResolveClickReaction().
-    AnimationDefinition clickReaction;
-
-    // Variantes de clickReaction para direcciones distintas de la
-    // canónica (Block 04.2 — ver docs/NIDIR_CONTENT.md). Vacío para un
-    // pet no direccional, o mientras no exista arte de click
-    // direccional real. Nunca indexar directamente — usar
-    // ResolveClickReaction().
-    std::vector<DirectionalAnimationOverride> clickReactionDirectionOverrides;
-
-    // Zero or more sparse autonomous actions; AnimationController picks
-    // which one to play by index (see TriggerPassiveAction()).
-    std::vector<AnimationDefinition> passiveActions;
-
-    // Peso relativo de selección de cada entrada de `passiveActions`,
-    // por índice paralelo (Block 04.3, corrección post-QA — política
-    // 70/30 pedida por el owner: la primera acción pasiva de un pet
-    // 70% de las veces, la segunda 30%). Vacío (el caso por defecto,
-    // sin cambio de comportamiento para cualquier pet con un solo
-    // `passiveActions` o que no defina pesos) significa "todas las
-    // entradas con el mismo peso" — ver ChooseWeightedPassiveActionIndex().
-    // Si no está vacío, DEBE tener el mismo tamaño que `passiveActions`
-    // (validado en tiempo de carga — ver PetPackLoader.cpp). Genérico:
-    // no asume ningún número específico de acciones pasivas ni ninguna
-    // proporción particular más allá de lo que este vector diga.
-    std::vector<double> passiveActionWeights;
-
-    // Variantes direccionales de entradas específicas de
-    // `passiveActions` (Block 04.2 — ver docs/NIDIR_CONTENT.md). Lista
-    // plana en vez de anidada dentro de `passiveActions` a propósito:
-    // mantiene el formato binario NVPACK1 puramente aditivo/al final
-    // (ver PetPackLoader.cpp) en vez de tener que intercalar bytes
-    // nuevos en medio del layout ya existente. Vacío para un pet no
-    // direccional. Nunca indexar directamente — usar
-    // ResolvePassiveAction().
-    std::vector<PassiveActionDirectionalOverride> passiveActionDirectionOverrides;
-
-    // Target average seconds between passive actions. A scheduling
-    // target, not a hard guarantee — see docs/ANIMATION_RUNTIME.md.
-    double passiveIntervalSeconds = 300.0;
-
-    // Optional; empty string if not set. Schema-only in this block —
-    // nothing reads it yet, but the field exists so future content
-    // packs have a place to record it without a schema change.
+    // Target average seconds between passive actions, retenido a nivel
+    // de contentVersion solo como metadato de compatibilidad de
+    // formato -- el valor real que gobierna el scheduler vive ahora en
+    // cada BehaviorState::ambientIntervalSeconds.
     std::string contentVersion;
 };
 
-// Resuelve qué AnimationDefinition de idle mostrar para `direction`
-// (block brief 04.2 §6: "active animation resolves using current pet +
-// animation id + direction" — "idle" es, en este bloque, la única
-// animación con variantes por dirección). Política de fallback,
-// documentada explícitamente en vez de dejarla implícita (block brief
-// §6: "unsupported direction fails clearly or uses an explicitly
-// documented safe fallback"):
-//   - Direction::kRight, o cualquier dirección sin entrada dedicada en
-//     `pet.idleDirectionOverrides`: retorna `pet.idle`.
-//   - Cualquier otra dirección CON una entrada dedicada: retorna esa
-//     animación.
-// Nunca falla — todo PetDefinition válido (impuesto por
-// PetPackLoader/PetDefinition's ctor implícito) tiene al menos `idle`.
-const AnimationDefinition& ResolveIdleAnimation(const PetDefinition& pet, Direction direction);
-
-// Igual que ResolveIdleAnimation() pero para clickReaction: retorna la
-// entrada de `pet.clickReactionDirectionOverrides` que calza con
-// `direction` si existe una, si no cae a `pet.clickReaction`. Mismo
-// contrato de "nunca falla, fallback documentado".
-const AnimationDefinition& ResolveClickReaction(const PetDefinition& pet, Direction direction);
-
-// Igual que ResolveIdleAnimation() pero para
-// `pet.passiveActions[passiveActionIndex]`: retorna la entrada de
-// `pet.passiveActionDirectionOverrides` que calza con
-// (passiveActionIndex, direction) si existe una, si no cae a
-// `pet.passiveActions[passiveActionIndex]`. Precondición: `passiveActionIndex`
-// es un índice válido de `pet.passiveActions` — a diferencia de
-// AnimationController::TriggerPassiveAction() (que valida el índice
-// antes de llegar acá), esta función no revalida el rango.
-const AnimationDefinition& ResolvePassiveAction(const PetDefinition& pet, std::size_t passiveActionIndex, Direction direction);
-
-// Elige qué entrada de `pet.passiveActions` disparar, ponderada por
-// `pet.passiveActionWeights` (Block 04.3, corrección post-QA — política
-// 70/30). Pura y determinista: `uniformRandom01` es un valor en [0,1)
-// que el LLAMADOR provee (en producción, de un generador aleatorio
-// real; en tests, un valor fijo) — esta función nunca genera
-// aleatoriedad por sí misma, así que su resultado es 100% reproducible
-// dado el mismo input, igual que el resto de `content::` (ver
-// AnimationController::Advance(nowMs), que de la misma forma nunca
-// lee el reloj por su cuenta).
-//
-// Si `pet.passiveActionWeights` está vacío, todas las entradas de
-// `passiveActions` tienen peso igual (selección uniforme). Si no está
-// vacío, se usa tal cual (debe tener el mismo tamaño que
-// `passiveActions` — ver el comentario del campo). Precondición:
-// `pet.passiveActions` no está vacío (el llamador ya lo garantiza
-// antes de disparar cualquier acción pasiva).
-std::size_t ChooseWeightedPassiveActionIndex(const PetDefinition& pet, double uniformRandom01);
+// AVISO para quien agregue una colección de animaciones nueva a
+// BehaviorState/PetDefinition: cada colección de frames debe estar
+// cubierta tanto por SpikeApp::AttachAllTextures()/ReleaseAllTextures()
+// como por cualquier futuro camino de carga/descarga de texturas — una
+// colección nueva que se olvide ahí se resuelve correctamente en
+// AnimationController (ResolveAnimation() no tiene ningún problema)
+// pero se renderiza completamente transparente en runtime, en
+// silencio. Esto ya pasó una vez de verdad en Block 04.2 (ver
+// docs/NIDIR_CONTENT.md, "bug de cobertura de texturas") — no es
+// hipotético.
 
 }  // namespace nimvlets::content

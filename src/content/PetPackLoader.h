@@ -10,11 +10,10 @@ namespace nimvlets::content {
 
 // Parses a compiled pet pack (see tools/compile_pet_pack.py for the
 // producer and docs/ANIMATION_RUNTIME.md for the exact on-disk format,
-// "NVPACK1") from an in-memory byte buffer. Pure parsing — no file I/O
-// — so it's directly unit-testable with small synthetic buffers (see
-// tests/PetPackLoaderTest.cpp) without any filesystem/CWD dependency,
-// the same lesson Block 01's DevSprite deliberately avoided testing
-// this way and Block 02 fixes by design.
+// "NVPACK2" — a named-state behavior graph, Block 05) from an in-memory
+// byte buffer. Pure parsing — no file I/O — so it's directly
+// unit-testable with small synthetic buffers (see
+// tests/PetPackLoaderTest.cpp) without any filesystem/CWD dependency.
 //
 // Fails loudly: returns false and a human-readable message in
 // `outError` on any structural problem (bad magic, truncated data,
