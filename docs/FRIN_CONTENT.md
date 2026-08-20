@@ -50,13 +50,16 @@ canónico/override que ya usa Bunny, canónico "left" — ver
 dirección opuesta por el mismo espejado horizontal determinista
 (`prep_dev_sprite.mirror_rgba_horizontal`), nunca con IA.
 
-`master.png` (`Frin_Macho.png`/`Frin_Hembra.png`) se copió tal cual a
-cada `assets/source/nimvlets/frin/{male,female}/master.png` como
-imagen de referencia estática (misma convención que Nidir/Bunny) —
-**no** es RGBA (colortype 2, sin canal alpha; el decoder PNG mínimo de
-este repo solo lee 8-bit RGBA) así que, como en todo pet anterior,
-nunca se alimenta al pipeline de compilación — solo los frames de
-`animations/` lo hacen.
+`master.png` (`Frin_Macho.png`/`Frin_Hembra.png`, los originales del
+owner) se inspeccionaron y resultaron NO ser RGBA (colortype 2, sin
+canal alpha) — inservibles para el pipeline y, además, una ilustración
+distinta a los frames de animación reales. **Corrección post-QA de este
+mismo bloque (ver §5 más abajo y DEC-073):** `master.png` ahora es una
+copia real, RGBA, del frame 0 de la pose sentada canónica
+(`sit_to_lie/{left,right}/frame_000.png`) — escrita determinísticamente
+por `tools/generate_frin_pack.py`, nunca a mano. Sigue sin alimentar el
+pipeline de compilación (que solo lee `animations/`) — es puramente el
+asset de referencia.
 
 **`local_imports/`/staging temporal:** no se usó — los exports ya
 estaban preservados de forma permanente en
@@ -81,7 +84,7 @@ seated (estado inicial):
   base_animation: sit_to_lie, frame 0 (la pose sentada real -- NUNCA
     se inventó/duplicó un asset nuevo: se REFERENCIA el mismo archivo
     que ya usa sit_to_lie).
-  ambient: sit_to_lie (one_shot) -> lying, tras REST_DELAY_SECONDS=45s
+  ambient: sit_to_lie (one_shot) -> lying, tras REST_DELAY_SECONDS=15s
     (dato de contenido por-estado, ver BehaviorState::
     ambientIntervalSeconds -- no hardcodeado por especie: Artu, con el
     mismo grafo en el futuro, define su propio valor sin tocar código).
@@ -102,13 +105,12 @@ lying:
   sin hover.
 ```
 
-**Por qué REST_DELAY_SECONDS=45s y no 15s (el intervalo ambient de
-Bunny/Nidir):** una transición de postura completa (sentarse ->
-acostarse) es un cambio más significativo que un idle esporádico —
-45s es una elección de contenido deliberada, documentada acá, no
-medida ni pedida explícitamente por el owner; trivial de ajustar
-(un solo número en `tools/generate_frin_pack.py`, `REST_DELAY_SECONDS`)
-sin tocar ningún código.
+**REST_DELAY_SECONDS=15s** — unificado con el intervalo ambient de
+Bunny/Nidir (ver `docs/DECISION_LOG.md` DEC-074; originalmente 45s por
+DEC-066, una elección de contenido propia nunca confirmada por el
+owner). Trivial de diferenciar de nuevo (un solo número en
+`tools/generate_frin_pack.py`, `REST_DELAY_SECONDS`) si el owner pide
+un ritmo distinto para la transición de postura específicamente.
 
 ## 3. Dirección + estado
 
@@ -135,20 +137,43 @@ belly-roll / 30% stretch — la MISMA forma exacta que Frin, con
 contenido distinto. Cero assets de Artu se agregaron en este bloque
 (fuera de alcance, explícitamente).
 
-## 5. Verificación
+## 5. Corrección post-QA: tamaño inconsistente / corrupción al quedar acostado (Block 05, segunda pasada)
+
+QA manual real encontró que las animaciones de Frin se veían a un
+tamaño más grande que la pose base sentada, y que la pose "lying" se
+percibía corrupta al asentarse. Causa raíz real (ver
+`docs/DECISION_LOG.md` DEC-071): un bug de key-format en
+`tools/compile_pet_pack.py` hacía que NINGUNA `WeightedAction`
+(`sit_to_lie`/`lie_to_sit`/`howl`/`tail_greet`) pasara nunca por el
+canvas de trabajo compartido — cada una se compilaba a su propio
+encuadre nativo. Corregido con una única función compartida
+(`_weighted_action_context()`) para construir esa clave, con un test
+de regresión de integración nuevo (`tools/test_asset_pipeline.py`'s
+`CompileWeightedActionNormalizationTest`) que falla si el bug
+reaparece. Ambos packs de Frin se recompilaron; verificado con capturas
+reales del binario corriendo (sentado, a mitad de `sit_to_lie`, y
+`lying` completamente asentado, macho y hembra) — sin corrupción, sin
+salto de tamaño perceptible entre estados. El rest-delay también pasa
+de 45s (DEC-066, nunca confirmado por el owner) a 15s (DEC-074,
+unificado con el resto de los pets).
+
+## 6. Verificación
 
 - `tools/validate_frame_sequence.py` sobre las 8 secuencias reales:
   sin hallazgos.
 - `tools/generate_frin_pack.py` corrido contra el binario real:
-  compila ambos packs sin error (`frin_male_pack.nvpack` 62 358 532
-  bytes, `frin_female_pack.nvpack` 69 063 174 bytes).
+  compila ambos packs sin error (`frin_male_pack.nvpack` 59 542 532
+  bytes, `frin_female_pack.nvpack` 65 287 174 bytes -- recompilado en
+  la corrección post-QA de §5; el tamaño exacto en bytes puede variar
+  levemente entre corridas del compresor PNG interno y no es una
+  cifra de contrato, solo un dato de verificación).
 - Canvas lógico derivado (canvas de trabajo compartido a través de las
   4 animaciones × 2 direcciones de cada variante, `visual_scale=1.0`,
   sin pedido de ajuste en este bloque): macho 125×176, hembra 138×176.
 - Cargado contra el binario real (`NIMVLETS_DEV_SELECT_PET=frin/male`
   y `frin/female`): arranca en `state='seated'`, click dispara
   `howl`/`tail_greet` ponderado, el timer ambient (acelerado vía
-  `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=1` para no esperar 45s reales)
+  `NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=1` para no esperar 15s reales)
   dispara `sit_to_lie` y transiciona a `lying` — ver el informe de
   este bloque para el log real.
 - `tests/StatefulBehaviorTest.cpp` (10 tests): seated inicial,
@@ -158,7 +183,7 @@ contenido distinto. Cero assets de Artu se agregaron en este bloque
   hover-no-op cuando el estado no define pool, y dos instancias
   stateful (macho/hembra) sin contaminación cruzada de estado.
 
-## 6. Limitaciones honestas
+## 7. Limitaciones honestas
 
 - El fps de reproducción (8.33 para las 4 animaciones) asume la misma
   configuración de Ludo.ai que Nidir/Bunny ya documentan ("3 segundos,
@@ -168,5 +193,5 @@ contenido distinto. Cero assets de Artu se agregaron en este bloque
   `DESCRIPTION.txt` (rasgos físicos), no procedencia.
 - Sin hover propio — explícitamente fuera de alcance hasta que el
   owner lo defina.
-- El rest-delay de 45s es una elección de contenido razonable, no un
+- El rest-delay de 15s (unificado con Bunny/Nidir, DEC-074) es un valor de producto pedido explícitamente, no un
   número confirmado por el owner — trivial de ajustar.

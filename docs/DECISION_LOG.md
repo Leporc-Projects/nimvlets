@@ -1844,3 +1844,47 @@ wakeup exacto para ese momento y, al llegar, vuelve a MUESTREAR la
 posición real del cursor (reusando `SampleCursor()`, la misma función
 que ya usa el fallback poll-driven de Windows) en vez de asumir que
 sigue encima.
+
+### DEC-073 — `master.png` pasa a ser una copia real de `frame_000` de la pose base canónica
+**Status:** DECIDIDO · Block 05, pasada de corrección post-QA #2 — ver
+`prep_dev_sprite.write_master_from_canonical_frame()`.
+
+El owner sospechó que `master.png` debería ser el primer frame real de
+la pose base de cada pet. Inspeccionado antes de asumir nada: los 4
+`master.png` actuales resultaron ser una ilustración "hero shot"
+COMPLETAMENTE SEPARADA de los frames de animación reales (mismo diseño
+de personaje, pero un render/encuadre distinto, 1254×1254, fondo
+sólido) -- 3 de los 4 (Nidir, Frin macho, Frin hembra) ni siquiera
+tienen canal alpha real (colortype 2, RGB puro), así que el decoder
+PNG mínimo de este repo (`read_png_rgba()`, que exige colortype 6) no
+puede ni abrirlos. Confirmado con evidencia: `master.png` NUNCA se lee
+en el pipeline de compilación (`tools/compile_pet_pack.py` solo lee
+`animations/**/frames/*.png`), así que esto nunca afectó al runtime —
+pero sí es un activo de referencia inconsistente y potencialmente
+confuso para cualquier proceso futuro (documentación, QA visual, un
+futuro `provenance.json`) que asuma que representa el pet real.
+
+Implementado determinísticamente en cada `generate_<pet>_pack.py` (no
+un copy-paste manual): tras compilar el pack, se escribe `master.png`
+como una copia decodificada+recodificada (`prep_dev_sprite.
+write_master_from_canonical_frame()`, valida que el frame de origen
+sea RGBA8 real antes de escribir nada) del frame 0 de la pose base
+canónica del pet, en su dirección canónica real (nunca el derivado por
+espejo) — Bunny: `idle/left/frame_000`; Nidir: `idle/right/frame_000`;
+Frin macho: `sit_to_lie/left/frame_000`; Frin hembra:
+`sit_to_lie/right/frame_000`. No afecta el pack compilado ni ningún
+frame de animación — puramente una corrección del asset de referencia.
+
+### DEC-074 — Rest-delay de Frin unificado a 15s
+**Status:** DECIDIDO · Block 05, pasada de corrección post-QA #2.
+
+DEC-066 había fijado el rest-delay de Frin ("seated" -> `sit_to_lie`)
+en 45s, una elección de contenido propia y explícitamente no confirmada
+por el owner. El owner pidió, en esta pasada, unificar el "tiempo base
+de las animaciones pasivas" a 15 segundos — se interpreta esto como
+aplicando también al rest-delay de Frin (mismo mecanismo genérico,
+`BehaviorState::ambientIntervalSeconds`), no solo al intervalo ambient
+de Bunny/Nidir que ya estaba en 15s. `tools/generate_frin_pack.py`'s
+`REST_DELAY_SECONDS` pasa de 45.0 a 15.0 — trivial de diferenciar de
+nuevo más adelante si el owner pide un ritmo distinto para la
+transición de postura específicamente.

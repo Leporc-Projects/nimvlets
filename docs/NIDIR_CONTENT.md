@@ -588,7 +588,12 @@ renderizado real de Nidir puede llegar a mostrar.
   entre los dos folders que el brief original nombra explícitamente,
   pero coincide en nombre/ubicación/rol con lo que
   `assets/source/nimvlets/README.md` ya definía como `master.png` —
-  inferencia con evidencia suficiente, no una adivinanza.
+  inferencia con evidencia suficiente, no una adivinanza. **Superseded
+  en Block 05, segunda pasada (ver `docs/DECISION_LOG.md` DEC-073):**
+  ese archivo no era RGBA y nunca se alimentó al pipeline de
+  compilación; `master.png` ahora es una copia determinística, RGBA,
+  del frame 0 de la animación idle canónica, escrita por
+  `tools/generate_nidir_pack.py` — nunca a mano.
 - **fps del `passive_action` de idle: derivado de `frame_count / 3.0`**
   (la configuración real de Ludo.ai, dato provisto por el owner en la
   segunda pasada — "3 seconds, Max Frames 25"), NO una medición de
@@ -1224,4 +1229,32 @@ muestran alas completas, sin pérdida de pixeles, consistente con el
 fix genérico de calidad de downscale descrito en `docs/BUNNY_CONTENT.md`
 §8 (que también beneficia a Nidir, cuyo canvas de trabajo 624×612
 también excede `runtime_max_frame_dimension`).
+
+## 20. Corrección post-QA (Block 05, segunda pasada): mismo bug de canvas compartido que Bunny, sin regresión visual confirmada
+
+El bug de key-format de `tools/compile_pet_pack.py` documentado en
+`docs/DECISION_LOG.md` DEC-071 (ver el detalle completo en
+`docs/BUNNY_CONTENT.md` §12) afectaba a TODA `WeightedAction` de TODO
+pet por igual -- Nidir incluido: `click_reaction`, `idle_breathing` y
+`wing_stretch` se compilaban cada una fuera del canvas de trabajo
+compartido (624×612, §12) descrito arriba, con su propio encuadre
+nativo en vez de compartir la normalización anclada por contenido.
+QA manual explícito de esta segunda pasada pidió validar que Nidir
+"estaba bien antes y no debe regresar" -- confirmado: el fix de
+DEC-071 es correctivo, no destructivo (recompila con la MISMA
+`normalization_plan` ya derivada correctamente para la pose base;
+las `WeightedAction` simplemente empiezan a usarla también). Verificado
+con capturas reales del binario corriendo (pose base estática y
+`idle_breathing`/respiración a mitad de reproducción): mismo tamaño
+visual entre ambos estados, sin salto perceptible ni pérdida de
+contenido -- sin regresión.
+
+`AMBIENT_INTERVAL_SECONDS` pasa de `10.0` (§19, Block 04.3) a `15.0`
+(Block 05, política de producto vigente, unificando a Nidir con
+Bunny y Frin -- ver `docs/BUNNY_CONTENT.md` §12 y DEC-074 en
+`docs/DECISION_LOG.md`). `content::PetDefinition::visualScale` queda
+en `1.10` para Nidir (sin cambio en esta pasada -- ver §18 para el
++10% absoluto ya vigente; el campo nuevo de Block 05 simplemente
+representa ese mismo ajuste como dato de contenido en vez de un
+factor hardcodeado en el compilador).
 

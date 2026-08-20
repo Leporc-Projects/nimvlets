@@ -352,6 +352,16 @@ def main() -> int:
 
     pet_id, total_bytes = compile_pet_pack.compile_pack(MANIFEST_PATH, COMPILED_PATH)
     print(f"compiled pet '{pet_id}': {COMPILED_PATH} ({total_bytes} bytes)")
+
+    # master.png := copia real de frame_000 de la pose base canónica
+    # (Block 05, corrección post-QA -- ver
+    # prep_dev_sprite.write_master_from_canonical_frame()). Bunny es
+    # canónicamente "left" -- master.png usa el frame REAL importado,
+    # nunca el derivado por espejo.
+    master_path = os.path.join(BUNNY_ROOT, "master.png")
+    prep_dev_sprite.write_master_from_canonical_frame(master_path, os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png"))
+    print(f"wrote master: {master_path} (copia de {IDLE_CANONICAL_FRAMES_DIR}/frame_000.png)")
+
     return 0
 
 

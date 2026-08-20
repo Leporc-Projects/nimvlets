@@ -418,3 +418,44 @@ agregar `groom` no lo hizo crecer, ver §9), canvas lógico
   se confirmó visualmente como un defecto real (a diferencia de la
   oreja de idle/click) -- documentado por transparencia, no porque se
   considere un problema pendiente.
+
+## 12. Corrección post-QA (Block 05, segunda pasada): tamaño inconsistente entre idle y animación, intervalo unificado a 15s
+
+QA manual real (con el runtime del nuevo grafo de comportamiento
+genérico de Block 05, ver `docs/ANIMATION_RUNTIME.md`) encontró que
+Bunny se veía notablemente más chico en reposo (pose base estática)
+que animando (click, ambient/groom) -- el mismo síntoma reportado como
+"pérdida de píxeles", aunque la causa real no era pérdida de contenido
+sino un canvas de trabajo DISTINTO para cada `WeightedAction`. Causa
+raíz real (ver `docs/DECISION_LOG.md` DEC-071): un bug de key-format en
+`tools/compile_pet_pack.py` hacía que la fase de compilación buscara la
+entrada del plan de normalización con una clave (`state[x].trigger
+('action')`) que nunca coincidía con la clave real que el propio plan
+había registrado (`state[x].trigger[action]`) -- el `.get()` fallaba en
+silencio para TODA `WeightedAction` de TODO pet (click_reaction,
+idle_breathing, groom -- las tres acciones ponderadas de Bunny),
+así que ninguna pasaba nunca por el canvas de trabajo compartido
+anclado por contenido: cada una se compilaba a su propio encuadre
+nativo, con su propia escala implícita, mientras solo la pose base
+sí usaba el canvas correcto. Corregido con una única función
+compartida (`_weighted_action_context()`) para construir esa clave en
+ambas pasadas (la que construye el plan y la que lo consume), con un
+test de regresión de integración nuevo
+(`tools/test_asset_pipeline.py::CompileWeightedActionNormalizationTest`)
+que falla si el bug reaparece para cualquier pet futuro.
+
+`content::PetDefinition::visualScale` (nuevo campo, por-pet, Block 05)
+permite además ajustar la escala visual final de un pet completo sin
+tocar el canvas de trabajo compartido -- Bunny queda en el default
+`1.0` ("Bunny's current size is approved", sin cambio; contrastar con
+Nidir, `1.10`, ver `docs/NIDIR_CONTENT.md`).
+
+`AMBIENT_INTERVAL_SECONDS` pasa de `10.0` (§9, Block 04.3) a `15.0` --
+política de producto vigente para Block 05, unificando a Bunny, Nidir
+y Frin bajo el mismo intervalo (ver DEC-074 en
+`docs/DECISION_LOG.md` para la pieza correspondiente de Frin).
+
+Verificado con capturas reales del binario corriendo (pose base
+estática y `groom` a mitad de reproducción, ver el informe de este
+bloque): mismo tamaño visual perceptible entre ambos estados, sin
+salto ni pérdida de contenido.

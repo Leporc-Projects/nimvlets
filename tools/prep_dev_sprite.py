@@ -550,6 +550,37 @@ def compute_frame_normalization_plan(
     return plan
 
 
+def write_master_from_canonical_frame(master_path: str, canonical_frame_path: str) -> None:
+    """Escribe `master_path` como una copia re-codificada (decode +
+    encode vía read_png_rgba/write_png_rgba de este mismo módulo, no
+    un `cp` binario) de `canonical_frame_path` -- política determinista
+    por-pet (Block 05, corrección post-QA: ver docs/DECISION_LOG.md).
+
+    Por qué: antes de esto, `master.png` era un asset de referencia
+    TOTALMENTE SEPARADO de los frames de animación reales -- inspeccionado
+    en este bloque, resultó ser una ilustración "hero shot" de otro
+    estilo/render (fondo sólido, a veces SIN canal alpha -- Nidir y
+    ambos masters de Frin son colortype 2/RGB, ni siquiera decodificables
+    por `read_png_rgba()`) que además nunca se compila al pack de
+    runtime (`tools/compile_pet_pack.py` nunca lo lee -- confirmado). El
+    owner sospechaba, correctamente, que master.png debería ser
+    directamente el primer frame real de la pose base/canónica del pet:
+    inspección visual confirmó que master.png y frame_000 SIEMPRE
+    muestran el mismo personaje/pose (mismo diseño), solo que en un
+    render/encuadre distinto -- reemplazar master.png por una copia
+    real de frame_000 lo vuelve consistente, decodificable, y
+    representativo de lo que el pet realmente muestra en pantalla, sin
+    afectar en nada el pipeline de compilación (que sigue sin leer
+    master.png para nada).
+
+    Decodificar+recodificar (en vez de una copia de bytes directa)
+    valida que el frame de origen sea un PNG RGBA8 real antes de
+    escribir nada -- falla ruidosamente (ValueError de read_png_rgba)
+    si no lo es, en vez de propagar un archivo potencialmente inválido."""
+    width, height, pixels = read_png_rgba(canonical_frame_path)
+    write_png_rgba(master_path, width, height, pixels)
+
+
 def write_raw_rgba(path: str, width: int, height: int, pixels: bytes) -> None:
     with open(path, "wb") as f:
         f.write(b"NVR1")

@@ -69,14 +69,17 @@ ALPHA_HIT_THRESHOLD = 128
 EXPORT_DURATION_SECONDS = 3.0
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
-# Intervalo ambient de un pet normal (15s, ver
-# tools/generate_bunny_pack.py) no aplica acá -- una transición de
-# postura completa (sentado -> acostado) es un cambio más significativo
-# que un idle esporádico, así que se le da un ritmo más pausado.
-# Dato de CONTENIDO (por-estado, ver BehaviorState::ambientIntervalSeconds),
+# Unificado a 15s -- mismo intervalo ambient base que Bunny/Nidir (ver
+# tools/generate_bunny_pack.py), pedido explícito del owner ("cambia el
+# tiempo base de las animaciones pasivas a 15 segundos por ahora").
+# Antes de esta corrección este valor era 45.0 -- una elección de
+# contenido propia, nunca confirmada por el owner (ver
+# docs/DECISION_LOG.md DEC-066) -- reemplazada acá por el mismo
+# baseline de producto que el resto de los pets, por ahora. Dato de
+# CONTENIDO (por-estado, ver BehaviorState::ambientIntervalSeconds),
 # nunca hardcodeado por especie -- Artu (futuro, misma forma de grafo)
 # puede definir su propio valor sin tocar ningún código.
-REST_DELAY_SECONDS = 45.0
+REST_DELAY_SECONDS = 15.0
 
 # 70/30 entre howl y tail_greet -- mismo mecanismo genérico que el
 # ambient 70/30 de Bunny/Nidir (content::ChooseWeightedActionIndex()),
@@ -251,7 +254,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
     return manifest, reports
 
 
-def _finalize_and_compile(variant: str, manifest: dict) -> None:
+def _finalize_and_compile(variant: str, manifest: dict, canonical_direction: str) -> None:
     variant_root = os.path.join(FRIN_ROOT, variant)
     manifest_path = os.path.join(variant_root, "pack_manifest.json")
 
@@ -276,17 +279,31 @@ def _finalize_and_compile(variant: str, manifest: dict) -> None:
     pet_id, total_bytes = compile_pet_pack.compile_pack(manifest_path, compiled_path)
     print(f"compiled pet '{pet_id}': {compiled_path} ({total_bytes} bytes)")
 
+    # master.png := copia real de frame_000 de la pose base canónica
+    # (Block 05, corrección post-QA -- ver
+    # prep_dev_sprite.write_master_from_canonical_frame()). La pose
+    # base de "seated" (el estado inicial) es sit_to_lie frame 0 en la
+    # dirección canónica de este variante -- mismo frame que
+    # base_pose() ya referencia en _build_variant_manifest(), nunca un
+    # asset separado.
+    canonical_frame_path = os.path.join(
+        variant_root, "animations", "sit_to_lie", canonical_direction, "frames", "frame_000.png"
+    )
+    master_path = os.path.join(variant_root, "master.png")
+    prep_dev_sprite.write_master_from_canonical_frame(master_path, canonical_frame_path)
+    print(f"wrote master: {master_path} (copia de {canonical_frame_path})")
+
 
 def main() -> int:
     male_manifest, male_reports = _build_variant_manifest("male", "frin_male", "Frin", "left")
     print(f"macho: sit_to_lie={male_reports['sit_to_lie'].frame_count}f lie_to_sit={male_reports['lie_to_sit'].frame_count}f "
           f"howl={male_reports['howl'].frame_count}f tail_greet={male_reports['tail_greet'].frame_count}f")
-    _finalize_and_compile("male", male_manifest)
+    _finalize_and_compile("male", male_manifest, "left")
 
     female_manifest, female_reports = _build_variant_manifest("female", "frin_female", "Frin", "right")
     print(f"hembra: sit_to_lie={female_reports['sit_to_lie'].frame_count}f lie_to_sit={female_reports['lie_to_sit'].frame_count}f "
           f"howl={female_reports['howl'].frame_count}f tail_greet={female_reports['tail_greet'].frame_count}f")
-    _finalize_and_compile("female", female_manifest)
+    _finalize_and_compile("female", female_manifest, "right")
 
     return 0
 

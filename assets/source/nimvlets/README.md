@@ -110,9 +110,20 @@ single-state case.
   — see `docs/PET_CONTENT_SPEC.md`), which is how the engine will later
   know `frin/male` and `frin/female` are two variants of one logical
   Nimvlet rather than two unrelated pets.
-- `master.png` — the single reference illustration a pet's animation
-  frames are derived from (hand-drawn, AI-generated, or both);
-  intentionally unopinionated about resolution or tool.
+- `master.png` — **(Block 05 policy)** a deterministic, real, RGBA copy
+  of frame 0 of the pet's canonical base pose, in its canonical
+  direction (e.g. Bunny: `animations/idle/left/frames/frame_000.png`;
+  Frin male: `animations/sit_to_lie/left/frames/frame_000.png`) —
+  written by each `generate_<pet>_pack.py` via
+  `prep_dev_sprite.write_master_from_canonical_frame()`, never edited
+  by hand. Earlier blocks treated `master.png` as a separate "hero
+  shot" reference asset (a different render/crop than the actual
+  animation frames, sometimes without even a real alpha channel); that
+  turned out to be misleading (never actually used by the compile
+  pipeline, but inconsistent with what the pet actually looks like
+  on-screen) — see `docs/DECISION_LOG.md` DEC-073. Regenerate it by
+  re-running that pet's `generate_<pet>_pack.py` after changing its
+  source frames.
 - `DESCRIPTION.txt` — stable physical traits (in Spanish), for keeping
   future generations/edits visually consistent — see
   `docs/NIDIR_CONTENT.md` §4 and `nidir/DESCRIPTION.txt` for a real
