@@ -200,8 +200,26 @@ def main() -> int:
         "groom": "groom",
         "groom_right": "groom",
     }
+    # Bunny tiene un solo BehaviorState ("default") -- state_of_group/
+    # base_group_of_state son triviales acá (todo bajo el mismo
+    # estado), y group_frame_paths usa las rutas REALES de frame_000
+    # de cada grupo (idle/click_reaction/groom nunca comparten archivo
+    # entre sí en Bunny, así que el union-find de
+    # compute_frame_normalization_plan no fusiona nada -- mismo
+    # resultado que antes de Block 05, segunda pasada. Ver esa función
+    # y docs/DECISION_LOG.md DEC-075 para el mecanismo completo, que
+    # solo importa de verdad para un pet con 2+ estados como Frin).
+    normalization_state_of_group = {"idle": "default", "click_reaction": "default", "groom": "default"}
+    normalization_base_group_of_state = {"default": "idle"}
+    normalization_group_frame_paths = {
+        "idle": [os.path.realpath(os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png"))],
+        "click_reaction": [os.path.realpath(os.path.join(CLICK_CANONICAL_FRAMES_DIR, "frame_000.png"))],
+        "groom": [os.path.realpath(os.path.join(GROOM_CANONICAL_FRAMES_DIR, "frame_000.png"))],
+    }
     normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
-        normalization_entries, normalization_groups, reference_group="idle"
+        normalization_entries, normalization_groups, reference_group="idle",
+        group_frame_paths=normalization_group_frame_paths, state_of_group=normalization_state_of_group,
+        base_group_of_state=normalization_base_group_of_state,
     )
     _, working_width, working_height, _, _ = normalization_plan["idle"]
     print(f"canvas de trabajo compartido (idle + click_reaction + groom, contenido alineado): {working_width}x{working_height}")
