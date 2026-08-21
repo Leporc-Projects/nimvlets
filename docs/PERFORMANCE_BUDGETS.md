@@ -467,3 +467,34 @@ forma sustancial sin sacrificar corrección visual — pero ninguna es
 segura de implementar apurado dentro de este bloque, así que quedan
 documentadas como el próximo paso concreto en vez de intentadas a
 medias.
+
+## Mediciones reales de Block 05, tercera pasada de corrección post-QA (transforma canónica por-estado)
+
+**Tamaño de pack compilado (dato preciso y reproducible, git-comparable
+byte a byte -- no sujeto al ruido de un muestreo de RSS):**
+
+| Pet | Antes de esta pasada | Después | Delta |
+|---|---|---|---|
+| Bunny | 47 283 395 bytes | 47 283 395 bytes | 0 (mismas dimensiones compiladas; bytes SÍ cambian -- confirmado con `cmp` -- por el resize de una sola pasada, ver `docs/BUNNY_CONTENT.md` §13, pero NVPACK2 almacena pixeles crudos sin comprimir, así que el tamaño total depende solo de las dimensiones de frame, no de sus valores) |
+| Nidir | 61 097 185 bytes | 61 097 185 bytes | 0 (mismo razonamiento -- dimensiones sin cambio) |
+| Frin (macho) | 59 542 532 bytes | 55 625 732 bytes | **-3 916 800 bytes (-6.6%)** -- canvas de trabajo compartido 689×968 -> 543×815 (ya no infla `lying`/`lie_to_sit` artificialmente, ver DEC-075) |
+| Frin (hembra) | 65 287 174 bytes | 63 459 334 bytes | **-1 827 840 bytes (-2.8%)** -- canvas 534×683 -> 496×653 |
+
+Reducción real y medida para Frin -- consecuencia directa de la
+corrección geométrica, no un objetivo de optimización de esta pasada.
+`visual_scale` (nuevo, más alto: 1.25 Nidir / 1.30 Frin) NO afecta este
+tamaño -- es puramente un multiplicador de render-time, nunca toca los
+bytes compilados (ver `docs/ANIMATION_RUNTIME.md` §11).
+
+**RSS -- observación liviana, NO una re-medición con el mismo rigor que
+la tabla de arriba:** un chequeo rápido (Release, arm64, 4 pets en
+paralelo con `NIMVLETS_DEV_APPDATA_DIR` aislado, muestreado a los
+~15s/35s/50s) mostró RSS bajando de forma monótona en los 4 (p. ej.
+Bunny 150 -> 114 -> 76 MB) en vez de estabilizarse en una meseta clara
+dentro de esa ventana -- consistente con macOS purgando páginas
+inactivas del proceso con el tiempo, no necesariamente comparable
+punto a punto con la meseta ~200s+ que documentó la tabla de arriba.
+Ningún pet mostró CPU sostenido en reposo (%CPU volvía a 0.0 entre
+redraws) -- el mecanismo event-driven sigue intacto. No se re-hizo la
+medición completa con el protocolo original (muestreo hasta
+estabilizar de verdad) -- ver limitaciones del informe de este bloque.
