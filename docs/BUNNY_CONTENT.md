@@ -459,3 +459,61 @@ Verificado con capturas reales del binario corriendo (pose base
 estática y `groom` a mitad de reproducción, ver el informe de este
 bloque): mismo tamaño visual perceptible entre ambos estados, sin
 salto ni pérdida de contenido.
+
+## 13. Corrección post-QA (Block 05, tercera pasada): evidencia de escala real entre exports, downscale de una sola pasada
+
+QA manual posterior a §12 seguía reportando pérdida de píxeles/partes
+del cuerpo en casi todas las animaciones de Bunny (salvo una pasiva).
+El owner aportó evidencia concreta: exports reales de Ludo.ai de la
+MISMA pose conceptual pueden tener escala de personaje distinta entre
+sí. Se verificó esto directamente para Bunny -- una comparación
+bottom-aligned, a escala nativa 1:1 (sin ningún resize), de
+idle/click_reaction/groom confirmó que **groom y click_reaction están
+genuinamente renderizados más grandes que idle dentro de su propio
+export nativo** -- no un artefacto de medición. El `content_scale` que
+`compute_frame_normalization_plan()` ya calculaba (idle=1.0,
+click_reaction=0.9586, groom=0.8642) es, con esta evidencia, la
+corrección CORRECTA -- Bunny es de un solo `BehaviorState`, así que no
+lo afecta el bug de comparación cross-estado que sí afectaba a Frin
+(ver DEC-075 en `docs/DECISION_LOG.md`); los números no cambiaron.
+
+Lo que sí se corrigió (aplica a Bunny igual que a cualquier otro pet
+con `normalize_visual_scale: true`): `tools/compile_pet_pack.py`
+aplicaba el resize de `content_scale` y el downscale de
+`runtime_max_frame_dimension` como DOS pasadas de box-filter
+encadenadas. Medido sobre un frame real de groom: ~1.75% de los
+píxeles de alpha difieren visiblemente (>10/255) entre esa versión de
+dos pasadas y una versión de una sola pasada combinada, con un
+ablandamiento de contorno perceptible al comparar los PNG resultantes
+lado a lado. Ahora es una única pasada (`combined_scale = content_scale
+* runtime_ratio`) -- mismo tamaño/geometría final, menos pérdida de
+detalle acumulada. Esto probablemente explica solo una PARTE de lo que
+el owner percibe como "pixel loss" -- capturas de pantalla reales del
+binario corriendo (base, click, groom, múltiples frames de cada una)
+no revelaron ningún body-part faltante o corrupción dramática pese a
+inspección deliberada; ver §14 (limitaciones) para lo que sigue sin
+confirmarse con certeza total.
+
+`tools/compile_pet_pack.py` también agrega ahora una verificación
+fuerte (no solo para Bunny, genérica): si el contenido real de
+CUALQUIER frame (no solo el frame 0 usado para calibrar) excedería el
+canvas de trabajo compartido, la compilación falla con un
+`PackCompileError` explícito en vez de recortar en silencio -- Bunny
+recompila limpio bajo esta verificación, confirmando que ninguno de
+sus 75 frames reales (25 por animación × 3 animaciones) pierde
+contenido de esta forma.
+
+## 14. Limitaciones honestas de la tercera corrección
+
+- No se pudo confirmar con certeza total, vía inspección visual real
+  (capturas de pantalla del binario corriendo, no solo bytes
+  compilados), un defecto de "pixel loss" tan dramático como el que el
+  owner describe ("body parts que desaparecen") -- la corrección de
+  downscale de una sola pasada es una mejora real y medida, pero puede
+  no ser la ÚNICA causa. Si el owner sigue viéndolo tras esta pasada,
+  el siguiente paso honesto sería una captura de pantalla DEL OWNER
+  (con su propia percepción de qué frame/animación exacta lo muestra)
+  para reproducirlo con el mismo dato exacto.
+- El fps de reproducción y el clipping lateral de idle/click_reaction
+  documentados en §7/§11 siguen sin cambios -- no eran el foco de esta
+  pasada.

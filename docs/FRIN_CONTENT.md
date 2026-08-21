@@ -162,14 +162,17 @@ unificado con el resto de los pets).
 - `tools/validate_frame_sequence.py` sobre las 8 secuencias reales:
   sin hallazgos.
 - `tools/generate_frin_pack.py` corrido contra el binario real:
-  compila ambos packs sin error (`frin_male_pack.nvpack` 59 542 532
-  bytes, `frin_female_pack.nvpack` 65 287 174 bytes -- recompilado en
-  la corrección post-QA de §5; el tamaño exacto en bytes puede variar
+  compila ambos packs sin error (`frin_male_pack.nvpack` 55 625 732
+  bytes, `frin_female_pack.nvpack` 63 459 334 bytes -- recompilado en
+  la corrección post-QA de §7; el tamaño exacto en bytes puede variar
   levemente entre corridas del compresor PNG interno y no es una
   cifra de contrato, solo un dato de verificación).
 - Canvas lógico derivado (canvas de trabajo compartido a través de las
-  4 animaciones × 2 direcciones de cada variante, `visual_scale=1.0`,
-  sin pedido de ajuste en este bloque): macho 125×176, hembra 138×176.
+  4 animaciones × 2 direcciones de cada variante, tras la corrección
+  de §7: 543×815 macho / 496×653 hembra -- MÁS CHICO que el canvas
+  inflado de §5, ver §7): macho 117×176, hembra 134×176 a
+  `visual_scale=1.0`; efectivo en pantalla `visual_scale=1.30` (§7):
+  macho 152×229, hembra 174×229.
 - Cargado contra el binario real (`NIMVLETS_DEV_SELECT_PET=frin/male`
   y `frin/female`): arranca en `state='seated'`, click dispara
   `howl`/`tail_greet` ponderado, el timer ambient (acelerado vía
@@ -183,7 +186,60 @@ unificado con el resto de los pets).
   hover-no-op cuando el estado no define pool, y dos instancias
   stateful (macho/hembra) sin contaminación cruzada de estado.
 
-## 7. Limitaciones honestas
+## 7. Corrección post-QA (Block 05, tercera pasada): transforma canónica por-estado, y visual_scale a 1.30
+
+QA manual posterior a §5 seguía reportando pérdida/corrupción en
+sit-to-lie/lying/lie-to-sit, y que Frin se sentía chico. Causa raíz
+REAL (la de §5 mejoró el salto de tamaño pero no lo eliminó -- ver
+`docs/DECISION_LOG.md` DEC-075 para el detalle completo): el bug de
+key-format de §5 dejaba que TODA `WeightedAction` compartiera el
+canvas de trabajo, pero `compute_frame_normalization_plan()` seguía
+midiendo el "tamaño" de cada grupo como el LADO MÁS LARGO de su
+bounding box de contenido -- válido dentro de un mismo estado, pero
+inválido ENTRE estados de silueta genuinamente distinta: "seated"
+(alto/angosto, el lado más largo es la altura) vs. "lying"
+(bajo/ancho, el lado más largo es el ancho). Medido en el pack real
+ANTES de esta corrección: `state[lying].base_animation` compilaba con
+`content_scale`=1.31x (macho)/1.08x (hembra), y `lie_to_sit` con
+1.52x/1.11x -- inflación real, exactamente el síntoma reportado.
+
+Corrección: dado que este proyecto ya exige el contrato first/
+last-frame (`state[seated].base_animation` Y `state[lying].base_animation`
+son, literalmente, el mismo archivo que el frame 0 y el frame final de
+`sit_to_lie`), `compute_frame_normalization_plan()` ahora detecta ese
+vínculo real (un union-find sobre archivos de frame compartidos) y
+hace que ambos hereden la MISMA escala por construcción, nunca por una
+nueva comparación de pixeles -- `lying` pasa a `content_scale=1.0000`
+EXACTO en ambas variantes. `lie_to_sit` (sin vínculo de archivo, un
+export de reversa genuinamente distinto) se calibra ahora contra el
+`base_animation` de SU PROPIO estado (`lying` -- misma orientación de
+silueta) en vez de contra `seated` -- pasa a 1.16x (macho)/1.03x
+(hembra), una corrección real y mucho más modesta. Como consecuencia,
+el canvas de trabajo compartido también se achica (macho: 689×968 →
+543×815; hembra: 534×683 → 496×653) -- ya no necesita espacio extra
+para una "lying" artificialmente agrandada. Verificado con capturas
+reales del binario corriendo (macho: seated, lying completamente
+asentado, click howl/tail_greet; hembra: seated, lying completamente
+asentado) -- sin corrupción, cuerpo completo visible, cola/orejas
+intactas en todos los casos.
+
+`tools/compile_pet_pack.py` también agrega una verificación fuerte:
+si el contenido real de CUALQUIER frame (no solo el frame 0 usado
+para calibrar) excedería el canvas de trabajo, la compilación falla
+en vez de recortar en silencio -- detectó, durante el desarrollo de
+esta corrección, que `lie_to_sit` llegaba a exceder el canvas
+derivado-solo-de-frame-0 por una fracción de pixel en un frame
+intermedio; con la escala corregida (1.16x/1.03x en vez de 1.52x/
+1.11x) ambos packs recompilan limpios bajo esta verificación.
+
+`VISUAL_SCALE` (DEC-076) sube de `1.0` a `1.30` para AMBAS variantes
+-- QA manual: "Frin feels too small, should be comparable to Bunny/
+Nidir." Medido con el bounding box de contenido visible del pack
+compilado: macho pasa de ~85×128pt a ~111×167pt, hembra de ~91×138pt
+a ~118×179pt -- ambos ahora comparables a Bunny (~114×159pt) y Nidir
+(~154×176pt, ver `docs/NIDIR_CONTENT.md` §21).
+
+## 8. Limitaciones honestas
 
 - El fps de reproducción (8.33 para las 4 animaciones) asume la misma
   configuración de Ludo.ai que Nidir/Bunny ya documentan ("3 segundos,
@@ -195,3 +251,10 @@ unificado con el resto de los pets).
   owner lo defina.
 - El rest-delay de 15s (unificado con Bunny/Nidir, DEC-074) es un valor de producto pedido explícitamente, no un
   número confirmado por el owner — trivial de ajustar.
+- `visual_scale=1.30` (§7) es un candidato de QA, no una cifra
+  definitiva del owner -- trivial de reajustar (un único número en
+  `tools/generate_frin_pack.py`).
+- No se pudo probar en vivo el caso "click mientras lying" con un
+  mecanismo DEV sintético (no existe uno con delay) -- cubierto por
+  `tests/StatefulBehaviorTest.cpp::LyingClickTransitionsToSeatedViaLieToSit`,
+  no por captura de pantalla directa.

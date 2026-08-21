@@ -1258,3 +1258,39 @@ en `1.10` para Nidir (sin cambio en esta pasada -- ver §18 para el
 representa ese mismo ajuste como dato de contenido en vez de un
 factor hardcodeado en el compilador).
 
+## 21. Corrección post-QA (Block 05, tercera pasada): retuning de `visual_scale` a 1.25, sin regresión geométrica
+
+Dos cambios independientes en esta pasada, ninguno específico de
+Nidir:
+
+**Geometría (DEC-075 en `docs/DECISION_LOG.md`):** `compute_frame_normalization_plan()`
+se rediseñó para calibrar cada `BehaviorState` contra el `base_animation`
+de SU PROPIO estado (vía un union-find de archivo de frame
+compartido), en vez de siempre contra un único `reference_group`
+pet-wide -- corrige un bug real en Frin (comparar bounding boxes entre
+posturas de silueta distinta). Nidir tiene un solo `BehaviorState`
+("default"), así que este cambio es matemáticamente idéntico al
+comportamiento anterior para Nidir por construcción (el union-find
+nunca fusiona nada porque idle/click_reaction/wing_stretch nunca
+comparten archivo entre sí) -- **verificado**: el pack recompilado
+produce EXACTAMENTE los mismos `content_scale` (1.0000 para los tres
+grupos) y el mismo canvas de trabajo (624×612) que antes de este
+cambio. `tools/compile_pet_pack.py` también combina ahora el resize de
+normalización y el downscale de `runtime_max_frame_dimension` en una
+sola pasada (menos pérdida de detalle acumulada, ver
+`docs/BUNNY_CONTENT.md` §13) y falla fuerte si algún frame real
+excediera el canvas compartido -- Nidir recompila limpio bajo ambas
+verificaciones.
+
+**Tamaño (DEC-076):** QA manual real seguía reportando que Nidir se
+sentía más chico que Bunny pese al +10% de §18/§20. Medido con
+evidencia real (bounding box de contenido visible del pack compilado,
+no solo el canvas transparente): a `visual_scale=1.10`, la ALTURA
+efectiva de Nidir (~155pt) quedaba por DEBAJO de la de Bunny (~159pt)
+pese a ser más ancho -- consistente con "sigue sintiéndose más chico".
+`VISUAL_SCALE` sube a `1.25` en `tools/generate_nidir_pack.py` --
+efectivo ahora ~154×176pt, claramente por encima de Bunny en ambos
+ejes. Verificado con capturas reales del binario corriendo (pose base
+y ambas pasivas): presencia de escritorio visiblemente mayor, sin
+pérdida de contenido ni cambio de proporciones.
+
