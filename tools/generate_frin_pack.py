@@ -86,7 +86,19 @@ REST_DELAY_SECONDS = 15.0
 # acá aplicado al trigger de click en vez de ambient.
 SEATED_CLICK_WEIGHTS = {"howl": 0.7, "tail_greet": 0.3}
 
-VISUAL_SCALE = 1.0  # sin pedido explícito de ajuste para Frin en este bloque
+# Escala visual por-pet (Block 05, segunda pasada de corrección
+# post-QA -- ver docs/DECISION_LOG.md DEC-076). QA manual real: "Frin
+# male/female currently feel too small; visibly larger, comparable in
+# presence to Bunny/Nidir." Medido con el bounding box de contenido
+# visible del pack compilado (no solo el canvas transparente): a
+# 1.0, Frin macho ~85x128pt / hembra ~91x138pt -- notablemente más
+# chico que Bunny (~114x159pt, la referencia aprobada). A 1.30:
+# macho ~110x166pt / hembra ~118x179pt -- comparable a Bunny/Nidir
+# (~154x176pt) en presencia de escritorio. UN SOLO valor para ambas
+# variantes (mismo personaje, mismo tamaño percibido esperado, sin
+# importar el género) -- trivial de ajustar: cambiar este único
+# número y volver a correr este script.
+VISUAL_SCALE = 1.30
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:

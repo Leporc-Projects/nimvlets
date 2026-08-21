@@ -17,16 +17,22 @@ Block 05 (corrección de comportamiento + escala visual, ver el informe
 de este bloque):
     - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0 --
       política de producto vigente, un único valor para Bunny y Nidir.
-    - `visual_scale` nuevo (por-pet, runtime -- ver
-      content::PetDefinition::visualScale): Nidir queda en 1.10 --
-      "Nidir currently feels visually smaller than Bunny; it should be
-      somewhat larger" -- un +10% adicional sobre su canvas ya
-      calculado (176x173 -> ver VISUAL_SCALE abajo para el resultado
-      exacto reportado). Contraste: tools/generate_bunny_pack.py usa
-      el default 1.0 ("Bunny's current size is approved", sin cambio).
-      Puramente runtime: los PNG fuente y el pack compilado no
-      cambian por esto -- solo cuánto se estira al dibujar (ver
-      SpikeApp::EffectiveCanvasWidth()/Height()).
+    - `visual_scale` (por-pet, runtime -- ver
+      content::PetDefinition::visualScale): Nidir sube de 1.10
+      (primera pasada) a 1.25 (segunda pasada de corrección post-QA --
+      ver docs/DECISION_LOG.md DEC-076). QA manual real encontró que
+      Nidir seguía sintiéndose más chico que Bunny incluso con el
+      +10% ya aplicado -- medido con evidencia real (bounding box de
+      contenido visible del pack compilado, no solo el tamaño del
+      canvas transparente): a 1.10, el contenido visible efectivo de
+      Nidir era ~136x155pt, ALGO MÁS BAJO que el de Bunny (~114x159pt)
+      pese a ser más ancho -- exactamente "feels smaller" pese al
+      ajuste anterior. A 1.25: ~154x176pt, claramente por encima de
+      Bunny en ambos ejes. Contraste: tools/generate_bunny_pack.py usa
+      el default 1.0 ("Bunny's current size is approved", sin cambio,
+      es la referencia). Puramente runtime: los PNG fuente y el pack
+      compilado no cambian por esto -- solo cuánto se estira al
+      dibujar (ver SpikeApp::EffectiveCanvasWidth()/Height()).
 
 Uso:
     python3 tools/generate_nidir_pack.py
@@ -86,11 +92,14 @@ AMBIENT_INTERVAL_SECONDS = 15.0
 AMBIENT_ACTION_WEIGHTS = [0.7, 0.3]
 
 # Escala visual por-pet (Block 05 -- ver el docstring del módulo y
-# content::PetDefinition::visualScale). Candidato de QA conservador
-# pedido por el owner ("approximately +10% relative to its current
-# result") -- trivial de ajustar: cambiar este único número y volver a
-# correr este script.
-VISUAL_SCALE = 1.10
+# content::PetDefinition::visualScale). Segunda pasada de corrección
+# post-QA (DEC-076): sube de 1.10 a 1.25 -- QA manual real reportó que
+# Nidir seguía sintiéndose más chico que Bunny; medido con el
+# bounding box de contenido visible del pack compilado (no solo el
+# canvas transparente), 1.25 deja a Nidir claramente por encima de
+# Bunny en ambos ejes (~154x176pt vs. ~114x159pt). Trivial de ajustar:
+# cambiar este único número y volver a correr este script.
+VISUAL_SCALE = 1.25
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
@@ -185,8 +194,23 @@ def main() -> int:
         "wing_stretch": "wing_stretch",
         "wing_stretch_left": "wing_stretch",
     }
+    # Nidir tiene un solo BehaviorState ("default") -- ver el comentario
+    # equivalente en tools/generate_bunny_pack.py; el union-find de
+    # compute_frame_normalization_plan no fusiona nada acá (idle/
+    # click_reaction/wing_stretch nunca comparten archivo entre sí),
+    # así que el resultado es idéntico al de antes de Block 05, segunda
+    # pasada.
+    normalization_state_of_group = {"idle": "default", "click_reaction": "default", "wing_stretch": "default"}
+    normalization_base_group_of_state = {"default": "idle"}
+    normalization_group_frame_paths = {
+        "idle": [os.path.realpath(os.path.join(RIGHT_FRAMES_DIR, "frame_000.png"))],
+        "click_reaction": [os.path.realpath(os.path.join(CLICK_RIGHT_FRAMES_DIR, "frame_000.png"))],
+        "wing_stretch": [os.path.realpath(os.path.join(WING_STRETCH_RIGHT_FRAMES_DIR, "frame_000.png"))],
+    }
     normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
-        normalization_entries, normalization_groups, reference_group="idle"
+        normalization_entries, normalization_groups, reference_group="idle",
+        group_frame_paths=normalization_group_frame_paths, state_of_group=normalization_state_of_group,
+        base_group_of_state=normalization_base_group_of_state,
     )
     _, working_width, working_height, _, _ = normalization_plan["idle"]
     print(f"canvas de trabajo compartido (idle + click_reaction + wing_stretch, contenido alineado): {working_width}x{working_height}")

@@ -415,10 +415,32 @@ class FrameNormalizationPlanTest(unittest.TestCase):
     04.3, la política genérica de canvas de trabajo compartido/anclado
     por contenido que corrige el clipping y la inconsistencia de
     tamaño visual entre animaciones de un mismo pet (ver
-    docs/NIDIR_CONTENT.md)."""
+    docs/NIDIR_CONTENT.md). Este grupo de tests usa un solo
+    BehaviorState sintético ("s") vía `_plan()` -- exactamente el caso
+    de Bunny/Nidir -- así que ejercita la misma matemática de
+    comparación-contra-referencia de siempre; el union-find por
+    archivo-compartido y la referencia POR ESTADO (Block 05, DEC-075)
+    se prueban por separado en `MultiStateNormalizationPlanTest`, más
+    abajo, con un grafo de 2+ estados real."""
 
     def _entry(self, w: int, h: int, rect: tuple[int, int, int, int]) -> tuple[int, int, bytes]:
         return w, h, _solid_frame(w, h, (5, 5, 5), rect)
+
+    def _plan(self, entries: dict, groups: dict, reference_group: str) -> dict:
+        # Un único estado sintético "s" para todos los grupos, y una
+        # ruta de archivo FALSA y ÚNICA por grupo -- así el union-find
+        # por archivo-compartido nunca fusiona nada acá (cada grupo se
+        # compara de forma independiente contra `reference_group`,
+        # exactamente el comportamiento anterior a Block 05).
+        group_keys = set(groups.values())
+        state_of_group = {g: "s" for g in group_keys}
+        base_group_of_state = {"s": reference_group}
+        group_frame_paths = {g: [f"/fake/{g}.png"] for g in group_keys}
+        return prep_dev_sprite.compute_frame_normalization_plan(
+            entries, groups, reference_group=reference_group,
+            group_frame_paths=group_frame_paths, state_of_group=state_of_group,
+            base_group_of_state=base_group_of_state,
+        )
 
     def test_reference_group_always_gets_scale_one(self) -> None:
         entries = {
@@ -426,7 +448,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(20, 20, (5, 5, 15, 15)),
         }
         groups = {"idle": "idle", "click": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         self.assertEqual(plan["idle"][0], 1.0)
 
     def test_matching_content_size_yields_no_rescale(self) -> None:
@@ -438,7 +460,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(30, 30, (10, 10, 20, 20)),  # contenido 10x10, canvas nativo más grande
         }
         groups = {"idle": "idle", "click": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         self.assertAlmostEqual(plan["click"][0], 1.0, places=6)
 
     def test_different_content_size_yields_real_rescale(self) -> None:
@@ -447,7 +469,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(20, 20, (8, 8, 12, 12)),  # contenido 4x4 -- mucho más chico
         }
         groups = {"idle": "idle", "click": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         content_scale = plan["click"][0]
         self.assertGreater(content_scale, 1.0)  # el contenido "click" es más chico -> hay que agrandarlo
         self.assertAlmostEqual(content_scale, 10.0 / 4.0, places=6)
@@ -460,7 +482,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click_left": self._entry(30, 26, (8, 8, 18, 18)),
         }
         groups = {"idle": "idle", "idle_left": "idle", "click": "click", "click_left": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         working_dims = {(w, h) for _, w, h, _, _ in plan.values()}
         self.assertEqual(len(working_dims), 1, f"expected one shared working canvas, got {working_dims}")
 
@@ -471,7 +493,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click_left": self._entry(20, 20, (8, 8, 12, 12)),
         }
         groups = {"idle": "idle", "click": "click", "click_left": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         self.assertEqual(plan["click"][0], plan["click_left"][0])
 
     def test_working_canvas_is_large_enough_to_avoid_cropping_every_entry(self) -> None:
@@ -480,7 +502,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(40, 12, (2, 2, 38, 10)),  # contenido muy ancho, casi todo el frame
         }
         groups = {"idle": "idle", "click": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         for key, (scale, working_w, working_h, offset_x, offset_y) in plan.items():
             w, h, _ = entries[key]
             scaled_w = round(w * scale)
@@ -496,14 +518,14 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(20, 20, (0, 0, 0, 0)),  # completamente transparente
         }
         groups = {"idle": "idle", "click": "click"}
-        plan = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        plan = self._plan(entries, groups, reference_group="idle")
         self.assertIn("click", plan)  # no debe fallar ni omitir la entrada
 
     def test_rejects_unknown_reference_group(self) -> None:
         entries = {"idle": self._entry(10, 10, (2, 2, 8, 8))}
         groups = {"idle": "idle"}
         with self.assertRaises(ValueError):
-            prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="does_not_exist")
+            self._plan(entries, groups, reference_group="does_not_exist")
 
     def test_result_is_deterministic(self) -> None:
         entries = {
@@ -511,9 +533,115 @@ class FrameNormalizationPlanTest(unittest.TestCase):
             "click": self._entry(30, 30, (10, 10, 20, 20)),
         }
         groups = {"idle": "idle", "click": "click"}
-        first = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
-        second = prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group="idle")
+        first = self._plan(entries, groups, reference_group="idle")
+        second = self._plan(entries, groups, reference_group="idle")
         self.assertEqual(first, second)
+
+
+class MultiStateNormalizationPlanTest(unittest.TestCase):
+    """Block 05, segunda pasada de corrección post-QA (ver
+    docs/DECISION_LOG.md DEC-075): un pet con 2+ `BehaviorState`s de
+    silueta genuinamente distinta (p. ej. Frin "seated"/"lying") NO
+    puede calibrarse comparando bounding boxes entre estados -- el lado
+    más largo de la silueta cambia de eje (alto/angosto vs.
+    bajo/ancho). La corrección real es: un estado cuyo `base_animation`
+    comparte un archivo de frame REAL con la transición de otro estado
+    (el contrato first/last-frame que este proyecto ya exige) hereda su
+    escala POR CONSTRUCCIÓN vía un union-find de archivo compartido, en
+    vez de por una nueva comparación de pixeles; y una acción de un
+    estado sin ese vínculo se calibra contra el `base_animation` de SU
+    PROPIO estado, nunca contra el de otro."""
+
+    def _entry(self, w: int, h: int, rect: tuple[int, int, int, int]) -> tuple[int, int, bytes]:
+        return w, h, _solid_frame(w, h, (5, 5, 5), rect)
+
+    def test_state_linked_by_shared_frame_file_inherits_reference_scale_exactly(self) -> None:
+        # "seated" es el estado de referencia (alto/angosto, 10x16).
+        # "lying" es una silueta DISTINTA (bajo/ancho, 22x8) cuyo
+        # base_animation comparte el MISMO archivo que el frame final
+        # de la transición sit_to_lie de "seated" -- el vínculo real
+        # que debe hacer que "lying" herede escala=1.0 sin ninguna
+        # comparación de bounding box entre las dos siluetas.
+        entries = {
+            "state[seated].base_animation": self._entry(20, 20, (5, 2, 14, 17)),  # 10x16, alto
+            "state[seated].ambient_actions.sit_to_lie": self._entry(20, 20, (5, 2, 14, 17)),  # frame 0 == seated base
+            "state[lying].base_animation": self._entry(30, 12, (4, 2, 25, 9)),  # 22x8, bajo/ancho -- silueta distinta
+        }
+        groups = {
+            "state[seated].base_animation": "state[seated].base_animation",
+            "state[seated].ambient_actions.sit_to_lie": "state[seated].ambient_actions.sit_to_lie",
+            "state[lying].base_animation": "state[lying].base_animation",
+        }
+        # El archivo compartido real: el ÚNICO frame de "lying" y el
+        # frame "final" (simulado con la misma ruta) de sit_to_lie.
+        shared_lying_frame_path = "/fake/sit_to_lie/frame_024.png"
+        group_frame_paths = {
+            "state[seated].base_animation": ["/fake/seated_base/frame_000.png"],
+            "state[seated].ambient_actions.sit_to_lie": ["/fake/seated_base/frame_000.png", shared_lying_frame_path],
+            "state[lying].base_animation": [shared_lying_frame_path],
+        }
+        state_of_group = {
+            "state[seated].base_animation": "seated",
+            "state[seated].ambient_actions.sit_to_lie": "seated",
+            "state[lying].base_animation": "lying",
+        }
+        base_group_of_state = {
+            "seated": "state[seated].base_animation",
+            "lying": "state[lying].base_animation",
+        }
+        plan = prep_dev_sprite.compute_frame_normalization_plan(
+            entries, groups, reference_group="state[seated].base_animation",
+            group_frame_paths=group_frame_paths, state_of_group=state_of_group,
+            base_group_of_state=base_group_of_state,
+        )
+        self.assertEqual(plan["state[lying].base_animation"][0], 1.0)
+
+    def test_action_of_unlinked_state_compares_against_its_own_state_base_not_the_pet_reference(self) -> None:
+        # "lying" NO está vinculado por archivo a "seated" en este
+        # test (a propósito, para aislar el otro mecanismo). Una acción
+        # de "lying" (p. ej. lie_to_sit) con contenido 22x8 (misma
+        # silueta que lying-base, 22x8) debe calibrarse SIN reescalado
+        # contra lying-base (misma silueta, real), no contra
+        # seated-base (10x16, silueta distinta) -- si comparara contra
+        # seated-base por bounding box terminaría con un content_scale
+        # completamente distinto (y sin sentido, otro eje) del que da
+        # comparar contra su propio estado.
+        entries = {
+            "state[seated].base_animation": self._entry(20, 20, (5, 2, 14, 17)),  # 10x16
+            "state[lying].base_animation": self._entry(30, 12, (4, 2, 25, 9)),  # 22x8
+            "state[lying].click_actions.lie_to_sit": self._entry(30, 12, (4, 2, 25, 9)),  # 22x8 -- misma silueta que lying-base
+        }
+        groups = {
+            "state[seated].base_animation": "state[seated].base_animation",
+            "state[lying].base_animation": "state[lying].base_animation",
+            "state[lying].click_actions.lie_to_sit": "state[lying].click_actions.lie_to_sit",
+        }
+        group_frame_paths = {
+            "state[seated].base_animation": ["/fake/seated_base.png"],
+            "state[lying].base_animation": ["/fake/lying_base.png"],  # SIN vínculo de archivo con seated
+            "state[lying].click_actions.lie_to_sit": ["/fake/lie_to_sit.png"],
+        }
+        state_of_group = {
+            "state[seated].base_animation": "seated",
+            "state[lying].base_animation": "lying",
+            "state[lying].click_actions.lie_to_sit": "lying",
+        }
+        base_group_of_state = {
+            "seated": "state[seated].base_animation",
+            "lying": "state[lying].base_animation",
+        }
+        plan = prep_dev_sprite.compute_frame_normalization_plan(
+            entries, groups, reference_group="state[seated].base_animation",
+            group_frame_paths=group_frame_paths, state_of_group=state_of_group,
+            base_group_of_state=base_group_of_state,
+        )
+        # lying-base y lie_to_sit comparten silueta (22x8 == 22x8) --
+        # deben terminar con la MISMA escala entre sí, sin importar
+        # cuál sea (la escala de lying-base contra seated-base SÍ usa
+        # el fallback de bounding box cross-estado, documentado como
+        # límite honesto -- lo que este test verifica es que
+        # lie_to_sit NO se recalibra por separado contra seated).
+        self.assertAlmostEqual(plan["state[lying].click_actions.lie_to_sit"][0], plan["state[lying].base_animation"][0], places=6)
 
 
 class FrameSequenceValidationTest(unittest.TestCase):
@@ -744,6 +872,197 @@ def _read_base_and_first_ambient_action_frame_dims(path: str) -> tuple[tuple[int
     action_dims, pos = read_animation_first_frame_dims(pos)
 
     return base_dims, action_dims
+
+
+class CompileTwoStateNormalizationTest(unittest.TestCase):
+    """Test de regresión de integración (Block 05, segunda pasada de
+    corrección post-QA -- ver docs/DECISION_LOG.md DEC-075): reproduce
+    el bug REAL encontrado en Frin ("lying" se veía inflado/corrupto
+    frente a "seated") a nivel de compilación end-to-end, con un
+    manifest de 2 estados real compilado a un .nvpack real -- no solo
+    la función pura que MultiStateNormalizationPlanTest ya cubre.
+
+    Frame A: contenido alto/angosto (bbox 4x16, longer=16).
+    Frame B: contenido bajo/ancho (bbox 12x6, longer=12) -- una silueta
+    deliberadamente DISTINTA, para que comparar bounding boxes entre
+    estados (el bug real) produzca una escala equivocada (16/12=1.333)
+    en vez de heredar la escala correcta (1.0) por archivo compartido.
+
+    `seated.base_animation` = frame A. `seated.ambient_actions[0]`
+    ("sit_to_lie") = [frame A, frame B] (frame 0 = pose sentada real,
+    frame final = pose acostada real -- el contrato first/last-frame),
+    target_state_id="lying". `lying.base_animation` = frame B (el MISMO
+    archivo que el frame final de sit_to_lie -- nunca un archivo
+    nuevo). Si la corrección funciona, `lying.base_animation` compila a
+    EXACTAMENTE los mismos pixeles que el frame 1 de `sit_to_lie` (sin
+    ningún resize -- content_scale=1.0 para ambos, heredado por
+    construcción); si el bug reapareciera, `lying.base_animation`
+    compilaría reescalado 1.333x, con dimensiones y pixeles distintos."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_two_state_regression_")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import compile_pet_pack  # noqa: E402
+
+        self.compile_pet_pack = compile_pet_pack
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_frame(self, name: str, w: int, h: int, alpha_rect: tuple[int, int, int, int]) -> str:
+        path = os.path.join(self.tmpdir, name)
+        prep_dev_sprite.write_png_rgba(path, w, h, _solid_frame(w, h, (10, 20, 30), alpha_rect))
+        return name
+
+    def test_lying_base_animation_is_pixel_identical_to_sit_to_lie_final_frame(self) -> None:
+        frame_a = self._write_frame("frame_a.png", 20, 20, (8, 2, 11, 17))  # bbox 4x16, alto
+        frame_b = self._write_frame("frame_b.png", 20, 20, (4, 7, 15, 12))  # bbox 12x6, bajo/ancho
+
+        manifest = {
+            "id": "two_state_regression_pet",
+            "display_name": "Two State Regression Pet",
+            "canvas_width": 20,
+            "canvas_height": 20,
+            "normalize_visual_scale": True,
+            "states": [
+                {
+                    "id": "seated",
+                    "base_animation": {"id": "seated_base", "kind": "static", "frames": [{"source": frame_a, "duration_ms": 0}]},
+                    "ambient_actions": [
+                        {
+                            "id": "sit_to_lie",
+                            "weight": 1.0,
+                            "target_state_id": "lying",
+                            "kind": "one_shot",
+                            "frames": [
+                                {"source": frame_a, "duration_ms": 100},
+                                {"source": frame_b, "duration_ms": 100},
+                            ],
+                        }
+                    ],
+                    "click_actions": [],
+                },
+                {
+                    "id": "lying",
+                    "base_animation": {"id": "lying_base", "kind": "static", "frames": [{"source": frame_b, "duration_ms": 0}]},
+                    "ambient_actions": [],
+                    "click_actions": [],
+                },
+            ],
+        }
+        manifest_path = os.path.join(self.tmpdir, "pack_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            import json
+
+            json.dump(manifest, f)
+
+        output_path = os.path.join(self.tmpdir, "out.nvpack")
+        self.compile_pet_pack.compile_pack(manifest_path, output_path)
+
+        lying_base, sit_to_lie_final_frame = _read_lying_base_and_sit_to_lie_final_frame(output_path)
+        # Compara geometría/pixeles (width, height, pixels) -- NO
+        # duration_ms (0 para una base_animation static de un frame,
+        # 100 para el frame de una secuencia one_shot; una diferencia
+        # de metadata esperada, no de geometría) ni anchor (coincide
+        # acá solo porque ninguno de los dos define un anchor
+        # explícito, no es lo que este test verifica).
+        lying_geometry = (lying_base[0], lying_base[1], lying_base[5])
+        sit_to_lie_geometry = (sit_to_lie_final_frame[0], sit_to_lie_final_frame[1], sit_to_lie_final_frame[5])
+
+        self.assertEqual(
+            lying_geometry, sit_to_lie_geometry,
+            f"'lying' base_animation compiló a {lying_geometry[:2]}, distinto del frame final de "
+            f"'sit_to_lie' {sit_to_lie_geometry[:2]} -- deberían ser EXACTAMENTE la misma "
+            "transformación (mismo archivo fuente, ver DEC-075) en vez de recalibrarse por "
+            "separado comparando bounding boxes entre estados de silueta distinta",
+        )
+
+
+def _read_lying_base_and_sit_to_lie_final_frame(path: str) -> tuple[tuple, tuple]:
+    """Lector mínimo de un pack NVPACK2 de 2 estados, suficiente para
+    extraer (width, height, pixels) del frame de `lying.base_animation`
+    y del ÚLTIMO frame de `sit_to_lie` (la primera -- y única, en este
+    test -- ambient action de `seated`) -- usado solo por
+    CompileTwoStateNormalizationTest de arriba. Espejo intencional del
+    formato de src/content/PetPackLoader.cpp, igual que el lector de
+    CompileWeightedActionNormalizationTest más arriba en este archivo."""
+    import struct
+
+    with open(path, "rb") as f:
+        buf = f.read()
+
+    def read_string(pos: int) -> tuple[str, int]:
+        (n,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        return buf[pos : pos + n].decode("utf-8"), pos + n
+
+    def read_frame(pos: int) -> tuple[tuple, int]:
+        w, h, ax, ay, dur = struct.unpack_from("<IIddd", buf, pos)
+        pos += 4 + 4 + 8 + 8 + 8
+        pixels = buf[pos : pos + w * h * 4]
+        pos += w * h * 4
+        return (w, h, ax, ay, dur, pixels), pos
+
+    def read_animation(pos: int) -> tuple[list, int]:
+        _id, pos = read_string(pos)
+        pos += 1 + 8 + 1  # kind, fps, returnsToIdle
+        (frame_count,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        frames = []
+        for _ in range(frame_count):
+            frame, pos = read_frame(pos)
+            frames.append(frame)
+        return frames, pos
+
+    def skip_direction_overrides(pos: int) -> int:
+        (count,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        for _ in range(count):
+            pos += 1
+            _frames, pos = read_animation(pos)
+        return pos
+
+    def read_weighted_actions(pos: int) -> tuple[list, int]:
+        (count,) = struct.unpack_from("<I", buf, pos)
+        pos += 4
+        actions = []
+        for _ in range(count):
+            _action_id, pos = read_string(pos)
+            pos += 8  # weight
+            _target_state_id, pos = read_string(pos)
+            frames, pos = read_animation(pos)
+            pos = skip_direction_overrides(pos)
+            actions.append(frames)
+        return actions, pos
+
+    pos = 8  # magic
+    for _ in range(3):  # petId, displayName, variantGroup
+        _s, pos = read_string(pos)
+    pos += 4 + 4 + 1 + 8  # canvasWidth, canvasHeight, alphaHitThreshold, visualScale
+    _s, pos = read_string(pos)  # contentVersion
+    (state_count,) = struct.unpack_from("<I", buf, pos)
+    pos += 4
+    assert state_count == 2
+
+    # Estado 0 ("seated"): base_animation + overrides + ambient (nos
+    # interesa el ÚLTIMO frame de la primera ambient action) + hover +
+    # click.
+    _state_id, pos = read_string(pos)
+    _seated_base_frames, pos = read_animation(pos)
+    pos = skip_direction_overrides(pos)
+    pos += 8  # ambientIntervalSeconds
+    ambient_actions, pos = read_weighted_actions(pos)
+    sit_to_lie_final_frame = ambient_actions[0][-1]
+    pos += 1  # hoverUsesAmbientActions
+    _hover_actions, pos = read_weighted_actions(pos)
+    _click_actions, pos = read_weighted_actions(pos)
+
+    # Estado 1 ("lying"): solo nos interesa su base_animation.
+    _state_id2, pos = read_string(pos)
+    lying_base_frames, pos = read_animation(pos)
+    lying_base = lying_base_frames[0]
+
+    return lying_base, sit_to_lie_final_frame
 
 
 if __name__ == "__main__":

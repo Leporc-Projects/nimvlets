@@ -1888,3 +1888,165 @@ de Bunny/Nidir que ya estaba en 15s. `tools/generate_frin_pack.py`'s
 `REST_DELAY_SECONDS` pasa de 45.0 a 15.0 — trivial de diferenciar de
 nuevo más adelante si el owner pide un ritmo distinto para la
 transición de postura específicamente.
+
+### DEC-075 — Transforma canónica POR ESTADO: por qué comparar bounding boxes entre estados de silueta distinta es matemáticamente inválido, y la corrección real
+**Status:** DECIDIDO · Block 05, TERCERA pasada de corrección post-QA
+(la QA manual del owner encontró que DEC-071 mejoró el salto de
+tamaño pero no lo eliminó) — ver el informe de este bloque para la
+evidencia numérica y visual completa.
+
+**QA manual del owner tras DEC-071:** Bunny seguía perdiendo
+pixeles/partes del cuerpo en casi todas sus animaciones (excepto una
+pasiva); TODOS los pets mostraban una diferencia sutil de escala entre
+la pose estática y la animada; Frin macho/hembra seguían
+perdiendo/corrompiendo partes al hacer sit-to-lie/lying/lie-to-sit; y
+Frin se sentía demasiado chico en su forma estática. El owner aportó
+evidencia nueva explícita: exports reales de Bunny de la MISMA pose
+conceptual (idle/click_reaction/groom) tienen dimensiones de contenido
+visible MATERIALMENTE distintas — un export de Ludo.ai no garantiza la
+misma escala de personaje entre secuencias distintas, ni siquiera
+cuando el primer frame representa la misma pose.
+
+**Verificación real, no asumida:** se generó una comparación
+bottom-aligned, a escala nativa 1:1 (sin ningún resize), de
+idle/click_reaction/groom de Bunny — confirmó visualmente que groom
+(y, en menor medida, click_reaction) están renderizados a una escala
+de personaje REAL Y GENUINAMENTE MÁS GRANDE que idle dentro de su
+propio export nativo, no un artefacto de medición. La corrección de
+DEC-071 (content_scale por grupo, comparado contra la pose de
+referencia) mide esto correctamente CUANDO todos los grupos comparten
+la misma orientación de silueta (el caso de Bunny/Nidir: todas las
+poses son "sentado", solo cambia cuánto margen nativo rodea al
+personaje) — confirmado con los mismos números exactos que antes
+(groom content_scale=0.8642, click_reaction=0.9586), sin cambios.
+
+**El bug real remanente:** `compute_frame_normalization_plan()` medía
+el "tamaño" de un grupo como el LADO MÁS LARGO de su bounding box de
+contenido. Eso asume que todos los grupos comparten orientación de
+silueta — cierto para Bunny/Nidir, FALSO entre `BehaviorState`s con
+posturas genuinamente distintas: Frin "seated" (alto y angosto, el
+lado más largo es la ALTURA) vs. "lying" (bajo y ancho, el lado más
+largo es el ANCHO). Comparar "lado más largo" entre los dos compara
+EJES DISTINTOS y produce una escala sin sentido — medido en el pack
+real: `state[lying].base_animation` compilaba con content_scale=1.31x
+(macho)/1.08x (hembra), y `lie_to_sit` con 1.52x (macho)/1.11x
+(hembra) — inflación real y visible, exactamente "lying pose gets
+scaled differently" que QA reportó. Como consecuencia indirecta, el
+canvas de trabajo compartido de Frin también se inflaba de más para
+darle espacio a esa "lying" artificialmente agrandada (macho: 689x968
+→ 543x815 tras la corrección; hembra: 534x683 → 496x653) — canvas más
+chico y ajustado, no una regresión.
+
+Adicionalmente, un chequeo frame-por-frame (no solo frame 0) encontró
+que `lie_to_sit` llegaba a exceder por una fracción de pixel (~0.1-
+0.2px) el canvas de trabajo derivado SOLO del frame 0 — el canvas
+nunca garantizaba que TODOS los frames de una animación (no solo el
+primero) entraran sin recorte. `compose_on_canvas()` recorta en
+silencio si esto pasa (documentado, nunca falla) — un riesgo real de
+"corrupción silenciosa" para cualquier animación futura cuya pose se
+extienda más lejos del ancla en un frame intermedio que en el frame 0.
+
+**La corrección real (genérica, sin ninguna rama por pet):** la
+pregunta correcta no es "¿cómo comparo mejor dos bounding boxes?" —
+es "¿cuándo NO debo comparar bounding boxes en absoluto?". Este
+proyecto ya exige el contrato first/last-frame (Block 04.2): el primer
+frame de una animación es la pose de reposo, el último es la pose
+final. Para Frin, eso significa que `state[seated].base_animation` Y
+`state[lying].base_animation` son, LITERALMENTE, el mismo archivo que
+el frame 0 y el frame final de `sit_to_lie` respectivamente — no son
+dos mediciones independientes que reconciliar, son EL MISMO personaje
+en el mismo frame. `tools/prep_dev_sprite.compute_frame_normalization_plan()`
+ahora recibe `group_frame_paths` (todas las rutas de frame de cada
+grupo, no solo la primera) y aplica un **union-find de archivo
+compartido**: dos grupos que comparten CUALQUIER archivo de frame real
+se fusionan en un único "scale_group" con una única escala resuelta,
+POR CONSTRUCCIÓN — nunca por una nueva comparación de pixeles. Para
+una acción sin ese vínculo (p. ej. `lie_to_sit`, un export de reversa
+genuinamente distinto), la comparación válida es contra el
+`base_animation` de SU PROPIO estado (`base_group_of_state`/
+`state_of_group`, nuevos parámetros) — misma orientación de silueta
+por construcción, en vez del estado de referencia global del pet (otra
+orientación). Resultado medido: `state[lying].base_animation` pasa a
+content_scale=1.0000 EXACTO para ambas variantes (idéntico a
+`seated`/`sit_to_lie`, garantizando "lying es exactamente el frame
+final transformado de sit_to_lie"); `lie_to_sit` pasa de 1.52x/1.11x a
+1.16x/1.03x — una corrección real y mucho más modesta, validada
+comparando su propia pose "lying" de inicio contra la de
+`sit_to_lie` (misma orientación), no contra "seated".
+
+Bunny/Nidir (un solo `BehaviorState` cada uno) son matemáticamente
+idénticos al comportamiento anterior por construcción — el
+union-find nunca fusiona nada porque sus grupos nunca comparten
+archivo, y "el base_animation de su propio estado" ES el único estado
+que ya existe. Verificado: los packs recompilados de Bunny/Nidir
+producen exactamente los mismos content_scale que antes de este
+cambio.
+
+**Salvaguarda adicional (evita que esta clase de bug pueda volver a
+corromper contenido en silencio):** `tools/compile_pet_pack.py`'s
+`_compile_frame()` ahora verifica, para CADA frame de CADA entrada (no
+solo el frame 0 usado para calibrar), que su bounding box de contenido
+real, ya escalado y posicionado, entre dentro del canvas de trabajo
+final — si no, `PackCompileError` en vez de un recorte silencioso vía
+`compose_on_canvas()`. Esto convierte "ningún frame real pierde
+contenido" en un invariante que CUALQUIER regeneración futura de
+CUALQUIER pet verifica automáticamente, no solo una promesa de
+documentación.
+
+**Downscale de dos pasadas -> una sola pasada combinada (causa parcial
+del "pixel loss" remanente de Bunny):** `_compile_frame()` aplicaba el
+`content_scale` de normalización y el downscale de
+`runtime_max_frame_dimension` como dos llamadas SEPARADAS y
+SECUENCIALES a `resize_rgba_area_average` (un box-filter cada una).
+Dos box-filters encadenados para el MISMO factor de reescalado neto
+pierden más detalle fino que uno solo aplicado directamente desde la
+resolución nativa — medido en este bloque sobre un frame real de
+groom de Bunny: ~1.75% de los pixeles de alpha difieren visiblemente
+(>10/255) entre ambos caminos, con un ablandamiento de contorno
+perceptible en el de dos pasadas al comparar los PNG resultantes lado
+a lado. Corregido: ambos factores se combinan en un único
+`combined_scale` (`content_scale * runtime_ratio`), un único resize
+directo desde los pixeles nativos. No cambia ninguna geometría/tamaño
+resultante — solo reduce la pérdida de detalle acumulada. Este es
+probablemente solo una PARTE del "pixel loss" reportado por el owner
+para Bunny — ver el informe de este bloque, sección de limitaciones,
+para lo que NO se pudo confirmar con evidencia visual directa pese a
+captura de pantalla real del binario corriendo.
+
+Tests de regresión nuevos (`tools/test_asset_pipeline.py`):
+`MultiStateNormalizationPlanTest` (la función pura, con un
+BehaviorState sintético de 2 estados) y
+`CompileTwoStateNormalizationTest` (integración end-to-end: un
+manifest real de 2 estados compilado a un `.nvpack` real, verificando
+que `lying.base_animation` compila pixel-idéntico al frame final de
+`sit_to_lie`).
+
+### DEC-076 — Retuning de `visual_scale`: Nidir a 1.25, Frin (ambas variantes) a 1.30
+**Status:** DECIDIDO · Block 05, tercera pasada de corrección post-QA.
+
+QA manual del owner: Nidir seguía sintiéndose más chico que Bunny pese
+al +10% ya aplicado (DEC-por-visual_scale de la pasada anterior); Frin
+macho/hembra se sienten claramente chicos, deberían tener una
+presencia de escritorio comparable a Bunny/Nidir. Medido con evidencia
+real (no solo el tamaño del canvas transparente, que incluye margen):
+el bounding box de contenido visible del pack COMPILADO, como fracción
+de su propio frame, multiplicado por `canvas_width/height *
+visual_scale` — la "presencia visible efectiva" real en puntos.
+
+| Pet | visual_scale antes | Efectivo antes | visual_scale ahora | Efectivo ahora |
+|---|---|---|---|---|
+| Bunny (referencia, sin cambio) | 1.0 | ~114x159pt | 1.0 | ~114x159pt |
+| Nidir | 1.10 | ~136x155pt (¡más bajo que Bunny!) | 1.25 | ~154x176pt |
+| Frin macho | 1.0 | ~85x128pt | 1.30 | ~110x166pt |
+| Frin hembra | 1.0 | ~91x138pt | 1.30 | ~118x179pt |
+
+A 1.10, la ALTURA efectiva de Nidir (155pt) quedaba por debajo de la
+de Bunny (159pt) pese a ser más ancho — consistente con "sigue
+sintiéndose más chico" pese al ajuste anterior. Un único valor de
+`visual_scale` para AMBAS variantes de Frin (macho/hembra) — mismo
+personaje, misma presencia esperada, sin importar el género. Puramente
+runtime (`content::PetDefinition::visualScale`, aplicado solo en
+`SpikeApp::EffectiveCanvasWidth()/Height()`) — el arte fuente y el
+pack compilado no cambian. Candidatos de QA, no cifras definitivas del
+owner — triviales de re-ajustar (un único número por pet en cada
+`generate_<pet>_pack.py`) tras la próxima ronda de QA manual real.

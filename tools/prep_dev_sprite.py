@@ -431,13 +431,18 @@ def compute_frame_normalization_plan(
     entries: dict[str, tuple[int, int, bytes]],
     groups: dict[str, str],
     reference_group: str,
+    group_frame_paths: dict[str, list[str]],
+    state_of_group: dict[str, str],
+    base_group_of_state: dict[str, str],
     scale_tolerance: float = 0.02,
 ) -> dict[str, tuple[float, int, int, int, int]]:
     """Política genérica de "canvas de trabajo compartido, anclado por
     contenido" (Block 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y
-    tamaño visual inconsistente entre animaciones"). Corrige el bug de
-    raíz encontrado en QA manual de Nidir: cada frame se estiraba
-    independientemente para llenar el mismo canvas lógico fijo
+    tamaño visual inconsistente entre animaciones"), extendida en Block
+    05 (segunda pasada de corrección post-QA) con una TRANSFORMA
+    CANÓNICA POR ESTADO -- ver docs/DECISION_LOG.md DEC-075. Corrige el
+    bug de raíz encontrado en QA manual de Nidir: cada frame se
+    estiraba independientemente para llenar el mismo canvas lógico fijo
     (SpikeApp::RenderFrame(), sin cambios -- sigue siendo un simple
     stretch-to-fill), así que dos animaciones con distinta cantidad de
     margen alrededor del personaje dentro de su propio frame nativo
@@ -455,31 +460,79 @@ def compute_frame_normalization_plan(
     contract", Block 04.2), la pose base/de-reposo, la referencia más
     estable para anclar el resto de la secuencia.
     `groups`: entry_key -> nombre de grupo lógico ("idle",
-    "click_reaction", "passive_actions[0]", ...) -- una animación
-    canónica y sus overrides direccionales SIEMPRE comparten grupo, así
-    que right/left de una misma animación terminan con idéntico
-    content_scale (nunca escalas distintas para las dos direcciones de
-    la misma animación).
-    `reference_group`: el grupo cuyo tamaño de contenido define la
-    escala "1.0" contra la que se miden todos los demás -- "idle" por
-    convención de este proyecto (ver DEC-045: idle ya es la referencia
-    para el tamaño de canvas lógico; acá se reusa la misma convención
-    para el tamaño de CONTENIDO).
+    "click_reaction", "state[lying].click_actions.lie_to_sit", ...) --
+    una animación canónica y sus overrides direccionales SIEMPRE
+    comparten grupo, así que right/left de una misma animación
+    terminan con idéntico content_scale (nunca escalas distintas para
+    las dos direcciones de la misma animación).
+    `reference_group`: el grupo del `base_animation` del PRIMER estado
+    del pet -- ancla absoluta de escala "1.0" (ver DEC-045: idle/la
+    pose base ya era la referencia para el tamaño de canvas lógico;
+    acá se reusa la misma convención para el tamaño de CONTENIDO).
+    `group_frame_paths`: group_key -> lista de rutas ABSOLUTAS de TODOS
+    los frames (no solo el primero) de TODAS las entradas de ese grupo
+    -- usada para detectar cuándo dos grupos distintos en realidad
+    comparten un archivo fuente literal (ver más abajo).
+    `state_of_group`: group_key -> id del `BehaviorState` que autoriza
+    ese grupo (bajo qué estado vive en el manifest).
+    `base_group_of_state`: state_id -> group_key del `base_animation`
+    de ESE estado específicamente (nunca un override direccional).
+
+    **Por qué un estado no puede compararse contra otro por bounding
+    box (evidencia real, Block 05 segunda pasada):** medir el "tamaño"
+    de un grupo como el lado más largo de su bounding box de contenido
+    asume que todos los grupos comparten la MISMA orientación de
+    silueta. Eso es razonablemente cierto para animaciones del mismo
+    estado (todas parten de la misma pose de reposo, solo con distinta
+    cantidad de margen nativo), pero es FALSO entre dos
+    `BehaviorState`s con posturas genuinamente distintas -- Frin
+    "seated" (alto y angosto) vs. "lying" (bajo y ancho): el lado más
+    largo de "seated" es la altura, el de "lying" es el ancho, así que
+    compararlos por "lado más largo" compara ejes distintos y produce
+    un content_scale sin sentido (medido en este bloque: 1.31x-1.52x de
+    inflación real en Frin, confirmado con capturas del binario
+    corriendo). La solución NO es una mejor fórmula de bounding box --
+    es no comparar por bounding box en absoluto cuando dos entradas ya
+    están vinculadas por CONTENIDO REAL: si `state[lying].base_animation`
+    literalmente REFERENCIA el mismo archivo que el frame final de
+    `sit_to_lie` (el contrato first/last-frame que este proyecto ya
+    exige -- ver docs/NIDIR_CONTENT.md), entonces "lying" y "seated" NO
+    son dos mediciones independientes que haya que reconciliar: son EL
+    MISMO personaje en el mismo frame, así que deben compartir
+    content_scale POR CONSTRUCCIÓN, nunca por una nueva comparación de
+    pixeles. Este `group_frame_paths`-based union-find hace exactamente
+    eso -- dos grupos que comparten CUALQUIER archivo de frame (no solo
+    el primero) se fusionan en un único "scale_group" con una única
+    escala resuelta.
+
+    Para una acción que SÍ pertenece a un estado sin vínculo de archivo
+    con la referencia (p. ej. `lie_to_sit`, un export de reversa
+    genuinamente distinto de `sit_to_lie`), la comparación válida NO es
+    contra el estado de referencia del pet (otra orientación) sino
+    contra el `base_animation` de SU PROPIO estado ("lying"), que ya
+    comparte silueta/orientación por ser la MISMA postura -- eso es lo
+    que `base_group_of_state`/`state_of_group` permiten expresar
+    genéricamente, sin ninguna rama de código específica de Frin ni de
+    ningún otro pet: cualquier pet futuro con estados reales que siga
+    el mismo contrato first/last-frame obtiene esta corrección gratis.
 
     Para cada entrada calcula:
-    - content_scale (compartido por grupo): factor de reescalado para
-      que el contenido visible (bounding box de alpha) de este grupo
-      ocupe el mismo tamaño absoluto en pixeles que el del grupo de
-      referencia. Si la diferencia entra dentro de `scale_tolerance`
-      (2% por defecto), se usa 1.0 -- evita un resample innecesario que
-      degradaría calidad sin corregir nada perceptible ("Calidad
-      visual consistente, sin degradación extra innecesaria").
+    - content_scale (compartido por grupo, luego por scale_group vía
+      el union-find de arriba): factor de reescalado para que el
+      contenido visible (bounding box de alpha) de este grupo ocupe el
+      mismo tamaño absoluto en pixeles que el de su ANCLA (el
+      scale_group de referencia si está transitivamente vinculado por
+      archivo, si no el `base_animation` de su propio estado). Si la
+      diferencia entra dentro de `scale_tolerance` (2% por defecto), se
+      usa 1.0 -- evita un resample innecesario que degradaría calidad
+      sin corregir nada perceptible.
     - Un canvas de trabajo COMPARTIDO por TODO el pet (mismas
-      dimensiones para todas las entradas, de todos los grupos), lo
-      bastante grande como para contener cada frame completo (post-
-      content_scale) sin recortar nada, calculado alineando el CENTRO
-      del bounding box de contenido del primer frame de cada entrada
-      al centro del canvas de trabajo.
+      dimensiones para todas las entradas, de todos los grupos/estados
+      -- así un pet con estados nunca "salta" de tamaño de canvas al
+      transicionar), lo bastante grande como para contener cada frame
+      completo (post-content_scale) sin recortar nada, calculado
+      alineando el CENTRO del bounding box de contenido del primer
+      frame de cada entrada al centro del canvas de trabajo.
     - offset_x/offset_y: dónde colocar el frame (post-content_scale,
       sin recortar) dentro de ese canvas de trabajo compartido, para
       que su ancla de contenido caiga exactamente en el centro.
@@ -487,9 +540,10 @@ def compute_frame_normalization_plan(
     Nunca recorta contenido -- solo agrega margen transparente
     (compose_on_canvas() nunca resamplea). Sin ninguna rama específica
     de personaje: cuánto escalar cada grupo y qué tan grande debe ser
-    el canvas de trabajo se derivan enteramente de los pixeles reales,
-    nunca de un valor hardcodeado por pet -- reusable tal cual para
-    cualquier Nimvlet futuro con animaciones de distinto encuadre
+    el canvas de trabajo se derivan enteramente de los pixeles reales
+    y de la estructura del grafo de estados (nunca de un valor
+    hardcodeado por pet) -- reusable tal cual para cualquier Nimvlet
+    futuro, con o sin estados, con animaciones de distinto encuadre
     nativo."""
     if reference_group not in groups.values():
         raise ValueError(f"compute_frame_normalization_plan: reference_group '{reference_group}' is not used by any entry")
@@ -513,15 +567,77 @@ def compute_frame_normalization_plan(
         minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
         return max(maxx - minx + 1, maxy - miny + 1)
 
-    reference_size = group_content_size(reference_group)
+    # --- Union-Find de grupos vinculados por archivo REAL compartido
+    # (cualquier frame, no solo el primero) -- ver el docstring de
+    # arriba. Dos grupos que nunca comparten ningún archivo permanecen
+    # en su propio cluster de un solo elemento, sin cambio de
+    # comportamiento respecto a antes de Block 05.
+    scale_group_parent: dict[str, str] = {g: g for g in group_frame_paths}
+
+    def find_scale_group(g: str) -> str:
+        while scale_group_parent[g] != g:
+            scale_group_parent[g] = scale_group_parent[scale_group_parent[g]]
+            g = scale_group_parent[g]
+        return g
+
+    def union_scale_groups(a: str, b: str) -> None:
+        ra, rb = find_scale_group(a), find_scale_group(b)
+        if ra != rb:
+            scale_group_parent[rb] = ra
+
+    path_owner: dict[str, str] = {}
+    for group_key, paths in group_frame_paths.items():
+        for path in paths:
+            owner = path_owner.get(path)
+            if owner is None:
+                path_owner[path] = group_key
+            elif find_scale_group(owner) != find_scale_group(group_key):
+                union_scale_groups(owner, group_key)
+
+    scale_group_of: dict[str, str] = {g: find_scale_group(g) for g in group_frame_paths}
+    reference_scale_group = scale_group_of[reference_group]
+
+    # --- Resuelve, por ESTADO (no por grupo/scale_group directamente),
+    # el factor de escala de su PROPIO base_animation -- memoizado
+    # porque varios grupos de un mismo estado comparten esta misma
+    # resolución.
+    resolved_scale_group_value: dict[str, float] = {reference_scale_group: 1.0}
+
+    def resolve_state_base_scale(state_id: str) -> float:
+        base_group = base_group_of_state[state_id]
+        sg = scale_group_of[base_group]
+        if sg in resolved_scale_group_value:
+            return resolved_scale_group_value[sg]
+        # Único caso restante que SÍ compara bounding boxes entre
+        # estados potencialmente distintos -- solo se alcanza si el
+        # base_animation de este estado NUNCA quedó vinculado por
+        # archivo real al estado de referencia (un pet futuro cuyo
+        # contenido no siga el contrato first/last-frame entre
+        # estados). Documentado como límite honesto, no oculto: ver el
+        # informe de este bloque.
+        this_size = group_content_size(base_group)
+        ref_size = group_content_size(reference_group)
+        raw_scale = ref_size / this_size if this_size > 0 else 1.0
+        resolved = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+        resolved_scale_group_value[sg] = resolved
+        return resolved
+
     scale_by_group: dict[str, float] = {}
     for group_key in set(groups.values()):
-        if group_key == reference_group:
-            scale_by_group[group_key] = 1.0
+        state_id = state_of_group[group_key]
+        base_group = base_group_of_state[state_id]
+        state_scale = resolve_state_base_scale(state_id)
+        if group_key == base_group:
+            # El propio base_animation de un estado -- su escala ES la
+            # escala resuelta de su estado, sin ninguna comparación
+            # adicional (evita recompararlo contra sí mismo).
+            scale_by_group[group_key] = state_scale
             continue
         this_size = group_content_size(group_key)
-        raw_scale = reference_size / this_size if this_size > 0 else 1.0
-        scale_by_group[group_key] = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+        base_size = group_content_size(base_group)
+        raw_scale = base_size / this_size if this_size > 0 else 1.0
+        local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+        scale_by_group[group_key] = state_scale * local_scale
 
     needed_left = needed_right = needed_top = needed_bottom = 0.0
     scaled_by_entry: dict[str, tuple[float, float, float, float]] = {}  # scaled_w, scaled_h, anchor_x, anchor_y

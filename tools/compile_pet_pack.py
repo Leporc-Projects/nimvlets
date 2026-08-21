@@ -162,22 +162,74 @@ def _compile_frame(
         raise PackCompileError(f"{context}: decoded pixel data size mismatch for {path}")
 
     # Normalización de escala/encuadre por contenido, opcional (ver el
-    # docstring del módulo y prep_dev_sprite.compute_frame_normalization_plan()).
+    # docstring del módulo y prep_dev_sprite.compute_frame_normalization_plan()),
+    # y el downscale opcional en tiempo de compilación
+    # (`runtime_max_frame_dimension`) -- COMBINADOS en un único resize
+    # cuando ambos aplican, en vez de dos resizes de box-filter
+    # encadenados (Block 05, segunda pasada de corrección post-QA: ver
+    # docs/DECISION_LOG.md DEC-075). Dos pasadas secuenciales de
+    # `resize_rgba_area_average` para el MISMO factor de reescalado neto
+    # pierden más detalle fino que una sola pasada directa desde la
+    # resolución nativa -- medido en este bloque: hasta ~1.75% de los
+    # pixeles de alpha de un frame real de Bunny (groom) difieren
+    # visiblemente (>10/255) entre ambos caminos, con un ablandamiento
+    # de contorno perceptible en el de dos pasadas. El PNG en disco
+    # nunca se toca de ninguna forma, solo estos bytes que van directo
+    # al pack compilado.
     if normalization is not None:
         content_scale, working_width, working_height, offset_x, offset_y = normalization
-        if abs(content_scale - 1.0) > 1e-9:
-            target_w = max(1, round(width * content_scale))
-            target_h = max(1, round(height * content_scale))
-            resize_fn = prep_dev_sprite.resize_rgba_area_average if content_scale < 1.0 else prep_dev_sprite.resize_rgba_nearest
+
+        runtime_ratio = 1.0
+        if runtime_max_frame_dimension is not None and max(working_width, working_height) > runtime_max_frame_dimension:
+            runtime_ratio = runtime_max_frame_dimension / max(working_width, working_height)
+
+        combined_scale = content_scale * runtime_ratio
+        final_working_width = max(1, round(working_width * runtime_ratio))
+        final_working_height = max(1, round(working_height * runtime_ratio))
+        final_offset_x = round(offset_x * runtime_ratio)
+        final_offset_y = round(offset_y * runtime_ratio)
+
+        if abs(combined_scale - 1.0) > 1e-9:
+            target_w = max(1, round(width * combined_scale))
+            target_h = max(1, round(height * combined_scale))
+            resize_fn = prep_dev_sprite.resize_rgba_area_average if combined_scale < 1.0 else prep_dev_sprite.resize_rgba_nearest
             pixels = resize_fn(width, height, pixels, target_w, target_h)
             width, height = target_w, target_h
-        pixels = prep_dev_sprite.compose_on_canvas(width, height, pixels, working_width, working_height, offset_x, offset_y)
-        width, height = working_width, working_height
 
-    # Downscale opcional en tiempo de compilación (ver el docstring del
-    # módulo) -- el PNG en disco nunca se toca, solo estos bytes que
-    # van directo al pack compilado.
-    if runtime_max_frame_dimension is not None and max(width, height) > runtime_max_frame_dimension:
+        # Falla fuerte en vez de recortar contenido en silencio (Block
+        # 05, segunda pasada de corrección post-QA -- ver
+        # docs/DECISION_LOG.md DEC-075): el canvas de trabajo compartido
+        # se dimensiona a partir del bounding box de contenido del
+        # PRIMER frame de cada entrada (ver
+        # compute_frame_normalization_plan()), así que un frame
+        # POSTERIOR de la misma animación con una pose que se extiende
+        # más lejos del ancla (p. ej. una oreja que se estira más en el
+        # frame 13 que en el frame 0) podría, en principio, exceder ese
+        # canvas -- `compose_on_canvas()` recortaría ese exceso en
+        # silencio si no se verificara acá. Se detectó exactamente este
+        # caso (por poco, <1px) en el `lie_to_sit` real de Frin durante
+        # este bloque -- ver el informe. Chequea el bounding box de
+        # contenido de ESTE frame específico (no el de su plan,
+        # calculado solo con el frame 0) contra el canvas final.
+        content_bbox = prep_dev_sprite.compute_content_bbox(width, height, pixels)
+        if content_bbox is not None:
+            minx, miny, maxx, maxy = content_bbox
+            left, top = final_offset_x + minx, final_offset_y + miny
+            right, bottom = final_offset_x + maxx + 1, final_offset_y + maxy + 1
+            if left < 0 or top < 0 or right > final_working_width or bottom > final_working_height:
+                raise PackCompileError(
+                    f"{context}: contenido real ({right - left}x{bottom - top} en "
+                    f"({left},{top})-({right},{bottom})) excede el canvas de trabajo compartido "
+                    f"({final_working_width}x{final_working_height}) -- este frame perdería contenido real "
+                    "si se recortara en silencio. El canvas se dimensiona a partir del frame 0 de cada "
+                    "animación; si un frame posterior se extiende más lejos del ancla, el margen de "
+                    "seguridad de compute_frame_normalization_plan() no alcanzó para este contenido real."
+                )
+        pixels = prep_dev_sprite.compose_on_canvas(width, height, pixels, final_working_width, final_working_height, final_offset_x, final_offset_y)
+        width, height = final_working_width, final_working_height
+    elif runtime_max_frame_dimension is not None and max(width, height) > runtime_max_frame_dimension:
+        # Sin normalización de contenido activa para este pet -- el
+        # downscale de tiempo de compilación de siempre, sin cambios.
         scale = runtime_max_frame_dimension / max(width, height)
         target_w = max(1, round(width * scale))
         target_h = max(1, round(height * scale))
@@ -366,19 +418,31 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
     docstring del módulo): recorre TODA la estructura del grafo de
     comportamiento (cada state.base_animation + sus direction_overrides,
     y cada ambient/hover/click action + los suyos), decodificando solo
-    el primer frame de cada una, y arma los diccionarios `entries`/
-    `groups` que prep_dev_sprite.compute_frame_normalization_plan()
-    necesita -- las claves usadas acá son exactamente los mismos
+    el primer frame de cada una, y arma los diccionarios que
+    prep_dev_sprite.compute_frame_normalization_plan() necesita --
+    `entries`/`groups` (las claves usadas acá son exactamente los mismos
     strings `context` que _compile_animation()/_compile_weighted_action()
     ya reciben más abajo, así que el resultado se puede indexar
     directamente con ese mismo `context` en la segunda pasada real de
-    compilación. Todas las entradas de TODOS los estados comparten un
-    único canvas de trabajo (el mismo invariante que ya regía Nidir/
-    Bunny de un solo estado) -- para un pet con estados reales (Frin)
-    esto además evita que el personaje "salte" de tamaño/posición al
+    compilación), más `group_frame_paths` (TODAS las rutas de frame de
+    cada grupo, no solo la primera -- para que esa función pueda
+    detectar cuándo dos grupos comparten un archivo real, p. ej. cuando
+    el `base_animation` de un estado ES literalmente el frame final de
+    la transición de otro estado) y `state_of_group`/
+    `base_group_of_state` (qué BehaviorState autoriza cada grupo, y
+    cuál es el `base_animation` de cada estado específicamente) -- ver
+    el docstring de esa función y docs/DECISION_LOG.md DEC-075 para por
+    qué esto ya no es una comparación de bounding box plana entre
+    estados. Todas las entradas de TODOS los estados comparten un único
+    canvas de trabajo (el mismo invariante que ya regía Nidir/Bunny de
+    un solo estado) -- para un pet con estados reales (Frin) esto
+    además evita que el personaje "salte" de tamaño/posición al
     transicionar entre estados."""
     entries: dict[str, tuple[int, int, bytes]] = {}
     groups: dict[str, str] = {}
+    group_frame_paths: dict[str, list[str]] = {}
+    state_of_group: dict[str, str] = {}
+    base_group_of_state: dict[str, str] = {}
 
     states = _require(manifest, "states", "manifest")
     if not states:
@@ -386,36 +450,50 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
 
     reference_group = f"state[{states[0]['id']}].base_animation"
 
-    def add_animation(anim_manifest: dict, context: str, group: str) -> None:
+    def add_animation(anim_manifest: dict, context: str, group: str, state_id: str) -> None:
         entries[context] = _first_frame_pixels(anim_manifest, manifest_dir, context)
         groups[context] = group
+        state_of_group.setdefault(group, state_id)
+        paths = group_frame_paths.setdefault(group, [])
+        for frame_manifest in anim_manifest.get("frames", []):
+            source = frame_manifest.get("source")
+            if source is not None:
+                paths.append(os.path.realpath(os.path.join(manifest_dir, source)))
 
     def add_actions(action_manifests: list[dict], state_id: str, trigger_name: str) -> None:
         for am in action_manifests:
             action_id = am.get("id", "?")
             context = _weighted_action_context(state_id, trigger_name, action_id)
             group = f"state[{state_id}].{trigger_name}.{action_id}"
-            add_animation(am, context, group)
+            add_animation(am, context, group, state_id)
             for i, om in enumerate(am.get("direction_overrides", [])):
                 override_context = f"{context}_direction_overrides[{i}]"
-                add_animation(om, override_context, group)  # right/left share content_scale
+                add_animation(om, override_context, group, state_id)  # right/left share content_scale
 
     for state in states:
         state_id = state["id"]
         base_context = f"state[{state_id}].base_animation"
         base_group = f"state[{state_id}].base_animation"
+        base_group_of_state[state_id] = base_group
         base_manifest = _require(state, "base_animation", f"state '{state_id}'")
-        add_animation(base_manifest, base_context, base_group)
+        add_animation(base_manifest, base_context, base_group, state_id)
         for i, om in enumerate(state.get("base_animation_direction_overrides", [])):
             override_context = f"{base_context}_direction_overrides[{i}]"
-            add_animation(om, override_context, base_group)
+            add_animation(om, override_context, base_group, state_id)
 
         add_actions(state.get("ambient_actions", []), state_id, "ambient_actions")
         if not bool(state.get("hover_uses_ambient_actions", True)):
             add_actions(state.get("hover_actions", []), state_id, "hover_actions")
         add_actions(state.get("click_actions", []), state_id, "click_actions")
 
-    return prep_dev_sprite.compute_frame_normalization_plan(entries, groups, reference_group=reference_group)
+    return prep_dev_sprite.compute_frame_normalization_plan(
+        entries,
+        groups,
+        reference_group=reference_group,
+        group_frame_paths=group_frame_paths,
+        state_of_group=state_of_group,
+        base_group_of_state=base_group_of_state,
+    )
 
 
 def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
