@@ -299,11 +299,28 @@ normalization (`compute_content_bbox`/`compose_on_canvas`/
 `compute_frame_normalization_plan`), and both resize functions
 (`resize_rgba_nearest` for upscales, `resize_rgba_area_average` — a
 box filter — for real downscales) that `tools/compile_pet_pack.py`
-reuses. None of this changed in Block 05 — only the manifest shape
-`compile_pet_pack.py` walks did (§2/§4 above): every compilable
-animation now lives under `states[i].base_animation` or one of
+reuses. The manifest shape `compile_pet_pack.py` walks changed in
+Block 05's first pass (§2/§4 above): every compilable animation now
+lives under `states[i].base_animation` or one of
 `states[i].{ambient,hover,click}_actions[j]`, instead of the old flat
-`idle`/`click_reaction`/`passive_actions` keys.
+`idle`/`click_reaction`/`passive_actions` keys. Block 05's THIRD
+corrective pass (see DEC-075 in `docs/DECISION_LOG.md`) additionally
+redesigned `compute_frame_normalization_plan()` itself: it no longer
+measures every group's scale against one pet-wide bounding box
+(invalid across `BehaviorState`s of genuinely different silhouette
+orientation, e.g. Frin "seated" vs. "lying") — it now unifies groups
+that share a real source frame file via a union-find (so a state's
+`base_animation` that reuses a transition's own first/last frame
+inherits that transition's scale BY CONSTRUCTION, never by a fresh
+pixel comparison) and, for anything not so linked, compares against
+its OWN authoring state's `base_animation` instead of the pet's global
+reference. `tools/compile_pet_pack.py`'s `_compile_frame()` also now
+combines the content-normalization resize and the
+`runtime_max_frame_dimension` downscale into a single resize pass
+(less cumulative detail loss than two chained box-filters for the same
+net ratio), and fails loudly (`PackCompileError`) instead of silently
+cropping if any frame's real content — not just its frame 0 — would
+exceed the shared working canvas.
 
 `tools/generate_bunny_pack.py`/`generate_nidir_pack.py` build a
 single-state ("default") manifest from real imported PNG frames plus
@@ -390,7 +407,7 @@ as a valid positive number, that value replaces *this run's* ambient
 interval for EVERY state that has one — the pack's own authored
 per-state default is never mutated.
 
-## 8.1 Política de hover — dwell continuo de 5s (Block 04.3 → Block 05, dos correcciones)
+## 8.1 Política de hover — dwell continuo de 1s (Block 04.3 → Block 05, tres correcciones)
 
 Historial honesto (ninguna pasada se reescribe, cada una superó a la
 anterior con un requisito más preciso del owner):
@@ -399,14 +416,18 @@ anterior con un requisito más preciso del owner):
 - Block 05, primera corrección: cooldown propio de 2s, independiente
   del timer ambient (todavía disparaba EN EL INSTANTE en que el cursor
   entraba).
-- Block 05, **segunda corrección (estado actual)**: el owner pidió,
-  con más precisión, que hover NO dispare apenas el cursor entra —
-  debe permanecer **continuamente** sobre la región interactiva
-  durante 5 segundos reales antes de disparar. Si sale antes de los
-  5s, el contador se reinicia por completo (no queda ningún crédito
-  parcial). Un click, un drag, o un cambio real de `BehaviorState`
-  TAMBIÉN reinician el contador, incluso si el cursor nunca salió
-  físicamente de la región.
+- Block 05, segunda corrección: dwell continuo real de 5 segundos — el
+  cursor debe permanecer **continuamente** sobre la región interactiva
+  antes de disparar; si sale antes, el contador se reinicia por
+  completo (sin crédito parcial). Un click, un drag, o un cambio real
+  de `BehaviorState` TAMBIÉN reinician el contador, incluso si el
+  cursor nunca salió físicamente de la región.
+- Block 05, **tercera corrección (estado actual)**: el owner pidió
+  bajar el umbral de dwell de 5s a **1s** ("current 5-second dwell is
+  too long") — el MECANISMO no cambia en absoluto, solo
+  `SpikeApp::kHoverDwellSeconds` (un único valor). Esta misma pasada
+  agrega, además, que el timer ambient se reinicie en cualquier
+  interacción real (ver el final de esta sección y §11.1).
 
 **Mecanismo: `core::HoverDwellTracker`** (`src/core/HoverDwellTracker.h`,
 reemplaza a la vieja `core::HoverPassiveGate`) — pura, sin SDL, testeada
@@ -426,14 +447,14 @@ Linux-X11), hover solo se alimentaba históricamente de eventos
 `SDL_EVENT_MOUSE_MOTION` reales — pero si el cursor se queda
 PERFECTAMENTE quieto sobre el pet (exactamente el caso que "dwell"
 debe detectar), ningún evento de motion nuevo llega para volver a
-chequear si ya pasaron los 5 segundos. `SpikeApp::hoverDwellDeadlineMs_`
-(un `std::optional<double>`, el mismo patrón que
+chequear si ya pasó el umbral. `SpikeApp::hoverDwellDeadlineMs_` (un
+`std::optional<double>`, el mismo patrón que
 `ambientDeadlineMs_`/`confirmRedrawDeadlineMs_`) se arma en cuanto un
 dwell arranca y se agrega al cálculo de `waitMs` del loop principal
 (`SpikeApp::Run()`) — así el loop despierta exactamente cuando ese
 dwell cruzaría el umbral, sin importar si el mouse se movió o no
-durante esos 5 segundos. Al despertar por ese deadline, el loop vuelve
-a MUESTREAR la posición real del cursor (`SampleCursor()`, la misma
+durante ese tiempo. Al despertar por ese deadline, el loop vuelve a
+MUESTREAR la posición real del cursor (`SampleCursor()`, la misma
 función que ya usa el fallback poll-driven de Windows) en vez de
 asumir que el cursor sigue encima — así el mecanismo es correcto sin
 importar la plataforma o si llegaron eventos de motion intermedios.
@@ -449,24 +470,87 @@ seated → lying — nunca un self-loop ordinario como un click en Bunny,
 que deja el mismo estado activo y por lo tanto NO reinicia ningún
 dwell en curso).
 
-**Sigue completamente desacoplado del timer ambient** — ninguno de los
-dos caminos (`ambientDeadlineMs_`/`hoverDwellDeadlineMs_`) consulta el
-reloj del otro, requisito que se mantiene sin cambios desde la primera
-corrección de este bloque.
+**Ambos relojes ("deadline") son independientes -- ninguno consulta el
+del otro** — `ambientDeadlineMs_` y `hoverDwellDeadlineMs_` corren cada
+uno con su propia matemática, requisito que se mantiene sin cambios
+desde la primera corrección de este bloque. Pero (tercera corrección,
+ver DEC-078 en `docs/DECISION_LOG.md`) el timer ambient **sí se
+reinicia** cuando una interacción de hover ocurre: el cursor entrando
+a la región interactiva (un dwell nuevo arrancando, incluso si nunca
+llega a disparar) y un disparo de hover completo AMBOS llaman a
+`RearmAmbientDeadline()`. Esto no es un acoplamiento de relojes — es
+que "el owner acaba de interactuar con el pet" también aplica a hover,
+no solo a click/drag (ver §8.1.1 para la lista completa de qué cuenta
+como interacción).
 
 **Prioridad click/drag > hover/pasiva > estática** (sin cambios). Un
 gesto de click/drag en curso nunca alimenta `hoverDwellTracker_` (lo
 resetea en cambio, ver arriba). `TriggerHoverAction()` es, por diseño,
 un no-op fuera de `kBase` — click siempre gana sobre cualquier disparo
-pasivo pendiente.
+pasivo pendiente. Y, simétricamente, un `TriggerAmbientAction()`/
+`TriggerHoverAction()` que llega mientras la OTRA acción pasiva ya está
+en curso también es un no-op (ambas comparten
+`ControllerMode::kAmbientOrHoverAction` y el mismo chequeo `mode_ !=
+kBase` en `content::AnimationController`) — ninguna de las dos
+interrumpe nunca a la otra ni a sí misma. Matriz completa verificada
+en `tests/AnimationControllerTest.cpp`: `ClickInterruptsAmbientAction`/
+`AmbientActionNeverInterruptsClick` (eje click↔ambient, ya existentes),
+más `HoverActionNeverInterruptsClick`/`ClickInterruptsHoverAction`
+(eje click↔hover) y
+`AmbientActionNeverInterruptsAnInProgressHoverAction`/
+`HoverActionNeverInterruptsAnInProgressAmbientAction` (eje
+ambient↔hover) — Block 05, tercera pasada.
 
 **Verificado** con `NIMVLETS_DEV_HOVER_TEST_COUNT` contra el binario
-real (simula ciclos completos de entrada + 5s de dwell + salida) y con
-`tests/HoverDwellTrackerTest.cpp` (9 casos: no dispara al entrar, sí
-exactamente al cruzar el umbral, nunca dos veces mientras se queda
+real (simula ciclos completos de entrada + dwell completo + salida) y
+con `tests/HoverDwellTrackerTest.cpp` (9 casos: no dispara al entrar,
+sí exactamente al cruzar el umbral, nunca dos veces mientras se queda
 quieto, un reset explícito exige un umbral completo nuevo aunque el
 cursor nunca haya salido, ciclos repetidos de entrada/salida cada uno
-dispara una vez).
+dispara una vez) — genérico sobre CUALQUIER valor de dwell (los tests
+usan su propio `kDwellSeconds` de prueba, no
+`SpikeApp::kHoverDwellSeconds`), así que no necesitaron ningún cambio
+al bajar el umbral de 5s a 1s.
+
+## 8.1.1 Reinicio del timer ambient por interacción real (Block 05, tercera pasada — DEC-078)
+
+Antes de esta pasada, `RearmAmbientDeadline()` solo se llamaba al
+cargar/cambiar de pet y al detectar una transición de `BehaviorState`
+real (ver `lastKnownStateId_` en `SpikeApp::Run()`) — un click o un
+hover completo interrumpían la animación en curso, pero el conteo de
+~15s hacia el PRÓXIMO ambient seguía corriendo desde donde estaba
+antes de la interacción. QA manual del owner: "the pet should not
+perform an ambient action immediately after the owner just interacted
+with it" — un ambient podía dispararse casi inmediatamente después de
+que el owner acababa de interactuar, si el deadline anterior ya
+estaba por vencer.
+
+`SpikeApp::RearmAmbientDeadline(nowMs)` ahora también se llama en:
+
+- el cursor entrando a la región interactiva (un dwell de hover nuevo
+  arrancando -- ver `MaybeTriggerHoverAction()`, detectado como la
+  transición "no estaba en dwell -> ahora sí" del propio
+  `hoverDwellTracker_`), incluso si el dwell nunca llega a cruzar el
+  umbral y disparar una acción;
+- un disparo de hover completo (`TriggerHoverAction()` exitoso);
+- un click (`TriggerClick()` exitoso, en `SDL_EVENT_MOUSE_BUTTON_UP`);
+- el inicio de un drag (`SDL_EVENT_MOUSE_BUTTON_DOWN` sobre la región
+  interactiva);
+- el fin de un drag (`SDL_EVENT_MOUSE_BUTTON_UP`, rama de drag);
+- un cambio de dirección real (`SetActiveDirection()`, incluyendo el
+  causado por un drag que cruza la mitad de pantalla -- ver
+  `UpdateDirectionFromWindowPosition()`).
+
+El intervalo en sí no cambia (sigue en 15s, ver DEC-066/074 en
+`docs/DECISION_LOG.md`) — lo único nuevo es CUÁNDO se reinicia el
+conteo. Un ambient cuyo deadline cae DURANTE un click/hover/drag en
+curso sigue sin solaparse ni encolarse (comportamiento preexistente,
+sin cambios en esta pasada): `TriggerAmbientAction()` es un no-op
+fuera de `ControllerMode::kBase`, pero `RearmAmbientDeadline()` se
+llama de todas formas justo después de chequear el deadline (ver
+`SpikeApp::Run()`), así que el deadline SIEMPRE se reprograma para
+~15s más adelante en vez de quedar vencido y disparar apenas termine
+la interacción en curso.
 
 ## 8.2 Redraw de confirmación — de solo-dirección a toda transición (Block 05)
 
@@ -555,9 +639,18 @@ cálculo, así que nunca pueden desalinearse entre sí ni con el alto-DPI
 cambios). El arte fuente y los bytes del pack compilado NUNCA se
 tocan — es puramente cuánto se estira al dibujar.
 
-Valores actuales: Bunny `1.0` (tamaño actual aprobado por el owner, sin
-cambio), Nidir `1.10` (candidato conservador de QA — "somewhat larger"
-— resultado exacto 176×173 nativo → 194×190 efectivo), Frin `1.0`
-(sin pedido de ajuste en este bloque). Ver `docs/NIDIR_CONTENT.md`/
-`docs/BUNNY_CONTENT.md`/`docs/FRIN_CONTENT.md` y el informe de Block 05
-para el detalle completo.
+Valores actuales (Block 05, tercera pasada de corrección post-QA — ver
+DEC-076 en `docs/DECISION_LOG.md`): Bunny `1.0` (tamaño actual
+aprobado por el owner, la referencia; sin cambio), Nidir `1.25` (subido
+de 1.10 -- QA manual real: seguía sintiéndose más chico que Bunny
+incluso con el +10% ya aplicado), Frin (macho Y hembra, un único valor
+para ambas variantes) `1.30` (subido de 1.0 -- "feels too small,
+should be comparable to Bunny/Nidir"). Estos candidatos se derivaron
+midiendo el bounding box de contenido VISIBLE del pack compilado como
+fracción de su propio frame (no solo el tamaño del canvas transparente,
+que incluye margen) — la "presencia visible efectiva" real en puntos:
+Bunny ~114×159pt, Nidir ~154×176pt (antes: ~136×155pt, con la ALTURA
+por debajo de Bunny pese al ajuste previo), Frin macho ~111×167pt
+(antes: ~85×128pt), Frin hembra ~118×179pt (antes: ~91×138pt). Ver
+`docs/NIDIR_CONTENT.md`/`docs/BUNNY_CONTENT.md`/`docs/FRIN_CONTENT.md`
+y el informe de Block 05 para el detalle completo.

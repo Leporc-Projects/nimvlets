@@ -155,8 +155,9 @@ single-state case.
 ## Ambient / hover / click are triggers, not a hard limit
 
 Every `content::BehaviorState` has exactly three trigger kinds today —
-`ambient_actions` (timer-driven), `hover_actions` (pointer-entry-driven,
-often just reusing the ambient pool — see `hover_uses_ambient_actions`),
+`ambient_actions` (timer-driven), `hover_actions` (continuous-dwell-driven
+— see `core::HoverDwellTracker`/`docs/ANIMATION_RUNTIME.md` §8.1 —
+often just reusing the ambient pool via `hover_uses_ambient_actions`),
 and `click_actions` (click-driven) — each an already-arbitrary-length,
 data-driven weighted list (a state can have one action or a dozen under
 any trigger, entirely through pack data, zero engine-code changes; see

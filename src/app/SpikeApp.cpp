@@ -534,6 +534,11 @@ void SpikeApp::SetActiveDirection(content::Direction direction) {
         content::ToString(direction), changed ? "" : " (no visual change -- already active, or a gesture is in progress)");
     if (changed) {
         MarkNeedsRedraw(nowMs);
+        // Un cambio de dirección real (incluyendo el causado por un
+        // drag que cruza la mitad de pantalla -- ver
+        // UpdateDirectionFromWindowPosition()) es una interacción
+        // visible del owner con el pet (Block 05 segunda pasada).
+        RearmAmbientDeadline(nowMs);
     }
 }
 
@@ -632,7 +637,19 @@ void SpikeApp::MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs) {
         return;
     }
 
+    const bool wasDwelling = hoverDwellTracker_.IsDwelling();
     const bool crossedThreshold = hoverDwellTracker_.Update(cursorOverOpaque, nowMs);
+
+    if (!wasDwelling && hoverDwellTracker_.IsDwelling()) {
+        // El cursor ACABA de entrar a la región interactiva -- un
+        // dwell nuevo recién arrancó. "Visible pointer enter" cuenta
+        // como interacción real por sí solo (owner: "the pet should
+        // not perform an ambient action immediately after the owner
+        // just interacted with it" -- pasar el mouse por encima
+        // también cuenta, incluso si nunca llega a mantenerse quieto
+        // lo suficiente como para disparar una acción de hover).
+        RearmAmbientDeadline(nowMs);
+    }
 
     // Mantiene armado (o limpia) hoverDwellDeadlineMs_ para que el
     // loop principal pueda despertar exactamente cuando el dwell EN
@@ -652,6 +669,12 @@ void SpikeApp::MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs) {
 
     if (animController_->TriggerHoverAction(NextUniformRandom01(), nowMs)) {
         MarkNeedsRedraw(nowMs);
+        // Un disparo de hover completo es, con más razón, una
+        // interacción real -- el próximo ambient debe volver a quedar
+        // a ~15s de distancia desde ESTE momento, no desde el enter
+        // previo (ya reiniciado arriba, pero una acción real
+        // completada lo confirma/reafirma).
+        RearmAmbientDeadline(nowMs);
         SDL_Log("nimvlets: hover-triggered action after %.0fs dwell (state='%s')", kHoverDwellSeconds, animController_->CurrentStateId().c_str());
     }
 }
@@ -691,7 +714,7 @@ void SpikeApp::RunDevHoverSmokeTestIfRequested() {
         simulatedNowMs += 1.0;
         MaybeTriggerHoverAction(true, simulatedNowMs);  // entra -- arranca el dwell
         simulatedNowMs += kHoverDwellSeconds * 1000.0 + 1.0;
-        MaybeTriggerHoverAction(true, simulatedNowMs);  // cruza el umbral de 5s
+        MaybeTriggerHoverAction(true, simulatedNowMs);  // cruza el umbral de dwell
         simulatedNowMs += 1.0;
         MaybeTriggerHoverAction(false, simulatedNowMs);  // sale -- resetea
     }
@@ -915,6 +938,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             // incluso si termina siendo un click corto (no un drag) y
             // el cursor nunca sale de la región interactiva.
             ResetHoverDwell();
+            // "Drag start" es también una interacción real que debe
+            // reiniciar el conteo ambient (owner, Block 05 segunda
+            // pasada) -- así un drag largo no deja que el ambient
+            // dispare mientras el owner sigue con el botón apretado.
+            RearmAmbientDeadline(static_cast<double>(SDL_GetTicks()));
 
             int winX = 0;
             int winY = 0;
@@ -967,6 +995,7 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 persistenceScheduler_.MarkDirty(nowMs);
                 animController_->TriggerClick(NextUniformRandom01(), nowMs);
                 MarkNeedsRedraw(nowMs);
+                RearmAmbientDeadline(nowMs);  // un click es una interacción real -- ver el comentario del campo
                 SDL_Log(
                     "nimvlets: click #%d this session (balance: %llu)",
                     clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
@@ -976,6 +1005,7 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 SDL_GetWindowPosition(window_, &endX, &endY);
                 appState_.lastWindowPosition = persistence::WindowPosition{endX, endY};
                 persistenceScheduler_.MarkDirty(nowMs);
+                RearmAmbientDeadline(nowMs);  // "drag end" -- el conteo de ~15s arranca de nuevo desde acá
                 SDL_Log("nimvlets: drag ended at (%d, %d) (correctly not counted as a click)", endX, endY);
             }
             break;
@@ -1019,7 +1049,7 @@ int SpikeApp::Run() {
         if (hoverDwellDeadlineMs_) {
             // Ver el comentario del campo en SpikeApp.h -- despierta el
             // loop exactamente cuando un dwell en curso cruzaría el
-            // umbral de 5s, incluso sin más eventos de motion reales
+            // umbral de dwell, incluso sin más eventos de motion reales
             // (el caso de un cursor perfectamente quieto).
             waitMs = std::min(waitMs, *hoverDwellDeadlineMs_ - nowMs);
         }

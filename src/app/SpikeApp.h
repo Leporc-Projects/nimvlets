@@ -46,11 +46,15 @@ public:
 
     // Segundos de dwell continuo requeridos para que hover dispare
     // (Block 05, corrección de comportamiento — ver
-    // MaybeTriggerHoverAction()). `static constexpr` (no un anonymous-
-    // namespace constant en el .cpp) porque tanto el inicializador de
-    // hoverDwellTracker_ como el cálculo de hoverDwellDeadlineMs_ en
-    // SpikeApp.cpp lo necesitan.
-    static constexpr double kHoverDwellSeconds = 5.0;
+    // MaybeTriggerHoverAction()). Bajado de 5.0 a 1.0 en la segunda
+    // pasada de corrección post-QA del owner ("current 5-second dwell
+    // is too long") -- el mecanismo en sí (dwell continuo, resets en
+    // salida/click/drag/cambio de estado, desacoplado del timer
+    // ambient) no cambia, solo este único umbral. `static constexpr`
+    // (no un anonymous-namespace constant en el .cpp) porque tanto el
+    // inicializador de hoverDwellTracker_ como el cálculo de
+    // hoverDwellDeadlineMs_ en SpikeApp.cpp lo necesitan.
+    static constexpr double kHoverDwellSeconds = 1.0;
 
 private:
     bool Init();
@@ -124,12 +128,24 @@ private:
     // (Re)arma ambientDeadlineMs_ a partir del BehaviorState ACTUAL de
     // animController_: nullopt si ese estado no define ambientActions
     // (p. ej. Frin "lying" — sin timer, nunca se despierta el loop para
-    // esto), o `nowMs + intervalo*1000` si sí. Se llama una vez tras
-    // cargar/cambiar de pet, y de nuevo cada vez que el loop principal
-    // detecta que el estado activo cambió (ver lastKnownStateId_) —
-    // así un pet con estados (Frin) rearma correctamente el timer al
-    // entrar/salir de un estado con/sin comportamiento ambient propio,
-    // sin ningún código específico de Frin acá.
+    // esto), o `nowMs + intervalo*1000` si sí. Se llama:
+    //   - una vez tras cargar/cambiar de pet;
+    //   - cada vez que el loop principal detecta que el estado activo
+    //     cambió (ver lastKnownStateId_) — así un pet con estados
+    //     (Frin) rearma correctamente el timer al entrar/salir de un
+    //     estado con/sin comportamiento ambient propio;
+    //   - cuando el timer ambient dispara de verdad (o se salta por
+    //     estar ocupado — ver el loop principal en SpikeApp::Run());
+    //   - y, Block 05 segunda pasada de corrección post-QA ("el
+    //     ambient no debe dispararse recién después de que el owner
+    //     acaba de interactuar"): en CUALQUIER interacción real del
+    //     owner con el pet -- el cursor entrando a la región
+    //     interactiva, un disparo de hover completo, un click, el
+    //     inicio y el fin de un drag. Esto reinicia el conteo de
+    //     ~15s desde ESE momento, en vez de dejar que el ambient
+    //     dispare inmediatamente después de una interacción que
+    //     casualmente terminó justo cuando el deadline anterior ya
+    //     había vencido.
     void RearmAmbientDeadline(double nowMs);
 
     // Escribe appState_ vía appStateStore_ si — y solo si —
@@ -174,15 +190,21 @@ private:
     // anterior). El owner pidió explícitamente: "no quiero que se
     // dispare una animación apenas el mouse entra" — hover ahora exige
     // DWELL: el cursor debe permanecer CONTINUAMENTE sobre la región
-    // interactiva durante kHoverDwellSeconds (5s) antes de disparar.
-    // Si sale antes, el contador se reinicia por completo (ver
+    // interactiva durante kHoverDwellSeconds (1s, segunda pasada de
+    // corrección post-QA -- bajado de 5s) antes de disparar. Si sale
+    // antes, el contador se reinicia por completo (ver
     // core::HoverDwellTracker). Sigue disparando la MISMA
     // TriggerHoverAction() que el timer ambient puede disparar (vía el
     // pool efectivo de hover del estado activo — ver
     // content::EffectiveHoverActions()); nunca toca
     // clickCount_/appState_.clickBalance/persistencia; sigue
-    // completamente desacoplado de ambientDeadlineMs_ (ningún reloj
-    // compartido).
+    // completamente desacoplado de ambientDeadlineMs_ en el sentido de
+    // que NINGÚN reloj es compartido entre ambos -- pero un dwell que
+    // recién arranca (el cursor entrando a la región interactiva) SÍ
+    // reinicia el timer ambient por separado (ver
+    // RearmAmbientDeadline(), llamado acá mismo) porque "el owner
+    // recién interactuó con el pet" también aplica a un simple pasar
+    // el mouse por encima, no solo a un disparo de hover completo.
     //
     // Prioridad click/drag > hover/pasiva > estática: un click, un
     // drag, o un cambio de BehaviorState reinician el dwell (ver
@@ -270,7 +292,7 @@ private:
     // posición real del cursor (SampleCursor(), la misma función que
     // ya usa el fallback poll-driven de Windows) en vez de asumir que
     // sigue encima -- así el mecanismo es correcto sin importar si el
-    // mouse se movió o no durante esos 5 segundos.
+    // mouse se movió o no durante esos kHoverDwellSeconds.
     std::optional<double> hoverDwellDeadlineMs_;
 
     // Fuente real de aleatoriedad para elegir qué WeightedAction

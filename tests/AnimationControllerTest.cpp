@@ -88,6 +88,60 @@ bool AmbientActionNeverInterruptsClick() {
     return true;
 }
 
+// Matriz de prioridad completa (Block 05, segunda pasada de corrección
+// post-QA -- "verify and leave clearly and unambiguously defined:
+// click during a pending passive, hover during a click, passive
+// during hover, etc."): click SIEMPRE gana; ambient y hover NUNCA se
+// interrumpen entre sí ni a sí mismos (ambos comparten
+// ControllerMode::kAmbientOrHoverAction -- el mismo chequeo "mode_ !=
+// kBase" en TriggerAmbientAction()/TriggerHoverAction() ya cubre
+// ambos casos por construcción, nunca dos implementaciones separadas
+// que puedan divergir). Los tests de arriba (ClickInterruptsAmbientAction/
+// AmbientActionNeverInterruptsClick) ya cubren el eje click<->ambient;
+// estos cuatro completan el eje click<->hover y ambient<->hover.
+
+bool HoverActionNeverInterruptsClick() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerClick(0.0, 0.0);
+    NIMVLETS_CHECK(!controller.TriggerHoverAction(0.0, 10.0));  // no-op -- click outranks hover
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kClickAction);
+    return true;
+}
+
+bool ClickInterruptsHoverAction() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerHoverAction(0.0, 0.0));  // picks weight-0.7 "breathing"
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+
+    NIMVLETS_CHECK(controller.TriggerClick(0.0, 10.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kClickAction);
+    const auto& clickAnim = pet.states[0].clickActions[0].animation;
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &clickAnim.frames[0]);
+    return true;
+}
+
+bool AmbientActionNeverInterruptsAnInProgressHoverAction() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerHoverAction(0.0, 0.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+    NIMVLETS_CHECK(!controller.TriggerAmbientAction(0.0, 10.0));  // no-op -- ya hay una acción en curso
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+    return true;
+}
+
+bool HoverActionNeverInterruptsAnInProgressAmbientAction() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerAmbientAction(0.0, 0.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+    NIMVLETS_CHECK(!controller.TriggerHoverAction(0.0, 10.0));  // no-op -- ya hay una acción en curso
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+    return true;
+}
+
 bool WeightedSelectionBoundaryAt70Percent() {
     PetDefinition pet = MakeNormalPetFixture();
     const auto& actions = pet.states[0].ambientActions;  // [0]=0.7 breathing, [1]=0.3 groom
@@ -141,6 +195,10 @@ void RegisterAnimationControllerTests(testing::TestRunner& runner) {
     runner.Add("AnimationController.RepeatedClickCoalescesInsteadOfRestarting", RepeatedClickCoalescesInsteadOfRestarting);
     runner.Add("AnimationController.ClickInterruptsAmbientAction", ClickInterruptsAmbientAction);
     runner.Add("AnimationController.AmbientActionNeverInterruptsClick", AmbientActionNeverInterruptsClick);
+    runner.Add("AnimationController.HoverActionNeverInterruptsClick", HoverActionNeverInterruptsClick);
+    runner.Add("AnimationController.ClickInterruptsHoverAction", ClickInterruptsHoverAction);
+    runner.Add("AnimationController.AmbientActionNeverInterruptsAnInProgressHoverAction", AmbientActionNeverInterruptsAnInProgressHoverAction);
+    runner.Add("AnimationController.HoverActionNeverInterruptsAnInProgressAmbientAction", HoverActionNeverInterruptsAnInProgressAmbientAction);
     runner.Add("AnimationController.WeightedSelectionBoundaryAt70Percent", WeightedSelectionBoundaryAt70Percent);
     runner.Add("AnimationController.WeightedSelectionFallsBackUniformlyWhenWeightsEqual", WeightedSelectionFallsBackUniformlyWhenWeightsEqual);
     runner.Add("AnimationController.DirectionChangeWhileBaseUpdatesFrameImmediately", DirectionChangeWhileBaseUpdatesFrameImmediately);

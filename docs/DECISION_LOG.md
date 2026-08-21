@@ -2050,3 +2050,43 @@ runtime (`content::PetDefinition::visualScale`, aplicado solo en
 pack compilado no cambian. Candidatos de QA, no cifras definitivas del
 owner — triviales de re-ajustar (un único número por pet en cada
 `generate_<pet>_pack.py`) tras la próxima ronda de QA manual real.
+
+### DEC-077 — Hover: dwell de 5s a 1s
+**Status:** DECIDIDO · Block 05, tercera pasada de corrección post-QA.
+
+El owner pidió explícitamente bajar el umbral de dwell continuo de
+hover (ver DEC-072) de 5 a 1 segundo — "current 5-second dwell is too
+long". El MECANISMO no cambia (dwell continuo, reset en salida/click/
+drag/cambio de estado, desacoplado del timer ambient, wakeup explícito
+para un cursor perfectamente quieto) — solo `SpikeApp::
+kHoverDwellSeconds` (5.0 -> 1.0), un único valor.
+
+### DEC-078 — El timer ambient se reinicia en toda interacción real, no solo en cambios de estado
+**Status:** DECIDIDO · Block 05, tercera pasada de corrección post-QA.
+
+Antes de esta pasada, `RearmAmbientDeadline()` solo se llamaba al
+cargar/cambiar de pet y al detectar una transición de `BehaviorState`
+real — un click o un hover completo interrumpían la animación en
+curso, pero el conteo de ~15s hacia el PRÓXIMO ambient seguía
+corriendo desde donde estaba antes de la interacción, así que un
+ambient podía dispararse casi inmediatamente después de que el owner
+acababa de interactuar con el pet — "the pet should not perform an
+ambient action immediately after the owner just interacted with it"
+(owner). Se agregan llamadas a `RearmAmbientDeadline(nowMs)` en: el
+cursor entrando a la región interactiva (un dwell de hover nuevo
+arrancando, incluso si nunca llega a disparar), un disparo de hover
+completo, un click, el inicio de un drag, el fin de un drag, y un
+cambio de dirección real (incluyendo el causado por un drag que cruza
+la mitad de pantalla). El intervalo en sí sigue en 15s (ver DEC-066/
+074) — lo único nuevo es CUÁNDO se reinicia el conteo. Un ambient cuyo
+deadline cae durante un click/hover/drag en curso sigue sin
+solaparse/encolarse (comportamiento ya existente desde antes de este
+bloque: `TriggerAmbientAction()` es un no-op fuera de `kBase`, pero el
+deadline SIEMPRE se reprograma) — no cambia. Prioridad sin cambios:
+click > hover/ambient > estático (`ClickInterruptsAmbientAction`/
+`AmbientActionNeverInterruptsClick` ya existentes, más 4 tests nuevos
+en `tests/AnimationControllerTest.cpp` que completan la matriz
+click<->hover y ambient<->hover: `HoverActionNeverInterruptsClick`,
+`ClickInterruptsHoverAction`,
+`AmbientActionNeverInterruptsAnInProgressHoverAction`,
+`HoverActionNeverInterruptsAnInProgressAmbientAction`).
