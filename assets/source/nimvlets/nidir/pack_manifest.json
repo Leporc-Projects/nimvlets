@@ -5,7 +5,7 @@
   "canvas_width": 176,
   "canvas_height": 173,
   "alpha_hit_threshold": 128,
-  "visual_scale": 1.1,
+  "visual_scale": 1.25,
   "content_version": "block05-nidir-1",
   "runtime_max_frame_dimension": 320,
   "normalize_visual_scale": true,
