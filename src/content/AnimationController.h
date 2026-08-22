@@ -50,7 +50,13 @@ enum class ControllerMode {
 //   (returnsToIdle == true en su animación), el controller transiciona
 //   al BehaviorState nombrado por su targetStateId (puede ser el MISMO
 //   estado — un self-loop, lo normal para un pet sin estados reales) y
-//   vuelve a kBase mostrando la pose base de ESE estado.
+//   vuelve a kBase mostrando la pose base de ESE estado. Ese instante se
+//   reporta vía ActionCompletedDuringLastAdvance() — ver su comentario:
+//   un self-loop NO cambia CurrentStateId(), así que el id de estado NO
+//   sirve como señal de "terminó una acción".
+// - CancelActionToCurrentState() aborta una acción en curso y vuelve a
+//   la pose base del estado ACTUAL (nunca al targetStateId pendiente) —
+//   el mecanismo genérico que le da al drag la prioridad más alta.
 class AnimationController {
 public:
     explicit AnimationController(const PetDefinition& pet);
@@ -59,8 +65,38 @@ public:
     // possibly stepping through more than one frame boundary (or
     // completing a one-shot and transitioning state) if `nowMs` is far
     // enough past the last call. Returns true if the *displayed frame*
-    // actually changed.
+    // actually changed. Si durante esta llamada una acción one-shot
+    // terminó, ActionCompletedDuringLastAdvance() lo reporta.
     bool Advance(double nowMs);
+
+    // El instante EXACTO (tiempo de contenido, no wall-clock del
+    // llamador) en que una acción one-shot terminó durante la ÚLTIMA
+    // llamada a Advance() — nullopt si esa llamada no completó ninguna.
+    // Se recalcula en cada Advance(); nunca queda "pegado" de una
+    // llamada anterior.
+    //
+    // Por qué existe (Block 05, corrección de ciclo de vida): el
+    // llamador necesita saber cuándo una acción TERMINÓ para reiniciar
+    // el contador ambient desde ese momento. Observar CurrentStateId()
+    // NO alcanza: la mayoría de las acciones son self-loops (click de
+    // Bunny/Nidir, howl/tail_greet de Frin) que terminan en el MISMO
+    // estado en el que empezaron, así que el id nunca cambia y la
+    // duración de la animación se comía parte del intervalo ambient.
+    // Esto reporta las DOS clases de terminación (self-loop y
+    // cambio-de-estado real) por el mismo camino.
+    std::optional<double> ActionCompletedDuringLastAdvance() const { return lastActionCompletedMs_; }
+
+    // Aborta la acción one-shot en curso (si la hay) y vuelve a la pose
+    // base del estado ACTUAL — deliberadamente NO al targetStateId
+    // pendiente: una transición de postura interrumpida a mitad de
+    // camino nunca "completó", así que el pet se queda donde estaba
+    // (Frin: sit_to_lie interrumpido -> sigue seated; lie_to_sit
+    // interrumpido -> sigue lying). No-op (retorna false) si ya estaba
+    // en kBase. Retorna true si el frame mostrado cambió.
+    //
+    // Genérico, sin ninguna rama por pet: "volver al estado actual" es
+    // la respuesta correcta para cualquier grafo de comportamiento.
+    bool CancelActionToCurrentState(double nowMs);
 
     // Ver el comentario de clase para el contrato completo de cada uno.
     bool TriggerClick(double uniformRandom01, double nowMs);
@@ -119,6 +155,10 @@ private:
     // Estado destino cuando el WeightedAction actualmente en curso
     // termine (solo significativo si mode_ != kBase).
     std::size_t pendingTargetStateIndex_ = 0;
+
+    // Ver ActionCompletedDuringLastAdvance(). Reseteado al principio de
+    // cada Advance(), seteado solo si una acción terminó ahí.
+    std::optional<double> lastActionCompletedMs_;
 };
 
 }  // namespace nimvlets::content

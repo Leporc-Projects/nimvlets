@@ -186,6 +186,106 @@ bool TwoStatefulPetsWithSameGraphShapeBehaveIdenticallyWithoutIdentityConfusion(
     return true;
 }
 
+
+// ---------------------------------------------------------------------
+// Block 05, pasada de estabilización: semántica de una transición de
+// POSTURA interrumpida por un drag (DEC-080). La regla genérica es
+// "volver al estado ACTUAL, nunca al targetStateId pendiente" -- para
+// Frin eso significa exactamente lo que el owner pidió: una transición
+// abortada a mitad de camino deja al pet donde estaba.
+// ---------------------------------------------------------------------
+
+bool CancelDuringSitToLieRemainsSeated() {
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "seated");
+
+    // Dispara la transición seated -> lying y avanza a mitad de camino.
+    NIMVLETS_CHECK(controller.TriggerAmbientAction(0.0, 0.0));
+    controller.Advance(100.0);
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "seated");  // aún no completó
+
+    NIMVLETS_CHECK(controller.CancelActionToCurrentState(150.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "seated");  // NO saltó a lying
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.states[0].baseAnimation.frames[0]);
+    return true;
+}
+
+bool CancelDuringLieToSitRemainsLying() {
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    // Llega a lying completando sit_to_lie de verdad.
+    controller.TriggerAmbientAction(0.0, 0.0);
+    controller.Advance(200.0);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");
+
+    // Empieza lie_to_sit y lo interrumpe a mitad.
+    NIMVLETS_CHECK(controller.TriggerClick(0.0, 200.0));
+    controller.Advance(300.0);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");  // aún no completó
+
+    NIMVLETS_CHECK(controller.CancelActionToCurrentState(350.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");  // NO saltó a seated
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.states[1].baseAnimation.frames[0]);
+    return true;
+}
+
+bool CancelDuringSeatedSelfLoopClickRemainsSeated() {
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerClick(0.0, 0.0));  // howl o tail_greet, ambos self-loop
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kClickAction);
+
+    NIMVLETS_CHECK(controller.CancelActionToCurrentState(50.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "seated");
+    return true;
+}
+
+bool CancelWhileLyingInBaseKeepsLying() {
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerAmbientAction(0.0, 0.0);
+    controller.Advance(200.0);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+
+    NIMVLETS_CHECK(!controller.CancelActionToCurrentState(250.0));  // no-op
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");
+    return true;
+}
+
+bool StateChangingCompletionIsReportedWithItsExactInstant() {
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerAmbientAction(0.0, 0.0);
+    // sit_to_lie = 2 frames x 100ms -> completa exactamente en t=200.
+    controller.Advance(200.0);
+    const auto completed = controller.ActionCompletedDuringLastAdvance();
+    NIMVLETS_CHECK(completed.has_value());
+    NIMVLETS_CHECK(*completed == 200.0);
+    NIMVLETS_CHECK(controller.CurrentStateId() == "lying");
+    return true;
+}
+
+bool CompletionInstantIsIndependentOfALateCaller() {
+    // El loop puede despertar TARDE (dormido, sistema cargado). El
+    // instante reportado debe ser el de la terminación REAL del
+    // contenido, no el `nowMs` tardío del llamador -- si no, el
+    // intervalo ambient se calcularía desde un momento equivocado.
+    PetDefinition pet = MakeStatefulPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerAmbientAction(0.0, 0.0);
+    controller.Advance(5000.0);  // llega MUY tarde
+    const auto completed = controller.ActionCompletedDuringLastAdvance();
+    NIMVLETS_CHECK(completed.has_value());
+    NIMVLETS_CHECK(*completed == 200.0);  // no 5000
+    return true;
+}
+
 }  // namespace
 
 void RegisterStatefulBehaviorTests(testing::TestRunner& runner) {
@@ -207,6 +307,12 @@ void RegisterStatefulBehaviorTests(testing::TestRunner& runner) {
     runner.Add(
         "StatefulBehavior.TwoStatefulPetsWithSameGraphShapeBehaveIdenticallyWithoutIdentityConfusion",
         TwoStatefulPetsWithSameGraphShapeBehaveIdenticallyWithoutIdentityConfusion);
+    runner.Add("StatefulBehavior.CancelDuringSitToLieRemainsSeated", CancelDuringSitToLieRemainsSeated);
+    runner.Add("StatefulBehavior.CancelDuringLieToSitRemainsLying", CancelDuringLieToSitRemainsLying);
+    runner.Add("StatefulBehavior.CancelDuringSeatedSelfLoopClickRemainsSeated", CancelDuringSeatedSelfLoopClickRemainsSeated);
+    runner.Add("StatefulBehavior.CancelWhileLyingInBaseKeepsLying", CancelWhileLyingInBaseKeepsLying);
+    runner.Add("StatefulBehavior.StateChangingCompletionIsReportedWithItsExactInstant", StateChangingCompletionIsReportedWithItsExactInstant);
+    runner.Add("StatefulBehavior.CompletionInstantIsIndependentOfALateCaller", CompletionInstantIsIndependentOfALateCaller);
 }
 
 }  // namespace nimvlets::tests

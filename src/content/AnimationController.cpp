@@ -24,6 +24,9 @@ std::size_t AnimationController::FindStateIndex(const std::string& stateId) cons
 
 bool AnimationController::Advance(double nowMs) {
     bool changed = false;
+    // Se recalcula en CADA llamada -- nunca queda pegado de una
+    // llamada anterior (ver ActionCompletedDuringLastAdvance()).
+    lastActionCompletedMs_.reset();
 
     // Loop rather than step once: si el llamador estuvo dormido lo
     // bastante como para cruzar más de un frame boundary (o terminar un
@@ -57,6 +60,12 @@ bool AnimationController::Advance(double nowMs) {
 
         // One-shot terminado.
         if (currentAnimation_->returnsToIdle) {
+            // currentFrameStartMs_ es el instante exacto en que el
+            // último frame terminó -- más preciso que el `nowMs` del
+            // llamador, que puede llegar tarde si el loop estuvo
+            // dormido. Se reporta ANTES de transicionar porque
+            // TransitionToState() lo pisa.
+            lastActionCompletedMs_ = currentFrameStartMs_;
             TransitionToState(pendingTargetStateIndex_, currentFrameStartMs_);
         } else {
             // Se mantiene en el último frame en vez de leer fuera de rango.
@@ -130,6 +139,17 @@ bool AnimationController::SetDirection(Direction direction, double nowMs) {
     currentAnimation_ = &ResolveAnimation(state.baseAnimation, state.baseAnimationDirectionOverrides, direction_);
     currentFrameIndex_ = 0;
     currentFrameStartMs_ = nowMs;
+    return true;
+}
+
+bool AnimationController::CancelActionToCurrentState(double nowMs) {
+    if (mode_ == ControllerMode::kBase) {
+        return false;  // no hay ninguna acción que cancelar
+    }
+    // Deliberadamente currentStateIndex_, NO pendingTargetStateIndex_:
+    // una transición abortada a mitad de camino nunca completó, así
+    // que el estado de origen sigue siendo el verdadero.
+    TransitionToState(currentStateIndex_, nowMs);
     return true;
 }
 

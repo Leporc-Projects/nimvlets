@@ -3,6 +3,8 @@
 #include "TestPetFixtures.h"
 #include "content/AnimationController.h"
 
+#include <string>
+
 using nimvlets::content::AnimationController;
 using nimvlets::content::ChooseWeightedActionIndex;
 using nimvlets::content::ControllerMode;
@@ -186,6 +188,128 @@ bool DirectionChangeMidActionIsDeferredUntilBaseReturn() {
     return true;
 }
 
+
+// ---------------------------------------------------------------------
+// Block 05, pasada de estabilización: ciclo de vida de acciones
+// (terminación reportada) y prioridad del drag (cancelación al estado
+// ACTUAL). Todo con timestamps fabricados -- ningún sleep real, por
+// AGENTS.md §12.
+// ---------------------------------------------------------------------
+
+bool SelfLoopCompletionIsReportedEvenThoughStateIdNeverChanges() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    const std::string stateBefore = controller.CurrentStateId();
+
+    NIMVLETS_CHECK(controller.TriggerClick(0.0, 0.0));
+    NIMVLETS_CHECK(!controller.ActionCompletedDuringLastAdvance().has_value());
+
+    // A mitad de la animación: todavía no terminó nada.
+    controller.Advance(100.0);
+    NIMVLETS_CHECK(!controller.ActionCompletedDuringLastAdvance().has_value());
+
+    // Al completarse el one-shot (300ms de duración total en el fixture).
+    controller.Advance(300.0);
+    const auto completed = controller.ActionCompletedDuringLastAdvance();
+    NIMVLETS_CHECK(completed.has_value());
+    NIMVLETS_CHECK(*completed == 300.0);
+    // El id de estado NUNCA cambió -- ésta es exactamente la señal que
+    // el viejo disparador basado en CurrentStateId() se perdía.
+    NIMVLETS_CHECK(controller.CurrentStateId() == stateBefore);
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    return true;
+}
+
+bool CompletionSignalIsNotStickyAcrossAdvances() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerClick(0.0, 0.0);
+    controller.Advance(300.0);
+    NIMVLETS_CHECK(controller.ActionCompletedDuringLastAdvance().has_value());
+    // Un Advance posterior sin terminación debe limpiar la señal.
+    controller.Advance(400.0);
+    NIMVLETS_CHECK(!controller.ActionCompletedDuringLastAdvance().has_value());
+    return true;
+}
+
+bool AmbientActionCompletionIsAlsoReported() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerAmbientAction(0.0, 0.0));
+    controller.Advance(300.0);
+    NIMVLETS_CHECK(controller.ActionCompletedDuringLastAdvance().has_value());
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    return true;
+}
+
+bool HoverActionCompletionIsAlsoReported() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.TriggerHoverAction(0.0, 0.0));
+    controller.Advance(300.0);
+    NIMVLETS_CHECK(controller.ActionCompletedDuringLastAdvance().has_value());
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    return true;
+}
+
+bool CancelClickActionReturnsToBaseOfCurrentState() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    const std::string stateBefore = controller.CurrentStateId();
+    controller.TriggerClick(0.0, 0.0);
+    controller.Advance(100.0);
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kClickAction);
+
+    NIMVLETS_CHECK(controller.CancelActionToCurrentState(150.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(controller.CurrentStateId() == stateBefore);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.states[0].baseAnimation.frames[0]);
+    return true;
+}
+
+bool CancelAmbientActionReturnsToBaseOfCurrentState() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerAmbientAction(0.0, 0.0);
+    // La accion ambient del fixture dura 2x50ms=100ms en total, asi que
+    // 50ms es "a mitad de camino" (cruzo el frame 0 pero no termino).
+    controller.Advance(50.0);
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kAmbientOrHoverAction);
+
+    NIMVLETS_CHECK(controller.CancelActionToCurrentState(75.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(&controller.CurrentFrame() == &pet.states[0].baseAnimation.frames[0]);
+    return true;
+}
+
+bool CancelWhileAlreadyInBaseIsANoOp() {
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    NIMVLETS_CHECK(!controller.CancelActionToCurrentState(50.0));  // false -- nada que cancelar
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    return true;
+}
+
+bool CancelledActionLeavesAStaticPoseWithNoPendingFrameDeadline() {
+    // El invariante que hace que "cero avance de frame durante el
+    // arrastre" sea real: tras cancelar, la pose base estática no tiene
+    // ningún deadline pendiente, así que el loop no se despierta ni
+    // avanza nada mientras el owner arrastra.
+    PetDefinition pet = MakeNormalPetFixture();
+    AnimationController controller(pet);
+    controller.TriggerClick(0.0, 0.0);
+    controller.Advance(100.0);
+    NIMVLETS_CHECK(controller.NextFrameDeadlineMs().has_value());  // animación en curso
+
+    controller.CancelActionToCurrentState(150.0);
+    NIMVLETS_CHECK(!controller.NextFrameDeadlineMs().has_value());
+    // Y un Advance muy posterior no mueve nada.
+    NIMVLETS_CHECK(!controller.Advance(1'000'000.0));
+    NIMVLETS_CHECK(controller.Mode() == ControllerMode::kBase);
+    return true;
+}
+
 }  // namespace
 
 void RegisterAnimationControllerTests(testing::TestRunner& runner) {
@@ -203,6 +327,14 @@ void RegisterAnimationControllerTests(testing::TestRunner& runner) {
     runner.Add("AnimationController.WeightedSelectionFallsBackUniformlyWhenWeightsEqual", WeightedSelectionFallsBackUniformlyWhenWeightsEqual);
     runner.Add("AnimationController.DirectionChangeWhileBaseUpdatesFrameImmediately", DirectionChangeWhileBaseUpdatesFrameImmediately);
     runner.Add("AnimationController.DirectionChangeMidActionIsDeferredUntilBaseReturn", DirectionChangeMidActionIsDeferredUntilBaseReturn);
+    runner.Add("AnimationController.SelfLoopCompletionIsReportedEvenThoughStateIdNeverChanges", SelfLoopCompletionIsReportedEvenThoughStateIdNeverChanges);
+    runner.Add("AnimationController.CompletionSignalIsNotStickyAcrossAdvances", CompletionSignalIsNotStickyAcrossAdvances);
+    runner.Add("AnimationController.AmbientActionCompletionIsAlsoReported", AmbientActionCompletionIsAlsoReported);
+    runner.Add("AnimationController.HoverActionCompletionIsAlsoReported", HoverActionCompletionIsAlsoReported);
+    runner.Add("AnimationController.CancelClickActionReturnsToBaseOfCurrentState", CancelClickActionReturnsToBaseOfCurrentState);
+    runner.Add("AnimationController.CancelAmbientActionReturnsToBaseOfCurrentState", CancelAmbientActionReturnsToBaseOfCurrentState);
+    runner.Add("AnimationController.CancelWhileAlreadyInBaseIsANoOp", CancelWhileAlreadyInBaseIsANoOp);
+    runner.Add("AnimationController.CancelledActionLeavesAStaticPoseWithNoPendingFrameDeadline", CancelledActionLeavesAStaticPoseWithNoPendingFrameDeadline);
 }
 
 }  // namespace nimvlets::tests
