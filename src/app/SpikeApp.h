@@ -9,6 +9,7 @@
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
 #include "core/HoverDwellTracker.h"
+#include "graphics/ActiveFrameTexture.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
@@ -108,16 +109,6 @@ private:
     // dibujar.
     int EffectiveCanvasWidth() const;
     int EffectiveCanvasHeight() const;
-
-    // Creates/releases one SDL_Texture per frame across TODAS las
-    // colecciones de animación de pet_ (cada BehaviorState::
-    // baseAnimation + sus overrides, y cada WeightedAction de
-    // ambient/hover/click + sus propios overrides) — ver
-    // graphics::AttachFrameTexture()/ReleaseFrameTexture() y el aviso
-    // junto a content::PetDefinition sobre por qué esta cobertura
-    // importa.
-    void AttachAllTextures();
-    void ReleaseAllTextures();
 
     // Segundos objetivo de intervalo ambient para `state`, aplicando
     // NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS si está seteada a un valor
@@ -309,6 +300,13 @@ private:
 
     core::FrameScheduler hoverScheduler_{1000.0 / 60.0};
     bool currentlyClickThrough_ = false;
+
+    // La ÚNICA textura GPU viva del pet activo (Block 05, pasada de
+    // estabilización -- ver DEC-081 y graphics::ActiveFrameTexture).
+    // Reemplazó al modelo histórico de una SDL_Texture por CADA frame
+    // de CADA animación/dirección/estado, que mantenía 152-204
+    // texturas residentes por pet para mostrar una sola a la vez.
+    graphics::ActiveFrameTexture activeFrameTexture_;
 
 #ifndef NDEBUG
     bool diagHasValue_ = false;

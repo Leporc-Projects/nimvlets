@@ -20,11 +20,11 @@ enum class PlaybackKind : std::uint8_t {
 // One displayable frame: pixel data plus enough metadata to place it
 // consistently and time it correctly. Deliberately pure C++ (no SDL) —
 // `pixels` is a plain RGBA8 buffer content::PetPackLoader fills in from
-// a compiled pack; the graphics layer turns it into a texture and never
-// mutates it. `rendererHandle` is the one deliberate exception: an
-// opaque slot the graphics layer may attach a native texture handle to
-// after loading, so per-frame textures aren't recreated every time the
-// same frame is shown again. content:: never reads or interprets it.
+// a compiled pack; the graphics layer uploads it into the single active
+// texture (graphics::ActiveFrameTexture) and never mutates it. Desde
+// Block 05 (pasada de estabilización, DEC-081) no queda ningún handle
+// nativo por-frame: había un `rendererHandle` que guardaba una
+// SDL_Texture* por CADA frame, retirado junto con ese modelo.
 struct FrameDefinition {
     int width = 0;
     int height = 0;
@@ -43,11 +43,6 @@ struct FrameDefinition {
     // RGBA8, row-major, top-to-bottom, straight alpha.
     // Size must be exactly width * height * 4 bytes.
     std::vector<std::uint8_t> pixels;
-
-    // Opaque; owned/interpreted only by the graphics layer (an
-    // SDL_Texture*, once attached). nullptr until the graphics layer
-    // attaches one.
-    void* rendererHandle = nullptr;
 };
 
 // Dirección genérica de un Nimvlet direccional. Metadata/estado, no un
@@ -239,15 +234,19 @@ struct PetDefinition {
     std::string contentVersion;
 };
 
-// AVISO para quien agregue una colección de animaciones nueva a
-// BehaviorState/PetDefinition: cada colección de frames debe estar
-// cubierta tanto por SpikeApp::AttachAllTextures()/ReleaseAllTextures()
-// como por cualquier futuro camino de carga/descarga de texturas — una
-// colección nueva que se olvide ahí se resuelve correctamente en
-// AnimationController (ResolveAnimation() no tiene ningún problema)
-// pero se renderiza completamente transparente en runtime, en
-// silencio. Esto ya pasó una vez de verdad en Block 04.2 (ver
-// docs/NIDIR_CONTENT.md, "bug de cobertura de texturas") — no es
-// hipotético.
+// NOTA histórica para quien agregue una colección de animaciones nueva
+// a BehaviorState/PetDefinition: hasta Block 05 hacía falta acordarse
+// de cubrir CADA colección nueva en SpikeApp::AttachAllTextures()/
+// ReleaseAllTextures(), porque cada frame necesitaba su propia
+// SDL_Texture adjuntada por adelantado; olvidarse ahí resolvía bien en
+// AnimationController pero renderizaba transparente en silencio (pasó
+// de verdad en Block 04.2 -- ver docs/NIDIR_CONTENT.md, "bug de
+// cobertura de texturas").
+//
+// Esa clase de bug ya NO puede ocurrir: graphics::ActiveFrameTexture
+// sube el frame que AnimationController esté mostrando, sea cual sea,
+// en el momento de dibujarlo (SpikeApp::RenderFrame()) -- no hay
+// ninguna lista de colecciones que mantener sincronizada. Una
+// colección nueva funciona por construcción, sin tocar el render.
 
 }  // namespace nimvlets::content

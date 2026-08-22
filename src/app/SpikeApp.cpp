@@ -1,7 +1,6 @@
 #include "app/SpikeApp.h"
 
 #include "catalog/PetCatalogLoader.h"
-#include "graphics/FrameTexture.h"
 #include "platform/TransparentWindowSupport.h"
 
 #include <algorithm>
@@ -179,60 +178,6 @@ void SpikeApp::MarkNeedsRedraw(double nowMs) {
     confirmRedrawDeadlineMs_ = nowMs + kConfirmRedrawDelayMs;
 }
 
-void SpikeApp::AttachAllTextures() {
-    auto attach = [&](content::AnimationDefinition& anim) {
-        for (content::FrameDefinition& frame : anim.frames) {
-            graphics::AttachFrameTexture(renderer_, frame);
-        }
-    };
-    auto attachOverrides = [&](std::vector<content::DirectionalAnimationOverride>& overrides) {
-        for (content::DirectionalAnimationOverride& override_ : overrides) {
-            attach(override_.animation);
-        }
-    };
-    auto attachActions = [&](std::vector<content::WeightedAction>& actions) {
-        for (content::WeightedAction& action : actions) {
-            attach(action.animation);
-            attachOverrides(action.directionOverrides);
-        }
-    };
-
-    for (content::BehaviorState& state : pet_.states) {
-        attach(state.baseAnimation);
-        attachOverrides(state.baseAnimationDirectionOverrides);
-        attachActions(state.ambientActions);
-        attachActions(state.hoverActions);
-        attachActions(state.clickActions);
-    }
-}
-
-void SpikeApp::ReleaseAllTextures() {
-    auto release = [&](content::AnimationDefinition& anim) {
-        for (content::FrameDefinition& frame : anim.frames) {
-            graphics::ReleaseFrameTexture(frame);
-        }
-    };
-    auto releaseOverrides = [&](std::vector<content::DirectionalAnimationOverride>& overrides) {
-        for (content::DirectionalAnimationOverride& override_ : overrides) {
-            release(override_.animation);
-        }
-    };
-    auto releaseActions = [&](std::vector<content::WeightedAction>& actions) {
-        for (content::WeightedAction& action : actions) {
-            release(action.animation);
-            releaseOverrides(action.directionOverrides);
-        }
-    };
-
-    for (content::BehaviorState& state : pet_.states) {
-        release(state.baseAnimation);
-        releaseOverrides(state.baseAnimationDirectionOverrides);
-        releaseActions(state.ambientActions);
-        releaseActions(state.hoverActions);
-        releaseActions(state.clickActions);
-    }
-}
-
 bool SpikeApp::Init() {
     std::signal(SIGINT, HandleTerminationSignal);
     std::signal(SIGTERM, HandleTerminationSignal);
@@ -392,7 +337,6 @@ bool SpikeApp::Init() {
 
     platform::ConfigureCompanionWindow(window_);
 
-    AttachAllTextures();
 
     animController_.emplace(pet_);
     lastKnownStateId_ = animController_->CurrentStateId();
@@ -473,10 +417,12 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
         return false;
     }
 
-    ReleaseAllTextures();
+    // Un pet nuevo tiene (potencialmente) otras dimensiones de frame:
+    // se descarta la textura activa para que RenderFrame() la vuelva a
+    // crear con el tamaño correcto en el próximo dibujo.
+    activeFrameTexture_.Reset();
     animController_.reset();
     pet_ = std::move(newPet);
-    AttachAllTextures();
     animController_.emplace(pet_);  // arranca en states[0]/kBase del pet nuevo
     lastKnownStateId_ = animController_->CurrentStateId();
 
@@ -730,7 +676,9 @@ void SpikeApp::RunDevHoverSmokeTestIfRequested() {
 void SpikeApp::Shutdown() {
     FlushPersistedState();
 
-    ReleaseAllTextures();
+    // Antes de destruir el renderer: la textura activa debe morir
+    // primero (SDL exige que ninguna textura sobreviva a su renderer).
+    activeFrameTexture_.Reset();
     if (renderer_ != nullptr) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
@@ -751,7 +699,15 @@ bool SpikeApp::IsPointInteractive(core::Point localPoint) const {
 
 void SpikeApp::RenderFrame() {
     const content::FrameDefinition& frame = animController_->CurrentFrame();
-    SDL_Texture* texture = static_cast<SDL_Texture*>(frame.rendererHandle);
+
+    // UNA textura reutilizable por pet, actualizada en el lugar (ver
+    // graphics::ActiveFrameTexture / DEC-081): el objeto SDL_Texture NO
+    // cambia entre frames de una animación -- solo su contenido. Se
+    // crea perezosamente en el primer dibujo de cada pet.
+    SDL_Texture* texture = nullptr;
+    if (activeFrameTexture_.SetFrame(renderer_, frame)) {
+        texture = activeFrameTexture_.Get();
+    }
 
     // Se presenta el mismo contenido DOS veces seguidas -- ver el
     // comentario histórico de Block 04.3 que sigue aplicando sin
@@ -773,7 +729,7 @@ void SpikeApp::RenderFrame() {
         } else if (!frame.pixels.empty() && presentPass == 0) {
             SDL_Log(
                 "nimvlets: RenderFrame: current frame (%dx%d) has pixel data but no attached texture -- "
-                "rendering fully transparent; check AttachAllTextures() coverage",
+                "rendering fully transparent; check ActiveFrameTexture::SetFrame() failures above",
                 frame.width, frame.height);
         }
         SDL_RenderPresent(renderer_);
@@ -916,7 +872,16 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             break;
 
         case SDL_EVENT_WINDOW_MOVED:
-            UpdateDirectionFromWindowPosition();
+            // Durante un drag REAL no se resuelve dirección: cada
+            // SetActiveDirection() que cambia algo dispara un redraw
+            // (y con él un swap de textura) JUSTO mientras la ventana
+            // se está moviendo -- exactamente el escenario que el owner
+            // reportó como corrupción visual al arrastrar durante una
+            // animación. La dirección final se resuelve UNA vez al
+            // soltar (ver SDL_EVENT_MOUSE_BUTTON_UP).
+            if (!dragClassifier_.IsDragging()) {
+                UpdateDirectionFromWindowPosition();
+            }
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
@@ -962,7 +927,25 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             };
 
             if (dragClassifier_.IsActive()) {
+                const bool wasDragging = dragClassifier_.IsDragging();
                 dragClassifier_.Update(localCurrent);
+
+                if (!wasDragging && dragClassifier_.IsDragging()) {
+                    // El gesto acaba de calificar como DRAG real (cruzó
+                    // el umbral de DragClassifier). Prioridad
+                    // DRAG > CLICK > HOVER/AMBIENT > BASE: se aborta
+                    // cualquier acción one-shot en curso y se vuelve a
+                    // la pose base ESTABLE del estado ACTUAL, para que
+                    // el arrastre mueva una imagen quieta en vez de una
+                    // animación reproduciéndose (ver DEC-080).
+                    const double dragStartMs = static_cast<double>(SDL_GetTicks());
+                    if (animController_->CancelActionToCurrentState(dragStartMs)) {
+                        MarkNeedsRedraw(dragStartMs);
+                        SDL_Log(
+                            "nimvlets: drag started -- in-progress action cancelled, holding base pose of state='%s'",
+                            animController_->CurrentStateId().c_str());
+                    }
+                }
 
                 if (dragClassifier_.IsDragging()) {
                     float globalX = 0.0f;
@@ -1005,7 +988,14 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 SDL_GetWindowPosition(window_, &endX, &endY);
                 appState_.lastWindowPosition = persistence::WindowPosition{endX, endY};
                 persistenceScheduler_.MarkDirty(nowMs);
-                RearmAmbientDeadline(nowMs);  // "drag end" -- el conteo de ~15s arranca de nuevo desde acá
+                // Al soltar: se resuelve la dirección UNA sola vez
+                // contra la posición FINAL (durante el arrastre se
+                // suprime -- ver SDL_EVENT_WINDOW_MOVED), se reinicia
+                // el dwell de hover desde cero, y el conteo ambient
+                // arranca de nuevo completo desde acá.
+                UpdateDirectionFromWindowPosition();
+                ResetHoverDwell();
+                RearmAmbientDeadline(nowMs);
                 SDL_Log("nimvlets: drag ended at (%d, %d) (correctly not counted as a click)", endX, endY);
             }
             break;
@@ -1078,23 +1068,41 @@ int SpikeApp::Run() {
 
         const double afterMs = static_cast<double>(SDL_GetTicks());
 
-        if (animController_->Advance(afterMs)) {
+        // Ninguna animación avanza mientras hay un drag REAL en curso
+        // (Block 05, corrección de ciclo de vida): el drag tiene la
+        // prioridad más alta y arrastra una pose base ESTABLE -- ver
+        // MaybeCancelActionForDragStart(). En la práctica esto ya sería
+        // un no-op (cancelar deja una pose estática, y Advance() sobre
+        // kStatic no hace nada), pero se explicita para que el
+        // invariante "cero avance de frame durante el arrastre" no
+        // dependa de que el contenido resulte ser estático.
+        if (!dragClassifier_.IsDragging() && animController_->Advance(afterMs)) {
             needsRedraw_ = true;
         }
 
-        // Detecta una transición de BehaviorState real (por cualquier
-        // camino: ambient/hover/click terminando un one-shot, o un
-        // switch de pet) y rearma ambientDeadlineMs_ para el estado
-        // NUEVO -- ver el comentario de RearmAmbientDeadline(). Un
-        // simple string compare, barato, sobre ids de 1-3 estados como
-        // mucho por pet.
+        // Una acción one-shot que TERMINA reinicia el contador ambient
+        // completo desde su instante exacto de terminación (Block 05,
+        // corrección de ciclo de vida -- ver DEC-079). Esto reemplaza
+        // al viejo disparador basado en "cambió CurrentStateId()", que
+        // se perdía TODA terminación de self-loop (el click de Bunny/
+        // Nidir, howl/tail_greet de Frin: empiezan y terminan en el
+        // mismo estado, el id nunca cambia), dejando que la duración de
+        // la animación se comiera parte del intervalo ambient.
+        // RearmAmbientDeadline() lee el estado ACTUAL del controller,
+        // que en este punto ya es el estado post-transición -- así que
+        // esto cubre por igual el self-loop y el cambio de estado real.
+        if (const std::optional<double> completedMs = animController_->ActionCompletedDuringLastAdvance()) {
+            RearmAmbientDeadline(*completedMs);
+        }
+
+        // Una transición de BehaviorState real (p. ej. Frin seated ->
+        // lying) invalida cualquier dwell de hover acumulado contra el
+        // estado ANTERIOR. El rearme del timer ambient ya lo cubre el
+        // bloque de terminación de arriba (más preciso: usa el instante
+        // real de terminación, no `afterMs`), así que acá solo queda el
+        // reset de hover.
         if (animController_->CurrentStateId() != lastKnownStateId_) {
             lastKnownStateId_ = animController_->CurrentStateId();
-            RearmAmbientDeadline(afterMs);
-            // "Si hay... cambio de estado, el dwell-hover debe
-            // resetearse" -- un cambio de postura real (p. ej. Frin
-            // seated -> lying) invalida cualquier dwell acumulado
-            // contra el estado ANTERIOR.
             ResetHoverDwell();
         }
 
