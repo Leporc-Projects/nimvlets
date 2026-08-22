@@ -456,11 +456,12 @@ implementar):
    del canvas lógico, no 4 bytes por pixel nativo), así que esto
    eliminaría la copia CPU-side casi por completo sin perder ninguna
    funcionalidad.
-2. Cargar bajo demanda (y liberar) las texturas de la dirección/estado
-   NO activos — hoy `AttachAllTextures()` adjunta las 8 combinaciones
-   de animación×dirección de un pet de un solo estado (o 16+ para
-   Frin, 2 estados × 4 acciones × 2 direcciones) por adelantado, aunque
-   como mucho 1-2 estén en pantalla en un momento dado.
+2. ~~Cargar bajo demanda (y liberar) las texturas de la dirección/estado
+   NO activos~~ — **IMPLEMENTADO en la pasada de estabilización de
+   Block 05, ver DEC-081 y la tabla de abajo.** El resultado fue más
+   fuerte que lo propuesto acá: en vez de carga perezosa por
+   dirección/estado, el runtime pasó a UNA sola textura reutilizable
+   por pet (`graphics::ActiveFrameTexture`), actualizada en el lugar.
 
 Cualquiera de las dos, implementada con cuidado, reduciría RSS de
 forma sustancial sin sacrificar corrección visual — pero ninguna es
@@ -498,3 +499,35 @@ Ningún pet mostró CPU sostenido en reposo (%CPU volvía a 0.0 entre
 redraws) -- el mecanismo event-driven sigue intacto. No se re-hizo la
 medición completa con el protocolo original (muestreo hasta
 estabilizar de verdad) -- ver limitaciones del informe de este bloque.
+
+
+## Mediciones reales: una textura reutilizable vs. una por frame (Block 05, pasada de estabilización)
+
+A/B con los DOS caminos compilados en el mismo binario (selector
+temporal `NIMVLETS_DEV_RENDERER`, retirado al adoptar). Release, arm64
+nativo, `NIMVLETS_DEV_APPDATA_DIR` aislado, RSS leído con `ps -o rss=`
+a los ~12s de arranque estable, sin interacción:
+
+| Pet | una textura por frame | una textura reutilizable | reducción |
+|---|---|---|---|
+| Bunny | 217.9 MB | 166.3 MB | **-23.7%** (-50.4 MB) |
+| Nidir | 258.1 MB | 194.5 MB | **-24.6%** (-62.1 MB) |
+| Frin (macho) | 252.8 MB | 183.4 MB | **-27.4%** (-67.7 MB) |
+| Frin (hembra) | 267.1 MB | 197.7 MB | **-26.0%** (-67.8 MB) |
+
+Esto retira el término GPU de la duplicación CPU+GPU que la sección
+anterior identificó como dominante. **La copia CPU-side sigue viva** —
+`FrameDefinition::pixels` permanece residente porque
+`core::AlphaMask::FromAlphaChannel()` lo necesita en cada cambio de
+frame para el hit-mask de click-through, así que la optimización #1 de
+la lista de arriba (precalcular/cachear la máscara y liberar `pixels`)
+sigue pendiente y sigue siendo la siguiente ganancia grande.
+
+**Invariante de recursos verificado** contra el binario real: 50
+redraws (5 clicks + 6 cambios de dirección + animaciones) crean UNA
+textura; 4 switches de pet crean 2 en total (creación perezosa — un pet
+que nunca se dibuja nunca reserva textura). Ningún crecimiento por
+ciclo de animación/dirección.
+
+Los 4 pets siguen excediendo el budget de <100MB — sin cambio de
+conclusión respecto de la sección anterior, solo ~50-68 MB más cerca.

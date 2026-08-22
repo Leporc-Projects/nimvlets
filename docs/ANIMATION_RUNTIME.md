@@ -98,7 +98,7 @@ AnimationDefinition
   frames: [FrameDefinition]
 
 FrameDefinition
-  width, height, anchor, durationMs, pixels (RGBA8), rendererHandle (opaque)
+  width, height, anchor, durationMs, pixels (RGBA8)
 
 DirectionalAnimationOverride
   direction (Direction::kRight | kLeft), animation: AnimationDefinition
@@ -583,24 +583,39 @@ crear cualquier ventana. Si no se puede cargar, `Init()` loguea un
 error fatal específico y el proceso sale con código no-cero — sin
 ningún fallback hardcodeado.
 
-## 9.1 Texture attachment coverage — a silent failure mode `PetPackLoader` can't catch
+## 9.1 Render path — UNA textura reutilizable por pet (Block 05)
 
-A pack that fails to *load* fails loudly (§9). A pack that loads fine
-but has one animation collection whose frames never get an SDL texture
-attached does **not** fail loudly by default — `graphics::FrameTexture`
-only turns pixel data into a texture when `SpikeApp::AttachAllTextures()`
-explicitly walks that collection. Block 05's `AttachAllTextures()`/
-`ReleaseAllTextures()` walk EVERY `BehaviorState`'s `baseAnimation` +
-its overrides, and every `ambientActions`/`hoverActions`/`clickActions`
-entry's `animation` + its own `directionOverrides` — generically, via
-one shared lambda per collection kind, so a future `WeightedAction`
-list added anywhere in the graph is covered by construction rather
-than needing its own new loop. `content::AnimationController` has no
-visibility into this at all (`ResolveAnimation()` resolves correctly
-regardless) — this remains, as documented since Block 04.2, a class of
-bug that can only be caught by actually exercising the content, not by
-a unit test (see `docs/NIDIR_CONTENT.md` §6 for the real bug that
-motivated this warning).
+`graphics::ActiveFrameTexture` mantiene **una sola** `SDL_Texture`
+(`SDL_TEXTUREACCESS_STREAMING`, RGBA32) por pet activo y la actualiza en
+el lugar (`SDL_UpdateTexture`) cada vez que
+`AnimationController::CurrentFrame()` cambia. Blend mode
+(`SDL_BLENDMODE_BLEND`) y scale mode (`SDL_SCALEMODE_LINEAR`) se fijan
+explícitamente al crearla.
+
+Esto reemplazó al modelo de Block 02 (`graphics::FrameTexture`), que
+creaba y retenía una textura por CADA frame de CADA
+animación/dirección/estado — 152 texturas para Bunny/Nidir, 204 para
+cada variante de Frin — y cambiaba el objeto `SDL_Texture*` dibujado en
+cada avance de frame. Ver DEC-081 en `docs/DECISION_LOG.md` para el A/B
+medido que motivó el cambio (equivalencia visual byte a byte contra el
+camino viejo; -24% a -27% de RSS según el pet).
+
+Precondición estructural, verificada contra los 4 packs reales antes de
+implementar nada: todos los frames de un pet compilado comparten las
+mismas dimensiones en píxeles, porque `compose_on_canvas()` los coloca a
+todos sobre el mismo canvas de trabajo compartido (§5). `SetFrame()`
+igualmente recrea la textura si las dimensiones cambian (p. ej. al
+cambiar de pet), así que no es una suposición silenciosa.
+
+**Un modo de fallo silencioso que este modelo ELIMINA:** hasta Block 05
+había que acordarse de cubrir cada colección de animaciones nueva en
+`SpikeApp::AttachAllTextures()`/`ReleaseAllTextures()`; olvidarse ahí
+resolvía bien en `AnimationController` pero renderizaba completamente
+transparente en runtime, sin ningún error — pasó de verdad en Block
+04.2 (ver `docs/NIDIR_CONTENT.md`, "bug de cobertura de texturas").
+Ahora no hay ninguna lista de colecciones que mantener sincronizada: se
+sube el frame que el controller esté mostrando, sea cual sea, en el
+momento de dibujarlo. Una colección nueva funciona por construcción.
 
 ## 10. Running
 

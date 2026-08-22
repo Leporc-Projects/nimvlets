@@ -2090,3 +2090,148 @@ click<->hover y ambient<->hover: `HoverActionNeverInterruptsClick`,
 `ClickInterruptsHoverAction`,
 `AmbientActionNeverInterruptsAnInProgressHoverAction`,
 `HoverActionNeverInterruptsAnInProgressAmbientAction`).
+
+### DEC-079 — El contador ambient se reinicia al TERMINAR una acción, no al empezar la interacción
+**Status:** DECIDIDO · Block 05, pasada de estabilización.
+
+DEC-078 ya reiniciaba `ambientDeadlineMs_` en cada interacción real
+(click, drag, entrada de hover, cambio de dirección). Faltaba la otra
+mitad: el reinicio ocurría al EMPEZAR la interacción, así que la
+DURACIÓN de la animación resultante se comía parte del intervalo. Un
+click a T reiniciaba el contador a T+15s, la animación corría ~3s, y al
+volver a la pose base quedaban solo ~12s — visible de inmediato con
+`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=2`, donde la pasiva llegaba
+prácticamente pegada al final del click.
+
+El disparador obvio ("¿cambió `CurrentStateId()`?") NO sirve: la mayoría
+de las acciones son self-loops (el click de Bunny/Nidir, howl/tail_greet
+de Frin) que terminan en el MISMO estado en que empezaron, así que el id
+nunca cambia y la terminación era invisible para `SpikeApp`.
+
+`content::AnimationController` ahora reporta la terminación
+explícitamente vía `ActionCompletedDuringLastAdvance()`: un
+`std::optional<double>` recalculado en CADA `Advance()`, que devuelve el
+instante EXACTO de terminación del contenido (`currentFrameStartMs_`
+acumulado) y no el `nowMs` del llamador — si el loop despertó tarde, el
+intervalo igual se cuenta desde la terminación real. `SpikeApp::Run()`
+lo consume y llama `RearmAmbientDeadline(*completedMs)`. Cubre por el
+mismo camino las dos clases de terminación (self-loop y cambio de
+estado real), así que el bloque de `lastKnownStateId_` queda solo para
+resetear el dwell de hover.
+
+Verificado contra el binario real (`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=2`):
+click termina en t=3901ms, la pasiva dispara en t=5901ms — 2000ms
+exactos desde la TERMINACIÓN. Segundo ciclo: 8902ms -> 10901ms.
+
+### DEC-080 — DRAG es la interacción de máxima prioridad: cancela la acción en curso y arrastra la pose base
+**Status:** DECIDIDO · Block 05, pasada de estabilización.
+
+Evidencia del owner: arrastrar a Nidir MIENTRAS una animación se
+reproduce produce corrupción visual, que un redraw posterior repara.
+Diagnóstico: durante un drag, `SDL_SetWindowPosition()` movía la
+ventana en el mismo instante en que el loop presentaba frames nuevos
+(y, si el arrastre cruzaba la mitad de pantalla,
+`SDL_EVENT_WINDOW_MOVED` -> `UpdateDirectionFromWindowPosition()` ->
+cambio de dirección -> otro redraw). Mover una ventana transparente,
+per-pixel-shaped y always-on-top mientras se presenta contenido nuevo
+es exactamente el escenario donde el compositor puede mostrar contenido
+inconsistente.
+
+La respuesta NO es bloquear el arrastre durante ~3s (haría el pet
+inmovible justo cuando el owner quiere moverlo). Prioridad establecida:
+**DRAG > CLICK > HOVER/AMBIENT > BASE**. Cuando un gesto califica como
+drag real (cruza el umbral de `core::DragClassifier`):
+
+- se cancela la acción one-shot en curso vía
+  `AnimationController::CancelActionToCurrentState()`, que vuelve a la
+  pose base del estado **ACTUAL** — nunca al `targetStateId` pendiente:
+  una transición abortada a mitad de camino nunca completó. Para Frin
+  eso da exactamente lo pedido sin ninguna rama por pet: `sit_to_lie`
+  interrumpido deja `seated`, `lie_to_sit` interrumpido deja `lying`,
+  howl/tail_greet interrumpidos dejan `seated`, y ya-`lying` en base
+  es un no-op;
+- no avanza ningún frame mientras el drag está activo (el loop saltea
+  `Advance()`; además la pose base es `kStatic`, así que
+  `NextFrameDeadlineMs()` es `nullopt` y el loop ni se despierta);
+- no se resuelve dirección durante el arrastre — se resuelve UNA vez al
+  soltar, contra la posición final, junto con un reset limpio del dwell
+  de hover y un reinicio completo del contador ambient.
+
+Resultado: durante un arrastre hay CERO presentaciones de contenido
+nuevo, así que el escenario de corrupción reportado deja de existir por
+construcción. 10 tests con timestamps fabricados cubren la matriz.
+
+### DEC-081 — UNA textura reutilizable por pet en vez de una SDL_Texture por frame
+**Status:** DECIDIDO · Block 05, pasada de estabilización — adoptado
+tras un A/B medido, no por preferencia arquitectónica.
+
+El modelo de Block 02 (`graphics::FrameTexture`) creaba y retenía una
+`SDL_Texture` por CADA frame de CADA animación/dirección/estado del pet
+activo — 152 texturas para Bunny/Nidir, 204 para cada Frin — y cada
+avance de frame cambiaba el `SDL_Texture*` que se dibujaba.
+
+**Precondición verificada primero** (no asumida) contra los 4 packs
+reales: todos los frames de un pet compilado comparten EXACTAMENTE las
+mismas dimensiones (Nidir 320x314 x152, Bunny 243x320 x152, Frin macho
+213x320 x204, hembra 243x320 x204) — consecuencia directa de que
+`compose_on_canvas()` los pone a todos sobre el mismo canvas de trabajo
+compartido. Una sola textura reutilizable es viable.
+
+`graphics::ActiveFrameTexture`: una única textura
+`SDL_TEXTUREACCESS_STREAMING` RGBA32, actualizada en el lugar con
+`SDL_UpdateTexture` solo cuando el frame mostrado cambia, con
+`SDL_BLENDMODE_BLEND` y `SDL_SCALEMODE_LINEAR` fijados EXPLÍCITAMENTE
+(el camino viejo dependía del default implícito de
+`SDL_CreateTextureFromSurface`, que resulta ser el mismo — ver
+`SDL_render.c:1545` — pero por accidente, no por contrato).
+
+**A/B medido, ambos caminos en el mismo binario** (vía un
+`NIMVLETS_DEV_RENDERER` temporal, retirado al adoptar):
+
+- *Equivalencia visual:* volcados de `SDL_RenderReadPixels` de Nidir en
+  los dos caminos, alineados por el offset de 1 frame entre dos
+  procesos independientes: **23/27 pares byte-idénticos**; los 4
+  restantes son el primer frame en blanco y los bordes donde la cadencia
+  de present difiere entre procesos. Equivalencia confirmada.
+- *Residencia (Release, RSS estable):* Bunny 217.9->166.3 MB (**-23.7%**),
+  Nidir 258.1->194.5 MB (**-24.6%**), Frin macho 252.8->183.4 MB
+  (**-27.4%**), Frin hembra 267.1->197.7 MB (**-26.0%**).
+- *Invariante de recursos:* 50 redraws (5 clicks + 6 cambios de
+  dirección + animaciones) crean **1** textura; 4 switches de pet crean
+  2 en total (creación perezosa: un pet que nunca se dibuja nunca
+  reserva textura).
+
+Esto implementa la optimización #2 que `docs/PERFORMANCE_BUDGETS.md`
+había documentado como pendiente. El camino por-frame se retiró
+completo (`graphics/FrameTexture.{h,cpp}`,
+`SpikeApp::AttachAllTextures()/ReleaseAllTextures()`,
+`content::FrameDefinition::rendererHandle`) — el brief pedía
+explícitamente no dejar un refactor especulativo conviviendo con el
+camino viejo.
+
+**Honesto sobre el criterio que NO se pudo probar:** el A/B no
+demuestra que este cambio elimine la corrupción visual que el owner
+reporta — eso requiere QA interactiva real. Se adoptó por los dos
+criterios que SÍ quedaron probados (equivalencia visual byte a byte y
+-24/-27% de residencia), más el hecho de que elimina estructuralmente
+el swap de objeto-textura por frame. Si la corrupción persiste tras
+esta pasada, este camino no es la causa y el diagnóstico sigue.
+
+### DEC-082 — "No screen capture" es un contrato de PRODUCTO, no una prohibición de herramientas de desarrollo
+**Status:** DECIDIDO · Block 05, pasada de estabilización — aclaración
+de redacción en `AGENTS.md` §5, sin debilitar nada.
+
+La viñeta "No screen capture" de `AGENTS.md` §5 vive en una lista sobre
+lo que hace el RUNTIME, pero leída aislada por un agente hacía que éste
+se auto-prohibiera tomar capturas de diagnóstico de nuestra propia
+ventana durante QA. Eso costó tiempo real en este bloque: los defectos
+visuales de una ventana transparente, per-pixel-shaped y always-on-top
+muchas veces no son reproducibles de otra forma.
+
+Se agregó una viñeta que fija el alcance explícitamente: el producto
+nunca captura pantalla (contrato permanente, sin cambios); un
+desarrollador —o un agente trabajando para el owner, con su
+consentimiento— SÍ puede tomar capturas enfocadas de nuestra propia
+ventana como diagnóstico de desarrollo. Nunca se envían con el
+producto, nunca se automatizan dentro de él, nunca se guardan en el
+repo. El contrato de privacidad real no se debilita.

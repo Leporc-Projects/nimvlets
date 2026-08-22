@@ -123,6 +123,19 @@ see `.gitignore`.
 - No screen capture, no keyboard logging, no enumerating other apps for
   behavioral purposes, no network sockets, no telemetry, no
   runtime-downloaded assets.
+- **Scope of "no screen capture": the PRODUCT, not the workbench.** The
+  shipped runtime must never capture the screen, under any
+  circumstance — that is the permanent, non-negotiable contract above.
+  It does *not* forbid a developer (or a coding agent working for the
+  repository owner, with the owner's consent) from taking focused
+  screenshots of *our own app window* as a DEVELOPMENT/QA diagnostic:
+  visual defects in a transparent, per-pixel-shaped, always-on-top
+  window are frequently not reproducible any other way, and Block 05
+  established that refusing to look at the real window costs more than
+  it protects (see `docs/DECISION_LOG.md`). The distinction is
+  product-behavior vs. developer-tooling, not "screenshots are
+  forbidden". Diagnostic captures are never shipped, never automated
+  into the product, and never stored in the repository.
 - **Global click counting is a future, explicitly opt-in feature.** Do
   not implement it, and do not request any permission for it, until a
   block brief explicitly says to. When it does land, it must be

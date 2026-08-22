@@ -208,8 +208,10 @@ switching (block brief §4):
   `PetDefinition` local; solo si esa carga tiene éxito se sueltan las
   texturas del pet anterior y se reemplaza `pet_`.
 - **Al tener éxito**: suelta las texturas del pet anterior
-  (`ReleaseAllTextures()`), reemplaza `pet_`, reatacha texturas del
-  nuevo (`AttachAllTextures()`), reconstruye `animController_` (que
+  (`ActiveFrameTexture::Reset()` — desde Block 05 hay UNA sola textura
+  por pet, ver DEC-081), reemplaza `pet_`, deja que la textura del pet
+  nuevo se cree perezosamente en el próximo dibujo, reconstruye
+  `animController_` (que
   arranca en `states[0]`/`ControllerMode::kBase` del pet nuevo —
   exactamente lo requerido, ver `docs/ANIMATION_RUNTIME.md` §2/§3),
   reaplica tamaño de ventana/presentación lógica a
