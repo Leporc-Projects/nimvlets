@@ -4,40 +4,47 @@
 #include <SDL3/SDL.h>
 
 #import <AppKit/AppKit.h>
+#import <objc/runtime.h>
 
 // See docs/PLATFORM_SPIKE.md for the full click-through investigation
-// this file's current shape is based on. Summary of the journey (kept
-// here because it's exactly the kind of thing a future reader will
-// re-discover the hard way otherwise):
+// this file's current shape is based on. Summary of the journey, kept
+// here because it is exactly the kind of thing a future reader will
+// otherwise re-discover the hard way:
 //
-// 1. SDL_SetWindowShape() was evaluated first, per the block brief, and
-//    initially rejected based on community reports (libsdl-org/SDL#12683,
-//    #11199) suggesting it couples the click-through mask to rendering.
-// 2. The fallback — manually polling SDL_GetGlobalMouseState() and
-//    toggling ignoresMouseEvents ourselves (SetWindowClickThrough(),
-//    below) — was shipped instead, and was interactively confirmed
-//    broken during macOS QA: SDL's own Cocoa backend
-//    (src/video/cocoa/SDL_cocoawindow.m, `-mouseMoved:` →
-//    `updateIgnoreMouseState:`) resets `ignoresMouseEvents` to NO on
-//    every real mouse-moved NSEvent whenever no SDL_SetWindowShape
-//    surface is set — silently undoing our own assignment moments after
-//    we made it, race-losing against the user's actual click.
-// 3. Reading the pinned SDL 3.4.12 Cocoa source directly (not
-//    community reports) showed step 1's rejection was wrong *for
-//    macOS specifically*: `Cocoa_UpdateWindowShape()`
-//    (SDL_cocoashape.m) only ever touches `ignoresMouseEvents`; it does
-//    not composite, clip, or otherwise touch rendered pixels on this
-//    platform. So `SDL_SetWindowShape()` is what src/app now uses on
-//    macOS (see NativeShapeHitTestIsRenderSafe()) — it hands hit-testing
-//    to SDL's own event-driven internals entirely, needing zero polling
-//    from us.
+// 1. SDL_SetWindowShape() was evaluated first and initially rejected on
+//    community reports (libsdl-org/SDL#12683, #11199) suggesting it
+//    couples the click-through mask to rendering.
+// 2. The alternative — sampling the cursor ourselves and toggling
+//    NSWindow.ignoresMouseEvents (SetWindowClickThrough(), below) — was
+//    shipped instead, and macOS QA found it unreliable.
+// 3. Reading the pinned SDL 3.4.12 Cocoa source showed step 1's
+//    rejection was wrong *for macOS with an accelerated renderer*:
+//    Cocoa_UpdateWindowShape() (SDL_cocoashape.m) only ever touches
+//    ignoresMouseEvents. So the native shape path became the macOS
+//    mechanism, event-driven and poll-free.
+// 4. DEC-083 then made the SOFTWARE renderer the macOS visual baseline
+//    (it is the one that renders Bunny/Frin correctly), and under it a
+//    window shape corrupts the picture — so the shape path had to go,
+//    and step 2's cursor-sampled mechanism came back, along with step
+//    2's original unreliability.
+// 5. THIS pass (Block 05 stabilization) finally established WHY each of
+//    those two things happens, from the pinned source plus minimal
+//    native repros rather than from inference — see
+//    NativeShapeHitTestIsRenderSafe() and MakeClickThroughAuthoritative()
+//    in platform/TransparentWindowSupport.h for both root causes in
+//    full. The short version: the shape corrupts rendering because
+//    SDL's *renderer* paints the shape bitmap as content when the
+//    driver rejects its custom blend mode, and the cursor-sampled
+//    mechanism was unreliable because SDL's Cocoa backend rewrites
+//    ignoresMouseEvents on every mouse-moved event when no shape is
+//    installed. The first is why we do not install a shape; the second
+//    is why we now take ownership of the property instead of racing for
+//    it.
 //
-// SetWindowClickThrough() below is kept as the fallback mechanism for
-// platforms where NativeShapeHitTestIsRenderSafe() is false (Windows,
-// unverified) — see that function's doc comment in the shared header.
-// Neither mechanism requires Accessibility, Input Monitoring, or any
-// TCC prompt: both are ordinary window-server/cursor-position queries,
-// not global input hooks.
+// Nothing here requires Accessibility, Input Monitoring, or any TCC
+// prompt: both mechanisms are ordinary window-server/cursor-position
+// queries and configuration of our own window, never a global input
+// hook (AGENTS.md §5/§14).
 
 namespace nimvlets::platform {
 
@@ -47,6 +54,52 @@ NSWindow* CocoaWindowFor(SDL_Window* window) {
     SDL_PropertiesID props = SDL_GetWindowProperties(window);
     void* ptr = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
     return (__bridge NSWindow*)ptr;
+}
+
+// --- Propiedad exclusiva de NSWindow.ignoresMouseEvents ---------------
+//
+// Ver MakeClickThroughAuthoritative() en
+// platform/TransparentWindowSupport.h para la causa raíz completa y su
+// evidencia. Acá solo el mecanismo.
+//
+// `g_ownedWindow` es una referencia PRESTADA (AGENTS.md §9: los objetos
+// nativos los posee SDL/AppKit, este código solo los configura) y hay
+// exactamente una ventana viva por proceso en este producto ("exactly
+// one Nimvlet is visible at a time", AGENTS.md §2) -- por eso un único
+// puntero alcanza y no hace falta una tabla. Se compara por identidad
+// en el interceptor, así que aunque el override termine viviendo en una
+// clase compartida, ninguna otra NSWindow del proceso cambia de
+// comportamiento.
+NSWindow* g_ownedWindow = nil;
+IMP g_originalSetIgnoresMouseEvents = nullptr;
+unsigned long long g_foreignWriteCount = 0;
+
+void NimvletsSetIgnoresMouseEvents(id self, SEL cmd, BOOL value) {
+    if (self == g_ownedWindow) {
+        // Escritura EXTERNA (en la práctica: SDL_cocoawindow.m's
+        // -updateIgnoreMouseState:). Se cuenta como diagnóstico y se
+        // descarta -- la política per-pixel de Nimvlets es la única
+        // fuente de verdad de esta propiedad. Nunca se llama a la IMP
+        // original acá: eso es justamente lo que la haría perder.
+        ++g_foreignWriteCount;
+        return;
+    }
+    if (g_originalSetIgnoresMouseEvents != nullptr) {
+        reinterpret_cast<void (*)(id, SEL, BOOL)>(g_originalSetIgnoresMouseEvents)(self, cmd, value);
+    }
+}
+
+// Única vía por la que Nimvlets escribe la propiedad una vez instalado
+// el interceptor: llama a la IMP original DIRECTAMENTE, saltándose el
+// despacho normal (y por lo tanto el interceptor). Antes de instalar,
+// cae al setter normal.
+void ApplyOwnedIgnoresMouseEvents(NSWindow* nsWindow, BOOL value) {
+    if (g_originalSetIgnoresMouseEvents != nullptr && nsWindow == g_ownedWindow) {
+        reinterpret_cast<void (*)(id, SEL, BOOL)>(g_originalSetIgnoresMouseEvents)(
+            nsWindow, @selector(setIgnoresMouseEvents:), value);
+        return;
+    }
+    nsWindow.ignoresMouseEvents = value;
 }
 
 }  // namespace
@@ -82,7 +135,7 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     if (nsWindow == nil) {
         return clickThrough;
     }
-    nsWindow.ignoresMouseEvents = clickThrough ? YES : NO;
+    ApplyOwnedIgnoresMouseEvents(nsWindow, clickThrough ? YES : NO);
     // Read the property back rather than trusting the assignment stuck —
     // this is the ground truth src/app's click-through instrumentation
     // compares against "what we asked for" (see
@@ -90,41 +143,93 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return nsWindow.ignoresMouseEvents == YES;
 }
 
+bool ReadWindowClickThrough(SDL_Window* window) {
+    NSWindow* nsWindow = CocoaWindowFor(window);
+    return nsWindow != nil && nsWindow.ignoresMouseEvents == YES;
+}
+
+bool MakeClickThroughAuthoritative(SDL_Window* window) {
+    NSWindow* nsWindow = CocoaWindowFor(window);
+    if (nsWindow == nil) {
+        SDL_Log("nimvlets: platform/macos could not resolve NSWindow; click-through ownership NOT installed");
+        return false;
+    }
+    if (g_ownedWindow == nsWindow && g_originalSetIgnoresMouseEvents != nullptr) {
+        return true;  // ya instalado para esta misma ventana
+    }
+
+    Class cls = [nsWindow class];
+    const SEL sel = @selector(setIgnoresMouseEvents:);
+    Method method = class_getInstanceMethod(cls, sel);
+    if (method == nullptr) {
+        SDL_Log("nimvlets: -setIgnoresMouseEvents: not found on %s; click-through ownership NOT installed",
+                class_getName(cls));
+        return false;
+    }
+
+    // Se captura la IMP original ANTES de tocar nada -- es la que
+    // ApplyOwnedIgnoresMouseEvents() usará para escribir de verdad.
+    g_originalSetIgnoresMouseEvents = method_getImplementation(method);
+    g_ownedWindow = nsWindow;
+
+    // Preferido: AGREGAR el override a la clase concreta de la ventana
+    // (SDL3Window). class_addMethod() falla si esa clase YA implementa
+    // el selector por sí misma; solo entonces se recurre al swizzle
+    // in-place. La diferencia importa: agregando, la implementación de
+    // NSWindow queda intacta para cualquier otra ventana del proceso.
+    const bool added = class_addMethod(
+        cls, sel, reinterpret_cast<IMP>(NimvletsSetIgnoresMouseEvents), method_getTypeEncoding(method)) == YES;
+    if (!added) {
+        method_setImplementation(class_getInstanceMethod(cls, sel), reinterpret_cast<IMP>(NimvletsSetIgnoresMouseEvents));
+    }
+
+    SDL_Log(
+        "nimvlets: click-through ownership installed on %s (%s) — Nimvlets is now the only writer of "
+        "NSWindow.ignoresMouseEvents for this window",
+        class_getName(cls), added ? "subclass override" : "in-place swizzle");
+    return true;
+}
+
+unsigned long long ForeignClickThroughWriteCount() {
+    return g_foreignWriteCount;
+}
+
 bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
-    // Hallazgo de Block 05 (pasada de resolución de renderer, ver
-    // DEC-083 y la sección de diagnóstico del informe final): un
-    // programa SDL3 standalone mínimo (~50 líneas, sin ningún código de
-    // esta app) aisló que UNA SOLA llamada a SDL_SetWindowShape()
-    // corrompe permanentemente todo SDL_RenderPresent() posterior bajo
-    // el driver "software" en esta máquina -- el frame se vuelve un
-    // silueta blanca opaca sólida, para siempre, sin importar el orden
-    // relativo a RenderFrame() ni si se llama una sola vez o en cada
-    // frame. Un segundo repro standalone descartó que sea el mecanismo
-    // de Cocoa_UpdateWindowShape() descrito arriba (togglear
-    // NSWindow.ignoresMouseEvents directamente -- el mismo mecanismo
-    // que usa SetWindowClickThrough() más abajo -- no corrompió nada en
-    // 4 ciclos consecutivos contra el mismo renderer): la ruptura vive
-    // en la parte de SDL_video.c genérica de SDL_SetWindowShape()
-    // (conversión/almacenamiento de la superficie de forma) que corre
-    // ANTES de llegar a Cocoa, no en nada que este archivo controle o
-    // pueda evitar reordenando llamadas.
-    return !usingSoftwareRenderer;
+    // Causa raíz real, probada en esta pasada de estabilización contra
+    // la fuente pineada y con un repro nativo mínimo (ver el comentario
+    // largo de esta misma función en platform/TransparentWindowSupport.h):
+    // instalar una forma hace que SDL_RenderPresent() DIBUJE el bitmap
+    // de la forma sobre nuestro contenido cuando el driver activo
+    // rechaza el blend mode custom que SDL_RenderApplyWindowShape()
+    // intenta usar -- y el driver de software es exactamente uno que lo
+    // rechaza (no implementa SupportsBlendMode). De ahí la silueta
+    // blanca opaca. No es nada que este archivo pueda evitar
+    // reordenando llamadas: la decisión es simplemente no instalar
+    // ninguna forma mientras el renderer de software sea el baseline.
+    //
+    // La regla en sí vive en platform::MacOSNativeShapeIsRenderSafe()
+    // (pura, sin SDL/AppKit) para que la CI de las cuatro plataformas
+    // pueda fijarla como invariante -- mismo patrón que
+    // LinuxBackendPolicy. Acá solo se delega.
+    return MacOSNativeShapeIsRenderSafe(usingSoftwareRenderer);
 }
 
 bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
     // Con el driver acelerado (el histórico), NativeShapeHitTestIsRenderSafe()
-    // ya es true en macOS, así que SpikeApp jamás entra a la rama de
-    // polling -- false por documentación/consistencia, no porque se
-    // haya medido nada acá.
+    // ya es true en macOS, así que SpikeApp jamás entra a esta rama --
+    // false por documentación/consistencia, no porque se haya medido
+    // nada acá.
     //
     // Con `usingSoftwareRenderer` true (DEC-083), en cambio, SÍ se
-    // consulta de verdad: el hallazgo de arriba obliga a SpikeApp a
-    // caer al fallback poll-driven (SetWindowClickThrough(), confirmado
-    // seguro contra el software renderer en el mismo repro standalone)
-    // para no perder el click-through por completo.
+    // consulta de verdad: sin ruta de forma, SpikeApp maneja el
+    // click-through él mismo con SetWindowClickThrough() sobre muestras
+    // reales del cursor. Eso ya no es "un fallback que pelea contra
+    // SDL": MakeClickThroughAuthoritative() corre primero y deja a
+    // Nimvlets como único escritor de la propiedad. Y el muestreo ya no
+    // es permanente -- core::EvaluateClickThrough() lo arma solo
+    // mientras el cursor está DENTRO del rectángulo de la ventana.
     return usingSoftwareRenderer;
 }
-
 
 RendererPlatform CurrentRendererPlatform() {
     return RendererPlatform::kMacOS;

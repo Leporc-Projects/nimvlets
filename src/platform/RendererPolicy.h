@@ -74,4 +74,30 @@ RendererPlatform CurrentRendererPlatform();
 //     este bloque, y Linux nunca reportó el problema).
 const char* PreferredRendererDriverName(RendererPlatform platform, const char* devOverride);
 
+// macOS: ¿es seguro para el RENDER instalar una forma nativa
+// (SDL_SetWindowShape) con el driver activo?
+//
+// Pura y testeable en CUALQUIER host -- mismo patrón y misma
+// justificación que LinuxBackendPolicy.h (ver AGENTS.md §3): la
+// capacidad en sí es una regla conocida, no algo que haya que
+// descubrir en runtime, así que vive donde la CI de las cuatro
+// plataformas puede fijarla como invariante en vez de solo en el
+// adaptador de macOS, donde ningún test la alcanzaría.
+// src/platform/macos/TransparentWindowSupport.mm delega acá.
+//
+// false con el driver "software": instalar una forma hace que
+// SDL_RenderPresent() DIBUJE el bitmap de la forma sobre nuestro
+// contenido, porque el driver de software rechaza el blend mode custom
+// que SDL_RenderApplyWindowShape() intenta aplicar y SDL ignora ese
+// fallo -- la silueta blanca opaca que reportó la QA del owner. Causa
+// raíz completa y evidencia medida: ver
+// platform::NativeShapeHitTestIsRenderSafe() en
+// platform/TransparentWindowSupport.h.
+//
+// Como DEC-083 hace que macOS use "software" por defecto, en la
+// práctica esto es false en producción -- de ahí que Nimvlets maneje
+// el click-through por su cuenta ahí (DEC-086).
+bool MacOSNativeShapeIsRenderSafe(bool usingSoftwareRenderer);
+
+
 }  // namespace nimvlets::platform

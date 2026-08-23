@@ -12,4 +12,8 @@ const char* PreferredRendererDriverName(RendererPlatform platform, const char* d
     return nullptr;
 }
 
+bool MacOSNativeShapeIsRenderSafe(bool usingSoftwareRenderer) {
+    return !usingSoftwareRenderer;
+}
+
 }  // namespace nimvlets::platform

@@ -71,6 +71,33 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return (after & WS_EX_TRANSPARENT) != 0;
 }
 
+bool ReadWindowClickThrough(SDL_Window* window) {
+    HWND hwnd = Win32WindowFor(window);
+    if (hwnd == nullptr) {
+        return false;
+    }
+    return (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0;
+}
+
+bool MakeClickThroughAuthoritative(SDL_Window* window) {
+    // Nada que hacer en Windows: WS_EX_TRANSPARENT lo escribe
+    // exclusivamente SetWindowClickThrough() de arriba. El backend Win32
+    // de SDL 3.4.12 nunca lo toca (a diferencia de su backend Cocoa con
+    // NSWindow.ignoresMouseEvents — ver
+    // platform/TransparentWindowSupport.h), así que no hay ningún otro
+    // escritor contra el que proteger la política de Nimvlets.
+    //
+    // NOTA HONESTA: eso se afirma por lectura de la fuente pineada, no
+    // por QA en hardware Windows real (no hubo máquina Windows en este
+    // bloque — ver docs/PLATFORM_SPIKE.md).
+    (void)window;
+    return false;
+}
+
+unsigned long long ForeignClickThroughWriteCount() {
+    return 0;  // ver MakeClickThroughAuthoritative() arriba
+}
+
 bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
     // Conservative "no" — not verified in this block (no Windows
     // machine available). See this function's doc comment in

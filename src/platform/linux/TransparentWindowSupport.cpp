@@ -111,6 +111,28 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return false;
 }
 
+bool ReadWindowClickThrough(SDL_Window* window) {
+    // SetWindowClickThrough() nunca aplica nada en Linux (ver arriba),
+    // así que el estado real es, honestamente, siempre "no
+    // click-through" -- nunca se finge lo contrario.
+    (void)window;
+    return false;
+}
+
+bool MakeClickThroughAuthoritative(SDL_Window* window) {
+    // X11 usa la ruta nativa de shape (donde el hit-test lo maneja el
+    // servidor X, no una propiedad nuestra que alguien pueda pisar) y
+    // Wayland no tiene mecanismo alguno -- en ninguno de los dos casos
+    // existe una propiedad de click-through propia que defender. Ver
+    // docs/LINUX_PLATFORM.md.
+    (void)window;
+    return false;
+}
+
+unsigned long long ForeignClickThroughWriteCount() {
+    return 0;  // ver MakeClickThroughAuthoritative() arriba
+}
+
 bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
     // El hallazgo de Block 05 (ver platform/TransparentWindowSupport.h
     // y macos/TransparentWindowSupport.mm) de que SDL_SetWindowShape()

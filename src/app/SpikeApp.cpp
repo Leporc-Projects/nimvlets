@@ -392,17 +392,43 @@ bool SpikeApp::Init() {
     usingNativeShapeHitTest_ = platform::NativeShapeHitTestIsRenderSafe(usingSoftwareRenderer);
     usingPollDrivenClickThrough_ =
         !usingNativeShapeHitTest_ && platform::ClickThroughPollingIsMeaningful(usingSoftwareRenderer);
+
+    // Antes de escribir el estado nativo por primera vez: hacer que la
+    // política per-pixel de Nimvlets sea la ÚNICA escritora de esa
+    // propiedad. En macOS bajo el renderer de software esto es lo que
+    // convierte el mecanismo de "un poll que pelea contra el backend
+    // Cocoa de SDL y pierde" en una decisión autoritativa -- ver
+    // platform::MakeClickThroughAuthoritative() para la causa raíz
+    // completa. En Windows/Linux es un no-op declarado (no hay otro
+    // escritor), así que esta llamada es incondicional y sin #ifdef.
+    if (usingPollDrivenClickThrough_) {
+        clickThroughOwnershipInstalled_ = platform::MakeClickThroughAuthoritative(window_);
+    }
+
     SDL_Log(
         "nimvlets: click-through mechanism = %s",
         usingNativeShapeHitTest_
             ? "native SDL_SetWindowShape (event-driven, no polling)"
             : (usingPollDrivenClickThrough_
-                   ? "poll-driven fallback"
+                   ? (clickThroughOwnershipInstalled_
+                          ? "Nimvlets-owned per-pixel state (authoritative; cursor sampled only while the cursor is inside the window)"
+                          : "Nimvlets-driven per-pixel state (no ownership guard needed on this platform)")
                    : "none available (see docs/LINUX_PLATFORM.md) -- relying on IsPointInteractive() app-side gating only"));
 
     RenderFrame();
     ApplyCurrentHitMask();
     needsRedraw_ = false;
+
+    if (usingPollDrivenClickThrough_) {
+        // Estado inicial resuelto contra la posición REAL del cursor:
+        // sin esto, el primer estado sería el default de
+        // currentlyClickThrough_ (false) hasta el primer evento, y con
+        // el muestreo apagado (arranca desarmado) ese primer evento
+        // podría no llegar nunca si el cursor ya está quieto encima.
+        const CursorSample startupSample = SampleCursor(window_);
+        UpdateClickThrough(
+            IsPointInsideWindow(startupSample.localPoint), IsPointInteractive(startupSample.localPoint));
+    }
 
     RearmAmbientDeadline(static_cast<double>(SDL_GetTicks()));
 
@@ -744,6 +770,12 @@ bool SpikeApp::IsPointInteractive(core::Point localPoint) const {
     return activeHitMask_.Contains(localPoint);
 }
 
+bool SpikeApp::IsPointInsideWindow(core::Point localPoint) const {
+    return localPoint.x >= 0.0 && localPoint.y >= 0.0 &&
+           localPoint.x < static_cast<double>(EffectiveCanvasWidth()) &&
+           localPoint.y < static_cast<double>(EffectiveCanvasHeight());
+}
+
 void SpikeApp::RenderFrame() {
     const content::FrameDefinition& frame = animController_->CurrentFrame();
 
@@ -873,38 +905,66 @@ void SpikeApp::PollHover() {
     diagHasValue_ = true;
 #endif  // NDEBUG
 
-    UpdateClickThrough(cursorOverOpaque);
+    UpdateClickThrough(IsPointInsideWindow(sample.localPoint), cursorOverOpaque);
     MaybeTriggerHoverAction(cursorOverOpaque, nowMs);
 
     hoverScheduler_.OnFramePresented(nowMs);
 }
 
-void SpikeApp::UpdateClickThrough(bool cursorOverOpaque) {
-    const bool shouldBeClickThrough = dragClassifier_.IsActive() ? false : !cursorOverOpaque;
+void SpikeApp::UpdateClickThrough(bool cursorInsideWindow, bool cursorOverOpaque) {
+    const core::ClickThroughDecision decision =
+        core::EvaluateClickThrough(cursorInsideWindow, cursorOverOpaque, dragClassifier_.IsActive());
+
+    // Arma/desarma el muestreo periódico. Esto es lo que hace que el
+    // costo en reposo sea CERO despertares con el cursor en cualquier
+    // otro lugar de la pantalla -- ver core/ClickThroughPolicy.h.
+    clickThroughSamplingActive_ = decision.samplingRequired;
 
 #ifndef NDEBUG
-    if (shouldBeClickThrough != diagRequestedClickThrough_ || !diagHasValue_) {
-        SDL_Log("nimvlets: [diag] requested click-through=%s", shouldBeClickThrough ? "true" : "false");
-        diagRequestedClickThrough_ = shouldBeClickThrough;
+    if (decision.clickThrough != diagRequestedClickThrough_ || !diagHasValue_) {
+        SDL_Log("nimvlets: [diag] requested click-through=%s (sampling=%s)",
+                decision.clickThrough ? "true" : "false", decision.samplingRequired ? "on" : "off");
+        diagRequestedClickThrough_ = decision.clickThrough;
     }
 #endif  // NDEBUG
 
-    if (shouldBeClickThrough != currentlyClickThrough_) {
-        const bool actual = platform::SetWindowClickThrough(window_, shouldBeClickThrough);
-        currentlyClickThrough_ = shouldBeClickThrough;
+    if (decision.clickThrough != currentlyClickThrough_) {
+        const bool actual = platform::SetWindowClickThrough(window_, decision.clickThrough);
+        currentlyClickThrough_ = decision.clickThrough;
 
 #ifndef NDEBUG
         if (actual != diagActualIgnoresMouseEvents_ || !diagHasValue_) {
             SDL_Log(
-                "nimvlets: [diag] NSWindow.ignoresMouseEvents actual=%s%s",
+                "nimvlets: [diag] native click-through actual=%s%s",
                 actual ? "true" : "false",
-                actual == shouldBeClickThrough ? "" : "  <-- MISMATCH vs. requested value!");
+                actual == decision.clickThrough ? "" : "  <-- MISMATCH vs. requested value!");
             diagActualIgnoresMouseEvents_ = actual;
         }
 #else
         (void)actual;
 #endif  // NDEBUG
+        return;
     }
+
+#ifndef NDEBUG
+    // Diagnóstico que el brief de este bloque pide explícitamente:
+    // comparar "lo que pedimos" contra "lo que el OS realmente tiene"
+    // DESPUÉS de actividad real de mouse de Cocoa/SDL, no solo en el
+    // instante de la asignación. Sin esto, el modo de falla histórico
+    // (SDL pisando NSWindow.ignoresMouseEvents por la espalda) era
+    // literalmente invisible desde el lado de la app: currentlyClickThrough_
+    // decía "ya está en el valor correcto" y nunca se volvía a mirar.
+    // ReadWindowClickThrough() LEE sin escribir, así que este chequeo no
+    // puede enmascarar el bug arreglándolo de casualidad.
+    const bool actualNow = platform::ReadWindowClickThrough(window_);
+    if (actualNow != currentlyClickThrough_) {
+        SDL_Log(
+            "nimvlets: [diag] click-through DRIFT: requested=%s but native state=%s "
+            "(foreign writes intercepted so far: %llu)",
+            currentlyClickThrough_ ? "true" : "false", actualNow ? "true" : "false",
+            platform::ForeignClickThroughWriteCount());
+    }
+#endif  // NDEBUG
 }
 
 void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
@@ -945,6 +1005,10 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             }
 
             dragClassifier_.Begin(localOrigin);
+            // Un gesto que arranca fija el estado en "no click-through"
+            // y apaga el muestreo -- durante el arrastre los eventos
+            // reales alcanzan.
+            UpdateClickThrough(true, true);
             // Un click/drag que arranca reinicia cualquier dwell de
             // hover en curso -- el owner lo pidió explícitamente,
             // incluso si termina siendo un click corto (no un drag) y
@@ -1005,9 +1069,33 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 break;
             }
 
+            // Camino EVENT-DRIVEN del click-through: mientras la
+            // ventana NO está en modo click-through recibe eventos de
+            // mouse reales, así que cada motion resuelve el estado con
+            // latencia cero y sin ningún despertar periódico. El
+            // muestreo de PollHover() solo hace falta para el caso
+            // inverso (ya en click-through, la ventana deja de recibir
+            // eventos) -- ver core/ClickThroughPolicy.h.
+            UpdateClickThrough(IsPointInsideWindow(localCurrent), IsPointInteractive(localCurrent));
             MaybeTriggerHoverAction(IsPointInteractive(localCurrent), static_cast<double>(SDL_GetTicks()));
             break;
         }
+
+        case SDL_EVENT_WINDOW_MOUSE_ENTER: {
+            const CursorSample sample = SampleCursor(window_);
+            UpdateClickThrough(IsPointInsideWindow(sample.localPoint), IsPointInteractive(sample.localPoint));
+            break;
+        }
+
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            // El cursor salió del rectángulo: el estado de
+            // click-through deja de ser observable (ningún click de ahí
+            // puede llegar a esta ventana). Se elige explícitamente NO
+            // click-through para recuperar la entrega normal de eventos
+            // y poder detectar el próximo ingreso sin encuestar.
+            UpdateClickThrough(false, false);
+            ResetHoverDwell();
+            break;
 
         case SDL_EVENT_MOUSE_BUTTON_UP: {
             if (event.button.button != SDL_BUTTON_LEFT || !dragClassifier_.IsActive()) {
@@ -1019,6 +1107,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             };
             const core::PointerGesture gesture = dragClassifier_.End(localEnd);
             const double nowMs = static_cast<double>(SDL_GetTicks());
+            // El gesto terminó: la política vuelve a depender solo de
+            // dónde está el cursor, así que se re-evalúa de inmediato
+            // en vez de esperar al próximo evento/muestra ("releasing
+            // restores normal per-pixel behavior", brief §5).
+            UpdateClickThrough(IsPointInsideWindow(localEnd), IsPointInteractive(localEnd));
             if (gesture == core::PointerGesture::kClick) {
                 ++clickCount_;
                 ++appState_.clickBalance;
@@ -1090,7 +1183,14 @@ int SpikeApp::Run() {
             // (el caso de un cursor perfectamente quieto).
             waitMs = std::min(waitMs, *hoverDwellDeadlineMs_ - nowMs);
         }
-        if (usingPollDrivenClickThrough_) {
+        if (usingPollDrivenClickThrough_ && clickThroughSamplingActive_) {
+            // Solo se acorta la espera mientras el muestreo está
+            // realmente armado (cursor DENTRO del rectángulo de la
+            // ventana). En reposo -- el caso dominante -- esta rama no
+            // corre, así que el loop puede dormir hasta el próximo
+            // evento real o deadline de animación, sin ningún despertar
+            // a 60Hz. Ver core/ClickThroughPolicy.h y el informe de
+            // este bloque para la medición de CPU.
             waitMs = std::min(waitMs, hoverScheduler_.MillisUntilNextFrame(nowMs));
         }
         if (waitMs < 0.0) {
@@ -1202,7 +1302,8 @@ int SpikeApp::Run() {
             needsRedraw_ = false;
         }
 
-        if (usingPollDrivenClickThrough_ && afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
+        if (usingPollDrivenClickThrough_ && clickThroughSamplingActive_ &&
+            afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
             PollHover();
         }
     }

@@ -3,6 +3,8 @@ add_library(nimvlets_core STATIC
   DragClassifier.h
   DragClassifier.cpp
   HoverDwellTracker.h
+  ClickThroughPolicy.h
+  ClickThroughPolicy.cpp
   FrameScheduler.h
   FrameScheduler.cpp
   Silhouette.h

@@ -47,6 +47,8 @@ add_executable(nimvlets_tests
   LinuxBackendPolicyTest.cpp
   RendererPolicyTest.h
   RendererPolicyTest.cpp
+  ClickThroughPolicyTest.h
+  ClickThroughPolicyTest.cpp
   DirectionTest.h
   DirectionTest.cpp
   main.cpp

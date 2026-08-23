@@ -4,6 +4,7 @@
 #include "AppStateSerializerTest.h"
 #include "AppStateStoreTest.h"
 #include "ClickAccountingTest.h"
+#include "ClickThroughPolicyTest.h"
 #include "DirectionTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
@@ -41,6 +42,7 @@ int main() {
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
     nimvlets::tests::RegisterRendererPolicyTests(runner);
+    nimvlets::tests::RegisterClickThroughPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 

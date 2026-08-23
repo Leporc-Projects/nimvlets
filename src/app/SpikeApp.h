@@ -6,6 +6,7 @@
 #include "content/AnimationController.h"
 #include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
+#include "core/ClickThroughPolicy.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
 #include "core/HoverDwellTracker.h"
@@ -76,7 +77,21 @@ private:
     void ApplyCurrentHitMask();
 
     void PollHover();
-    void UpdateClickThrough(bool cursorOverOpaque);
+
+    // Aplica core::EvaluateClickThrough() sobre una muestra de cursor
+    // ya resuelta y empuja el resultado al mecanismo nativo si (y solo
+    // si) cambió. Llamada desde las DOS fuentes de muestra: eventos
+    // reales de SDL (motion/enter/leave — el camino barato,
+    // event-driven, activo mientras la ventana NO está en
+    // click-through) y el muestreo periódico de PollHover() (el único
+    // camino posible mientras SÍ lo está, porque entonces la ventana
+    // deja de recibir eventos de mouse — ver core/ClickThroughPolicy.h).
+    void UpdateClickThrough(bool cursorInsideWindow, bool cursorOverOpaque);
+
+    // True si `localPoint` cae dentro del rectángulo de la ventana
+    // (EffectiveCanvasWidth()/Height() en puntos lógicos), sea sobre
+    // pixel opaco o transparente.
+    bool IsPointInsideWindow(core::Point localPoint) const;
 
     // Diagnóstico DEV genérico y reusado (no descartable) — ver el
     // comentario de kDevDumpFramesDirEnvVar en SpikeApp.cpp.
@@ -300,8 +315,23 @@ private:
     bool usingNativeShapeHitTest_ = false;
     bool usingPollDrivenClickThrough_ = false;
 
+    // True si el adaptador de plataforma pudo hacer que la política de
+    // Nimvlets sea la única escritora del estado nativo de
+    // click-through (macOS; ver platform::MakeClickThroughAuthoritative()).
+    // Solo se usa para logging/diagnóstico honesto — el resto del
+    // wiring es idéntico con o sin esta garantía.
+    bool clickThroughOwnershipInstalled_ = false;
+
     core::FrameScheduler hoverScheduler_{1000.0 / 60.0};
     bool currentlyClickThrough_ = false;
+
+    // Si el muestreo periódico del cursor está armado ahora mismo (ver
+    // core::ClickThroughDecision::samplingRequired). Falso la enorme
+    // mayoría del tiempo: solo se arma mientras el cursor está DENTRO
+    // del rectángulo de la ventana. Con el cursor en cualquier otro
+    // lugar de la pantalla el loop principal no se despierta ni una
+    // sola vez por click-through.
+    bool clickThroughSamplingActive_ = false;
 
     // La ÚNICA textura GPU viva del pet activo (Block 05, pasada de
     // estabilización -- ver DEC-081 y graphics::ActiveFrameTexture).
