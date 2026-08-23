@@ -1294,3 +1294,52 @@ ejes. Verificado con capturas reales del binario corriendo (pose base
 y ambas pasivas): presencia de escritorio visiblemente mayor, sin
 pérdida de contenido ni cambio de proporciones.
 
+
+## 22. Pasada de resolución de renderer (Block 05, cuarta pasada): Nidir sigue siendo el control sano
+
+Nidir es el control ya establecido: nunca mostró el bug de corrupción
+visual que sí afectaba a Bunny/Frin, en ninguna pasada anterior. Esta
+pasada explica POR QUÉ de forma directa -- QA manual real del owner
+aisló el bug al driver de renderer acelerado de macOS, y Nidir se ve
+bien bajo AMBOS (software y acelerado). `docs/DECISION_LOG.md` DEC-083
+documenta la política resultante (`platform::RendererPolicy`, default
+a software en macOS) y DEC-084 el retuning de timing (`ambient` 15s ->
+12s, hover dwell 1s -> 0.5s -- este último sin relación con Nidir en
+particular, un valor de producto único para los cuatro pets).
+
+Ningún asset/pipeline de Nidir cambió.
+
+Esta misma validación en vivo encontró un segundo bug antes de poder
+cerrar la historia -- `SDL_SetWindowShape()` corrompiendo el software
+renderer en macOS (blanco sólido a partir del segundo frame, cualquier
+pet, no específico de Nidir) -- ver DEC-085 para el mecanismo completo
+y el fix (fallback a click-through poll-driven cuando el driver activo
+es "software").
+
+**Alcance real de lo verificado en esta pasada** (honesto, no todo lo
+que §-anteriores prometían): volcado del backbuffer real
+(`SDL_RenderReadPixels`) de una sesión completa en vivo de Nidir bajo
+"software" -- estático (`Base`), y una animación ambient real completa
+de 28 frames disparada por el intervalo de 12s -- **0 frames
+corruptos, colores correctos en todos**. El mecanismo de
+click-through se confirmó seleccionando la rama correcta ("poll-driven
+fallback", ver el log de arranque) y su bucle de poll ejecutándose
+(posición de cursor, `IsPointInteractive`, `ignoresMouseEvents` real
+todos logueados en cada ciclo). Los 186 tests automatizados (sin
+cambio de resultado por este bloque) siguen cubriendo la máquina de
+estados completa (hover/click/drag/ambient, prioridad DRAG > CLICK >
+HOVER/AMBIENT > BASE) a nivel de lógica.
+
+**No verificado en vivo en esta sesión** (sin herramienta de inyección
+de mouse/drag a nivel de SO disponible en este entorno sandboxeado --
+`osascript`/System Events no tiene permiso de Accesibilidad acá):
+click real disparando la animación de click, dwell de hover real de
+0.5s, drag real cancelando una acción en curso, incremento real del
+contador de clicks, y el cambio de dirección izquierda/derecha
+disparado por arrastrar la ventana a través del punto medio de la
+pantalla. Estos mecanismos no cambiaron de código en esta pasada
+(nada de esto se tocó fuera de la política de click-through descrita
+arriba) y ya estaban cubiertos por los 186 tests a nivel de lógica,
+pero una confirmación interactiva real en la máquina del owner sigue
+pendiente para cerrar el círculo completo bajo el renderer de
+software.

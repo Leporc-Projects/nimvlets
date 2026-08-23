@@ -2235,3 +2235,177 @@ consentimiento— SÍ puede tomar capturas enfocadas de nuestra propia
 ventana como diagnóstico de desarrollo. Nunca se envían con el
 producto, nunca se automatizan dentro de él, nunca se guardan en el
 repo. El contrato de privacidad real no se debilita.
+
+### DEC-083 — macOS: driver de renderer por default pasa a "software" — evidencia de QA real, no preferencia arquitectónica
+**Status:** DECIDIDO · Block 05, pasada de resolución de renderer.
+
+QA manual real, interactiva, en la máquina macOS del owner, aisló el
+bug de larga data de "pixeles/partes del cuerpo que desaparecen
+durante animaciones" (Bunny; Frin en sit-to-lie/lying/lie-to-sit) a la
+etapa de PRESENTACIÓN, no al pipeline de contenido: **el driver de
+software de SDL renderiza los MISMOS assets correctamente; los drivers
+acelerados que macOS elige por default (Metal/OpenGL) no.** Nidir --
+el control ya establecido en pasadas anteriores -- se ve bien en
+ambos. Esto NO es "el software siempre es más seguro que lo
+acelerado" como afirmación general -- es una discrepancia real y
+reproducible de un driver acelerado específico contra assets
+específicos, en esta máquina, medida por el owner mismo.
+
+Como consecuencia directa, esta pasada NO tocó ningún PNG fuente,
+frame derivado left/right, `content_scale`, canvas de trabajo
+compartido, ni `master.png` -- el pipeline de assets/contenido queda
+exonerado por segunda vez (la primera fue DEC-070/075, que ya había
+descartado el pipeline de compilación; ahora se descarta también la
+GEOMETRÍA como explicación, porque el mismo binario compilado, con el
+mismo pack, se ve distinto según el driver de PRESENTACIÓN).
+
+**Política implementada** (`src/platform/RendererPolicy.h/.cpp`, lógica
+pura sin SDL, mismo patrón que `LinuxBackendPolicy.h` -- ver
+`tests/RendererPolicyTest.cpp`, 7 tests): `SpikeApp::Init()` pide
+`SDL_CreateRenderer(window_, driverName)` con
+`driverName = PreferredRendererDriverName(CurrentRendererPlatform(),
+devOverride)`. Default por plataforma: macOS -> `"software"`
+(`SDL_SOFTWARE_RENDERER`, confirmado string literal contra la fuente
+SDL 3.4.12 pineada -- `src/render/software/SDL_render_sw.c`); Windows/
+Linux -> `nullptr` (sin cambio, nunca se demostró el mismo bug ahí).
+`platform::CurrentRendererPlatform()` es un hecho de compilación,
+implementado una vez por cada
+`src/platform/{macos,windows,linux}/TransparentWindowSupport.*` --
+mismo patrón exacto que `NativeShapeHitTestIsRenderSafe()` ya usaba,
+así que `SpikeApp` nunca necesita su propio `#ifdef` de plataforma
+(AGENTS.md §3).
+
+**Override DEV preservado**: `NIMVLETS_DEV_RENDERER_DRIVER` (cualquier
+nombre de driver -- "metal", "opengl", "software", lo que sea) gana
+sobre el default de CUALQUIER plataforma, sin recompilar -- verificado
+contra el binario real: default sin la variable selecciona
+"software"; con la variable en "opengl"/"metal" selecciona
+exactamente eso. Fallback documentado y no-silencioso: si el driver
+pedido (preferido o DEV override) falla al crear el renderer,
+`SpikeApp::Init()` loguea el fallo específico y reintenta con
+`SDL_CreateRenderer(window_, nullptr)` (el default de SDL) en vez de
+abortar el arranque -- verificado con un nombre de driver inexistente.
+El driver REALMENTE seleccionado (`SDL_GetRendererName()`, no solo lo
+pedido) se loguea siempre al arrancar.
+
+**Esto es una política de corrección, no una afirmación de que el
+renderizado acelerado nunca podrá funcionar** -- si una investigación
+futura confirma y corrige la causa exacta en el driver acelerado (o
+una versión más nueva de SDL la resuelve), esta política es un único
+punto de cambio (`PreferredRendererDriverName()`), no una reescritura.
+
+Ver el informe de esta pasada para el A/B visual completo (Nidir/
+Bunny/Frin bajo software, capturas reales) y las mediciones de
+CPU/RSS bajo software.
+
+### DEC-084 — Retuning de timing: hover dwell a 0.5s, intervalo ambient a 12s
+**Status:** DECIDIDO · Block 05, pasada de resolución de renderer --
+pedido de producto explícito del owner, no derivado de ningún
+diagnóstico.
+
+- `SpikeApp::kHoverDwellSeconds`: 1.0 -> 0.5 (historial completo: 5.0
+  -> 1.0 -> 0.5, cada pasada un pedido de producto más preciso). El
+  MECANISMO (`core::HoverDwellTracker`, reset en salida/click/drag/
+  cambio de estado, deadline propio en el loop principal para el caso
+  del cursor perfectamente quieto) no cambia -- solo este único valor.
+- `ambient_interval_seconds`/`REST_DELAY_SECONDS`: 15.0 -> 12.0 en los
+  tres generadores (`tools/generate_bunny_pack.py`,
+  `generate_nidir_pack.py`, `generate_frin_pack.py`) -- un único
+  intervalo de producto para los cuatro pets, sin excepción. El
+  mecanismo de reinicio en interacción real (DEC-078/079: el conteo
+  arranca de nuevo en click/drag/hover-completo/cambio de dirección Y
+  al TERMINAR una acción, no solo al empezar la interacción) tampoco
+  cambia -- solo el número base.
+
+Ambos son datos de contenido/runtime puros (nunca geometría de
+assets), así que no entran en conflicto con el alcance de DEC-083 (no
+tocar el pipeline de assets para compensar el bug de renderer). Los
+cuatro packs se recompilaron para llevar el nuevo
+`ambient_interval_seconds` -- verificado que el tamaño en bytes de
+cada `.nvpack` no cambia (es metadata de comportamiento, no geometría
+de frame).
+
+### DEC-085 — El A/B prometido en DEC-083 encontró un SEGUNDO bug: SDL_SetWindowShape() corrompe el software renderer en macOS; fallback a click-through poll-driven
+**Status:** DECIDIDO · Block 05, misma pasada de resolución de renderer
+-- este es el seguimiento directo de la validación que DEC-083 dejó
+pendiente ("Ver el informe de esta pasada para el A/B visual
+completo"), no una pasada nueva.
+
+Al ejecutar esa validación en vivo (Nidir bajo el nuevo default
+"software" de DEC-083) apareció un bug DISTINTO y más severo que el
+que DEC-083 resolvía: cada frame renderizado DESPUÉS del primero se
+presentaba como una silueta blanca opaca sólida -- confirmado primero
+con una captura de pantalla real, y después con evidencia mucho más
+rigurosa (volcado del backbuffer real vía `SDL_RenderReadPixels`,
+mecanismo `NIMVLETS_DEV_DUMP_FRAMES_DIR` ya existente): el frame 0
+(el render directo de `Init()`) salía correcto; los 27 frames
+siguientes de una animación completa de 28 frames -- cada uno con un
+`FrameDefinition*` distinto, cada uno con su propio
+`SDL_UpdateTexture` fresco -- salían blancos, sin ninguna falla de API
+reportada (`SDL_UpdateTexture` siempre devolvía éxito).
+
+Se descartó la hipótesis inicial (el modelo de `ActiveFrameTexture` de
+una sola textura reutilizada, actualizada in-place, vs. recrear una
+textura nueva por cambio de frame): un cambio de implementación de
+prueba a "destruir y recrear vía `SDL_CreateTextureFromSurface` en
+cada cambio de frame" NO cambió el resultado -- el frame 1 (idéntica
+textura reutilizada del frame 0, sin ningún re-upload de por medio, en
+el caso estático) seguía saliendo blanco. Esto probó que el bug no
+vive en `ActiveFrameTexture` en absoluto.
+
+La causa real se aisló con un programa SDL3 standalone mínimo
+(~50 líneas, cero código de esta app, misma ventana transparente/
+borderless/utility que usa SpikeApp): **una sola llamada a
+`SDL_SetWindowShape()` corrompe permanentemente todo
+`SDL_RenderPresent()` posterior contra el driver "software"**, sin
+importar el orden relativo al render ni si se llama una vez o en cada
+frame. Un segundo repro standalone acotó la causa aún más: togglear
+`NSWindow.ignoresMouseEvents` DIRECTAMENTE (el mecanismo exacto de
+`Cocoa_UpdateWindowShape()`, y el mismo que ya usa
+`SetWindowClickThrough()`) NO corrompió nada en 4 ciclos consecutivos
+contra el mismo renderer -- así que la ruptura no está en el efecto
+documentado de `Cocoa_UpdateWindowShape()` (que sigue siendo cierto:
+solo toca `ignoresMouseEvents`), sino en la parte genérica de
+`SDL_video.c`'s `SDL_SetWindowShape()` (conversión/almacenamiento de
+la superficie de forma) que corre antes de llegar a Cocoa.
+
+Esto significa que el mecanismo de click-through PRIMARIO de esta app
+en macOS (`SDL_SetWindowShape`, ver
+`NativeShapeHitTestIsRenderSafe()`) es incompatible con el nuevo
+default "software" de DEC-083 -- usarlo habría dejado la app
+visualmente inutilizable (blanco sólido permanente) apenas ocurriera
+la primera actualización de hit-mask, que pasa en el primer frame.
+
+**Fix implementado**: `NativeShapeHitTestIsRenderSafe()` y
+`ClickThroughPollingIsMeaningful()` (`src/platform/TransparentWindowSupport.h`
+y las tres implementaciones por plataforma) ahora reciben un parámetro
+`usingSoftwareRenderer` -- un hecho de RUNTIME (qué driver
+efectivamente eligió SDL, `SDL_GetRendererName(renderer_) ==
+SDL_SOFTWARE_RENDERER`), no de compilación, calculado una vez en
+`SpikeApp::Init()` justo después de crear el renderer. En macOS:
+`NativeShapeHitTestIsRenderSafe(true) == false` (el shape ya no es
+seguro con software) y `ClickThroughPollingIsMeaningful(true) == true`
+(SpikeApp cae al fallback poll-driven existente,
+`SetWindowClickThrough()`, ya confirmado seguro contra el software
+renderer por el segundo repro standalone). Con el driver acelerado
+histórico, ambas funciones siguen devolviendo exactamente lo mismo que
+antes de este bloque (`true`/`false` respectivamente) -- cero cambio
+de comportamiento fuera del caso nuevo. Windows y Linux aceptan el
+parámetro por consistencia de firma pero lo ignoran: Windows porque ya
+era `false`/`true` sin condición, y `RendererPolicy` nunca fuerza
+"software" ahí salvo por el override DEV; Linux por la misma razón,
+documentado explícitamente como no verificado si alguna vez se fuerza
+software ahí.
+
+**Resultado, con el fix**: se repitió el volcado de frames completo
+para Nidir (28 frames, animación ambient real disparada por el
+intervalo de 12s de DEC-084), Bunny (28 frames) y Frin macho (28
+frames) bajo el driver "software" -- **0 de 84 frames corruptos**,
+confirmando que el A/B prometido en DEC-083 ahora sí es limpio para
+los tres. `ActiveFrameTexture` no cambió de diseño (revertido al
+modelo de una sola textura reutilizada tras descartar esa hipótesis;
+el log confirma "creation #1" por sesión, sin crecer por frame).
+
+Ver el informe final de esta pasada para los números de CPU/RSS bajo
+software (Nidir/Bunny/Frin macho, estático vs. durante animación) y el
+estado de la retest de la transición de dirección (§ notas de UX).

@@ -84,7 +84,7 @@ seated (estado inicial):
   base_animation: sit_to_lie, frame 0 (la pose sentada real -- NUNCA
     se inventó/duplicó un asset nuevo: se REFERENCIA el mismo archivo
     que ya usa sit_to_lie).
-  ambient: sit_to_lie (one_shot) -> lying, tras REST_DELAY_SECONDS=15s
+  ambient: sit_to_lie (one_shot) -> lying, tras REST_DELAY_SECONDS=12s
     (dato de contenido por-estado, ver BehaviorState::
     ambientIntervalSeconds -- no hardcodeado por especie: Artu, con el
     mismo grafo en el futuro, define su propio valor sin tocar código).
@@ -105,10 +105,10 @@ lying:
   sin hover.
 ```
 
-**REST_DELAY_SECONDS=15s** — unificado con el intervalo ambient de
-Bunny/Nidir (ver `docs/DECISION_LOG.md` DEC-074; originalmente 45s por
-DEC-066, una elección de contenido propia nunca confirmada por el
-owner). Trivial de diferenciar de nuevo (un solo número en
+**REST_DELAY_SECONDS=12s** — unificado con el intervalo ambient de
+Bunny/Nidir (ver `docs/DECISION_LOG.md` DEC-084; historial completo:
+45s por DEC-066 (nunca confirmado por el owner) -> 15s por DEC-074 ->
+12s por DEC-084). Trivial de diferenciar de nuevo (un solo número en
 `tools/generate_frin_pack.py`, `REST_DELAY_SECONDS`) si el owner pide
 un ritmo distinto para la transición de postura específicamente.
 
@@ -249,8 +249,9 @@ a ~118×179pt -- ambos ahora comparables a Bunny (~114×159pt) y Nidir
   `DESCRIPTION.txt` (rasgos físicos), no procedencia.
 - Sin hover propio — explícitamente fuera de alcance hasta que el
   owner lo defina.
-- El rest-delay de 15s (unificado con Bunny/Nidir, DEC-074) es un valor de producto pedido explícitamente, no un
-  número confirmado por el owner — trivial de ajustar.
+- El rest-delay de 12s (§9, unificado con Bunny/Nidir, DEC-084) es un
+  valor de producto pedido explícitamente, no un número confirmado por
+  el owner — trivial de ajustar.
 - `visual_scale=1.30` (§7) es un candidato de QA, no una cifra
   definitiva del owner -- trivial de reajustar (un único número en
   `tools/generate_frin_pack.py`).
@@ -258,3 +259,32 @@ a ~118×179pt -- ambos ahora comparables a Bunny (~114×159pt) y Nidir
   mecanismo DEV sintético (no existe uno con delay) -- cubierto por
   `tests/StatefulBehaviorTest.cpp::LyingClickTransitionsToSeatedViaLieToSit`,
   no por captura de pantalla directa.
+
+## 9. Pasada de resolución de renderer (Block 05, cuarta pasada): renderer software en macOS, rest-delay a 12s
+
+QA manual real e interactiva del owner en su propia máquina macOS
+aisló la corrupción visual restante de sit-to-lie/lying/lie-to-sit a
+la etapa de PRESENTACIÓN (el driver de renderer acelerado que macOS
+elige por default), no al contenido/pipeline de Frin -- el driver de
+software de SDL renderiza los MISMOS assets de Frin correctamente. Ver
+`docs/DECISION_LOG.md` DEC-083 para el mecanismo completo
+(`platform::RendererPolicy`) y la evidencia. Ningún PNG/frame/manifest
+de Frin cambió por esta causa -- el pipeline de contenido de Frin
+queda exonerado por completo.
+
+`REST_DELAY_SECONDS` pasa de 15s a **12s** (DEC-084) -- mismo
+intervalo unificado que Bunny/Nidir.
+
+**Verificación real, con el fix de DEC-085 aplicado** (esa misma
+validación encontró un segundo bug -- `SDL_SetWindowShape()`
+corrompiendo el software renderer -- antes de poder confirmar esto;
+ver DEC-085 para el mecanismo y el fix): volcado del backbuffer real
+(`SDL_RenderReadPixels`, no una captura de pantalla) de una animación
+completa de 28 frames de Frin macho (`seated` -> `sit_to_lie` en curso
+-> `lying`, disparada por el rest-delay real de 12s) bajo el driver
+"software" -- **0 de 28 frames con la corrupción de silueta blanca**,
+colores correctos en todos. Frin hembra comparte el mismo pipeline de
+contenido y el mismo código de runtime que macho (ninguno de los dos
+tiene una ruta de renderizado separada) pero no se relanzó por
+separado en esta pasada -- no verificado en vivo, riesgo bajo dado que
+no hay ninguna diferencia de código entre variantes.

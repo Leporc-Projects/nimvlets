@@ -348,8 +348,8 @@ single self-looping state.
 waitMs = min(
     ambientDeadlineMs_ - now,                     // std::optional (Block 05) — absent entirely
                                                     // for a state with no ambientActions (e.g. Frin
-                                                    // "lying"), present otherwise (~15s Bunny/Nidir,
-                                                    // ~15s Frin "seated" -- unificado, ver DEC-074)
+                                                    // "lying"), present otherwise (~12s Bunny/Nidir/
+                                                    // Frin "seated" -- unificado, ver DEC-084)
     animController.NextFrameDeadlineMs() - now,    // absent (nullopt) while the base pose is static
     confirmRedrawDeadlineMs_ - now,                // absent unless an animation transition just armed it (§8.2)
     persistenceScheduler.NextFlushDeadlineMs() - now,  // absent unless something is actually dirty
@@ -386,7 +386,7 @@ global constant.
 
 ## 8. DEV overrides
 
-Manual QA cannot reasonably wait a real ~15s (per-state ambient
+Manual QA cannot reasonably wait a real ~12s (per-state ambient
 interval) or navigate a real product UI (which doesn't exist yet) to
 see a specific pet. Two independent, opt-in, env-var-gated DEV
 mechanisms:
@@ -407,7 +407,7 @@ as a valid positive number, that value replaces *this run's* ambient
 interval for EVERY state that has one — the pack's own authored
 per-state default is never mutated.
 
-## 8.1 Política de hover — dwell continuo de 1s (Block 04.3 → Block 05, tres correcciones)
+## 8.1 Política de hover — dwell continuo de 0.5s (Block 04.3 → Block 05, cuatro correcciones)
 
 Historial honesto (ninguna pasada se reescribe, cada una superó a la
 anterior con un requisito más preciso del owner):
@@ -422,12 +422,15 @@ anterior con un requisito más preciso del owner):
   completo (sin crédito parcial). Un click, un drag, o un cambio real
   de `BehaviorState` TAMBIÉN reinician el contador, incluso si el
   cursor nunca salió físicamente de la región.
-- Block 05, **tercera corrección (estado actual)**: el owner pidió
-  bajar el umbral de dwell de 5s a **1s** ("current 5-second dwell is
+- Block 05, tercera corrección: 5s -> 1s ("current 5-second dwell is
   too long") — el MECANISMO no cambia en absoluto, solo
-  `SpikeApp::kHoverDwellSeconds` (un único valor). Esta misma pasada
+  `SpikeApp::kHoverDwellSeconds` (un único valor). Esa misma pasada
   agrega, además, que el timer ambient se reinicie en cualquier
   interacción real (ver el final de esta sección y §11.1).
+- Block 05, **cuarta corrección (estado actual, pasada de resolución
+  de renderer)**: 1s -> **0.5s** — pedido de producto explícito (ver
+  DEC-084 en `docs/DECISION_LOG.md`), sin relación con el diagnóstico
+  de renderer de esta misma pasada. De nuevo, solo el valor cambia.
 
 **Mecanismo: `core::HoverDwellTracker`** (`src/core/HoverDwellTracker.h`,
 reemplaza a la vieja `core::HoverPassiveGate`) — pura, sin SDL, testeada
@@ -518,7 +521,7 @@ Antes de esta pasada, `RearmAmbientDeadline()` solo se llamaba al
 cargar/cambiar de pet y al detectar una transición de `BehaviorState`
 real (ver `lastKnownStateId_` en `SpikeApp::Run()`) — un click o un
 hover completo interrumpían la animación en curso, pero el conteo de
-~15s hacia el PRÓXIMO ambient seguía corriendo desde donde estaba
+~12s hacia el PRÓXIMO ambient seguía corriendo desde donde estaba
 antes de la interacción. QA manual del owner: "the pet should not
 perform an ambient action immediately after the owner just interacted
 with it" — un ambient podía dispararse casi inmediatamente después de
@@ -541,15 +544,16 @@ estaba por vencer.
   causado por un drag que cruza la mitad de pantalla -- ver
   `UpdateDirectionFromWindowPosition()`).
 
-El intervalo en sí no cambia (sigue en 15s, ver DEC-066/074 en
-`docs/DECISION_LOG.md`) — lo único nuevo es CUÁNDO se reinicia el
+El intervalo en sí (12s, ver DEC-066/074/084 en
+`docs/DECISION_LOG.md` para su historial completo) es ortogonal a
+esta sección -- lo que describe acá es CUÁNDO se reinicia el
 conteo. Un ambient cuyo deadline cae DURANTE un click/hover/drag en
 curso sigue sin solaparse ni encolarse (comportamiento preexistente,
 sin cambios en esta pasada): `TriggerAmbientAction()` es un no-op
 fuera de `ControllerMode::kBase`, pero `RearmAmbientDeadline()` se
 llama de todas formas justo después de chequear el deadline (ver
 `SpikeApp::Run()`), así que el deadline SIEMPRE se reprograma para
-~15s más adelante en vez de quedar vencido y disparar apenas termine
+~12s más adelante en vez de quedar vencido y disparar apenas termine
 la interacción en curso.
 
 ## 8.2 Redraw de confirmación — de solo-dirección a toda transición (Block 05)

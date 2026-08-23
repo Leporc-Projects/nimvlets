@@ -517,3 +517,30 @@ contenido de esta forma.
 - El fps de reproducción y el clipping lateral de idle/click_reaction
   documentados en §7/§11 siguen sin cambios -- no eran el foco de esta
   pasada.
+
+## 15. Pasada de resolución de renderer (Block 05, cuarta pasada): la causa real era el driver de presentación en macOS, no el pipeline de assets
+
+§14 dejó abierta la posibilidad de que "pixel loss" no fuera solo el
+downscale de dos pasadas corregido en §13. QA manual real e
+interactiva del owner en su propia máquina macOS lo confirmó: **el
+driver de renderer acelerado que macOS elige por default (Metal/
+OpenGL) muestra el bug; el driver de software de SDL, con los MISMOS
+assets/pack compilados, no.** Ningún PNG fuente, frame derivado,
+`content_scale`, ni el canvas de trabajo compartido de Bunny cambió
+por esto -- ver `docs/DECISION_LOG.md` DEC-083 para el mecanismo
+(`platform::RendererPolicy`, default a `"software"` en macOS) y la
+evidencia completa. El pipeline de assets de Bunny queda exonerado por
+completo, por segunda vez y con evidencia más directa que la de §8/§13.
+
+`AMBIENT_INTERVAL_SECONDS` pasa de 15s (§12) a **12s** (DEC-084) --
+ver el docstring de `tools/generate_bunny_pack.py`.
+
+**Verificación real, con el fix de DEC-085 aplicado**: esa misma
+validación en vivo encontró un segundo bug antes de poder confirmar
+esto -- `SDL_SetWindowShape()` corrompiendo el software renderer en
+macOS, no relacionado con Bunny ni con ningún pet en particular -- ver
+DEC-085 para el mecanismo y el fix (fallback a click-through
+poll-driven cuando el driver activo es "software"). Con el fix:
+volcado del backbuffer real (`SDL_RenderReadPixels`) de una animación
+ambient completa de 28 frames de Bunny bajo el driver "software" --
+**0 de 28 frames corruptos**, colores correctos en todos.

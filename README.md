@@ -22,8 +22,9 @@ segundo Nimvlet con estados reales — **Frin** (macho/hembra, lobo
 blanco/crema, un único Nimvlet lógico con dos variantes visuales —
 transición sentado/acostado, ver
 [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md)) — junto con Bunny y
-Nidir, corrige el comportamiento real de hover (ya no comparte
-cooldown con el timer ambient), sube el intervalo ambient a 15s, y
+Nidir, corrige el comportamiento real de hover (ahora exige dwell
+continuo de 0.5s sobre pixeles visibles, desacoplado del timer
+ambient), unifica el intervalo ambient a 12s para los cuatro pets, y
 agrega una escala visual por-pet genérica y data-driven
 (`content::PetDefinition::visualScale`). Esto explícitamente *no* es
 todavía el producto terminado — ver
@@ -89,8 +90,8 @@ NIMVLETS_DEV_SELECT_PET=frin/male ./build/macos-debug/src/app/nimvlets_spike
 NIMVLETS_DEV_SELECT_PET=frin/female ./build/macos-debug/src/app/nimvlets_spike
 
 # QA convenience: ambient action every ~5s instead of the real per-state
-# default (15s for Bunny/Nidir, 45s for Frin's seated rest-delay --
-# production behavior is unchanged — see docs/ANIMATION_RUNTIME.md)
+# default (12s for all four pets today -- production behavior is
+# unchanged — see docs/ANIMATION_RUNTIME.md)
 NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS=5 ./build/macos-debug/src/app/nimvlets_spike
 
 # conveniencia de QA: persiste a un directorio aislado en vez de la
@@ -137,23 +138,30 @@ rename), it falls back to the catalog's default and repairs the saved
 selection instead of crashing. Haz click en la región visible para
 incrementar el click balance (persistido localmente — ver
 [`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)) y reproducir una
-reacción de click corta; cada ~15s (Bunny/Nidir) o ~45s (Frin, mientras
-está sentado) también reproduce una acción ambient por su cuenta, y
-reposar el cursor sobre el pet (sin click) puede disparar la misma
-acción con su propio cooldown corto e independiente del timer ambient.
+reacción de click corta; cada ~12s (los cuatro pets, incluyendo a
+Frin mientras está sentado) también reproduce una acción ambient por
+su cuenta, y mantener el cursor quieto sobre el pet (sin click)
+durante 0.5s continuos dispara la misma acción, con su propio dwell
+desacoplado del timer ambient.
 Arrástrala para mover la ventana (la nueva posición también se
 persiste); hacer click en el área transparente pasa a lo que esté
 debajo. Cerrar y reabrir la ventana la reabre donde la dejaste, con tu
 click balance intacto.
 
-On macOS and Linux/X11, click-through hit-testing is handed to SDL's
-own `SDL_SetWindowShape()` mechanism (event-driven, no polling) — see
+On Linux/X11 (always) and on macOS with an accelerated renderer driver
+(Metal/OpenGL/GPU), click-through hit-testing is handed to SDL's own
+`SDL_SetWindowShape()` mechanism (event-driven, no polling) — see
 `docs/PLATFORM_SPIKE.md` §5.1 (macOS) and `docs/LINUX_PLATFORM.md` §3.2
-(X11's XShape extension) for why. A poll-driven fallback exists for
-Windows, where that mechanism isn't verified safe yet. Linux/Wayland
-has neither mechanism available with the pinned SDL3 (see
-`docs/LINUX_PLATFORM.md` §6): a click on a transparent pixel there is
-safely ignored by Nimvlets, but — unlike macOS/Windows/Linux-X11 — it
+(X11's XShape extension) for why. macOS defaults to SDL's *software*
+renderer instead (see `docs/DECISION_LOG.md` DEC-083), and
+`SDL_SetWindowShape()` was found to corrupt that specific driver's
+presentation (DEC-085) — so on the actual default macOS configuration,
+click-through uses the same poll-driven fallback as Windows. A
+poll-driven fallback also exists for Windows on its own terms, where
+the native shape mechanism isn't verified safe regardless of renderer.
+Linux/Wayland has neither mechanism available with the pinned SDL3
+(see `docs/LINUX_PLATFORM.md` §6): a click on a transparent pixel there
+is safely ignored by Nimvlets, but — unlike the other cases above — it
 does not reach whatever's underneath; this is a real Wayland protocol
 limitation, not a bug.
 
