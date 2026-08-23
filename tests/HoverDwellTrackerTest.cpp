@@ -108,47 +108,47 @@ bool NeverOverNeverFires() {
     return true;
 }
 
-bool ProductDwellThresholdIsPointTwoSeconds() {
-    // Valor de producto explícito (DEC-090, pasada de pulido final --
-    // baja de 0.5s a 0.2s, ver DEC-084 para el valor anterior) -- se
+bool ProductDwellThresholdIsPointFourSeconds() {
+    // Valor de producto explícito (pasada de continuidad de frontera --
+    // sube de 0.2s a 0.4s, ver DEC-090 para el valor anterior) -- se
     // fija acá porque src/app no es testeable en aislamiento y este
     // umbral es exactamente el tipo de constante que una pasada futura
     // podría mover sin querer.
-    NIMVLETS_CHECK(core::kDefaultHoverDwellSeconds == 0.2);
+    NIMVLETS_CHECK(core::kDefaultHoverDwellSeconds == 0.4);
 
     // Y que el umbral realmente gobierne el disparo, no solo exista:
-    // a 199ms todavía no; a 200ms sí.
+    // a 399ms todavía no; a 400ms sí.
     core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
     NIMVLETS_CHECK(!tracker.Update(true, 1000.0));
-    NIMVLETS_CHECK(!tracker.Update(true, 1000.0 + 199.0));
-    NIMVLETS_CHECK(tracker.Update(true, 1000.0 + 200.0));
+    NIMVLETS_CHECK(!tracker.Update(true, 1000.0 + 399.0));
+    NIMVLETS_CHECK(tracker.Update(true, 1000.0 + 400.0));
     return true;
 }
 
 bool DwellDoesNotFireBeforeThreshold() {
-    // Cobertura explícita del brief: "no trigger before 0.2s" -- un
+    // Cobertura explícita del brief: "no trigger before threshold" -- un
     // muestreo denso que nunca alcanza el umbral no debe disparar en
     // ningún punto intermedio, ni una sola vez.
     core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
     NIMVLETS_CHECK(!tracker.Update(true, 0.0));
-    for (double t = 10.0; t < 200.0; t += 10.0) {
+    for (double t = 10.0; t < 400.0; t += 10.0) {
         NIMVLETS_CHECK(!tracker.Update(true, t));
     }
     return true;
 }
 
 bool DwellFiresAtOrAfterThreshold() {
-    // Cobertura explícita del brief: "trigger at/after 0.2s" -- ambos
-    // bordes del umbral, no solo el exacto.
+    // Cobertura explícita del brief: "trigger at/after threshold" --
+    // ambos bordes del umbral, no solo el exacto.
     {
         core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
         tracker.Update(true, 0.0);
-        NIMVLETS_CHECK(tracker.Update(true, 200.0));  // exactamente en el umbral
+        NIMVLETS_CHECK(tracker.Update(true, 400.0));  // exactamente en el umbral
     }
     {
         core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
         tracker.Update(true, 0.0);
-        NIMVLETS_CHECK(tracker.Update(true, 350.0));  // bien después del umbral
+        NIMVLETS_CHECK(tracker.Update(true, 550.0));  // bien después del umbral
     }
     return true;
 }
@@ -159,8 +159,8 @@ bool DwellDoesNotSpamAfterFiring() {
     // debe volver a disparar nunca, sin importar cuánto tiempo pase.
     core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
     tracker.Update(true, 0.0);
-    NIMVLETS_CHECK(tracker.Update(true, 200.0));
-    for (double t = 210.0; t <= 5000.0; t += 100.0) {
+    NIMVLETS_CHECK(tracker.Update(true, 400.0));
+    for (double t = 410.0; t <= 5000.0; t += 100.0) {
         NIMVLETS_CHECK(!tracker.Update(true, t));
     }
     return true;
@@ -169,7 +169,7 @@ bool DwellDoesNotSpamAfterFiring() {
 }  // namespace
 
 void RegisterHoverDwellTrackerTests(testing::TestRunner& runner) {
-    runner.Add("HoverDwellTracker.ProductDwellThresholdIsPointTwoSeconds", ProductDwellThresholdIsPointTwoSeconds);
+    runner.Add("HoverDwellTracker.ProductDwellThresholdIsPointFourSeconds", ProductDwellThresholdIsPointFourSeconds);
     runner.Add("HoverDwellTracker.DwellDoesNotFireBeforeThreshold", DwellDoesNotFireBeforeThreshold);
     runner.Add("HoverDwellTracker.DwellFiresAtOrAfterThreshold", DwellFiresAtOrAfterThreshold);
     runner.Add("HoverDwellTracker.DwellDoesNotSpamAfterFiring", DwellDoesNotSpamAfterFiring);
