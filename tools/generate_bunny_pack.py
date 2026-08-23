@@ -20,9 +20,10 @@ kRight/kLeft resuelvan al contenido visualmente correcto.
 
 Block 05 (corrección de comportamiento + escala visual, ver el informe
 de este bloque):
-    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0 --
-      política de producto vigente ("target interval is now 15
-      seconds"), un único valor para Bunny y Nidir.
+    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0
+      (segunda pasada) y luego a 12.0 (pasada de resolución de
+      renderer -- pedido de producto explícito, ver DEC-084 en
+      docs/DECISION_LOG.md), un único valor para Bunny y Nidir.
     - `visual_scale` nuevo (por-pet, runtime -- ver
       content::PetDefinition::visualScale): Bunny queda en el default
       1.0 ("Bunny's current size is approved", sin cambio) -- ver
@@ -86,11 +87,12 @@ ALPHA_HIT_THRESHOLD = 128
 
 EXPORT_DURATION_SECONDS = 3.0
 
-# 15 segundos -- política de producto vigente para Block 05 ("target
-# interval is now 15 seconds"), reemplaza el 10.0 de la corrección
-# post-QA de Block 04.3. Mismo valor que Nidir -- un único intervalo de
+# 12 segundos -- pasada de resolución de renderer, pedido de producto
+# explícito (ver DEC-084 en docs/DECISION_LOG.md); reemplaza el 15.0 de
+# la segunda pasada de corrección post-QA (que a su vez reemplazó el
+# 10.0 de Block 04.3). Mismo valor que Nidir -- un único intervalo de
 # producto para los dos, no un ajuste por-pet.
-AMBIENT_INTERVAL_SECONDS = 15.0
+AMBIENT_INTERVAL_SECONDS = 12.0
 
 # Selección ponderada 70/30 entre las DOS acciones ambient de Bunny --
 # índice 0 = idle periódico (breathing), índice 1 = groom.

@@ -69,17 +69,16 @@ ALPHA_HIT_THRESHOLD = 128
 EXPORT_DURATION_SECONDS = 3.0
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
-# Unificado a 15s -- mismo intervalo ambient base que Bunny/Nidir (ver
-# tools/generate_bunny_pack.py), pedido explícito del owner ("cambia el
-# tiempo base de las animaciones pasivas a 15 segundos por ahora").
-# Antes de esta corrección este valor era 45.0 -- una elección de
-# contenido propia, nunca confirmada por el owner (ver
-# docs/DECISION_LOG.md DEC-066) -- reemplazada acá por el mismo
-# baseline de producto que el resto de los pets, por ahora. Dato de
-# CONTENIDO (por-estado, ver BehaviorState::ambientIntervalSeconds),
-# nunca hardcodeado por especie -- Artu (futuro, misma forma de grafo)
-# puede definir su propio valor sin tocar ningún código.
-REST_DELAY_SECONDS = 15.0
+# Unificado con el intervalo ambient base de Bunny/Nidir (ver
+# tools/generate_bunny_pack.py) -- 45.0 (DEC-066, nunca confirmado por
+# el owner) -> 15.0 (DEC-074, "cambia el tiempo base de las animaciones
+# pasivas a 15 segundos por ahora") -> 12.0 (pasada de resolución de
+# renderer, pedido de producto explícito, ver DEC-084 en
+# docs/DECISION_LOG.md). Dato de CONTENIDO (por-estado, ver
+# BehaviorState::ambientIntervalSeconds), nunca hardcodeado por
+# especie -- Artu (futuro, misma forma de grafo) puede definir su
+# propio valor sin tocar ningún código.
+REST_DELAY_SECONDS = 12.0
 
 # 70/30 entre howl y tail_greet -- mismo mecanismo genérico que el
 # ambient 70/30 de Bunny/Nidir (content::ChooseWeightedActionIndex()),

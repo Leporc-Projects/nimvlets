@@ -69,7 +69,7 @@ inline content::PetDefinition MakeNormalPetFixture() {
     groom.animation.frames = {MakeFrame(50.0), MakeFrame(50.0)};
 
     state.ambientActions = {breathing, groom};
-    state.ambientIntervalSeconds = 15.0;
+    state.ambientIntervalSeconds = 12.0;  // matches product policy -- ver DEC-084
     state.hoverUsesAmbientActions = true;
 
     pet.states = {state};

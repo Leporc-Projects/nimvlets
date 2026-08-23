@@ -15,8 +15,9 @@ espejado horizontal determinista.
 
 Block 05 (corrección de comportamiento + escala visual, ver el informe
 de este bloque):
-    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0 --
-      política de producto vigente, un único valor para Bunny y Nidir.
+    - `ambient_interval_seconds` pasa de 10.0 (Block 04.3) a 15.0
+      (segunda pasada) y luego a 12.0 (pasada de resolución de
+      renderer, DEC-084), un único valor para Bunny y Nidir.
     - `visual_scale` (por-pet, runtime -- ver
       content::PetDefinition::visualScale): Nidir sube de 1.10
       (primera pasada) a 1.25 (segunda pasada de corrección post-QA --
@@ -84,8 +85,9 @@ EXPORT_DURATION_SECONDS = 3.0
 CLICK_EXPORT_DURATION_SECONDS = 3.0
 WING_STRETCH_EXPORT_DURATION_SECONDS = 3.0
 
-# 15 segundos -- ver el docstring del módulo y tools/generate_bunny_pack.py.
-AMBIENT_INTERVAL_SECONDS = 15.0
+# 12 segundos -- ver el docstring del módulo y tools/generate_bunny_pack.py
+# (DEC-084 en docs/DECISION_LOG.md).
+AMBIENT_INTERVAL_SECONDS = 12.0
 
 # Selección ponderada 70/30 -- índice 0 = idle periódico (breathing/
 # fuego), índice 1 = wing_stretch.

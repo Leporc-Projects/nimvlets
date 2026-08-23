@@ -47,15 +47,17 @@ public:
 
     // Segundos de dwell continuo requeridos para que hover dispare
     // (Block 05, corrección de comportamiento — ver
-    // MaybeTriggerHoverAction()). Bajado de 5.0 a 1.0 en la segunda
-    // pasada de corrección post-QA del owner ("current 5-second dwell
-    // is too long") -- el mecanismo en sí (dwell continuo, resets en
-    // salida/click/drag/cambio de estado, desacoplado del timer
-    // ambient) no cambia, solo este único umbral. `static constexpr`
-    // (no un anonymous-namespace constant en el .cpp) porque tanto el
-    // inicializador de hoverDwellTracker_ como el cálculo de
-    // hoverDwellDeadlineMs_ en SpikeApp.cpp lo necesitan.
-    static constexpr double kHoverDwellSeconds = 1.0;
+    // MaybeTriggerHoverAction()). Historial: 5.0 (primera versión real)
+    // -> 1.0 (segunda pasada de corrección post-QA, "current 5-second
+    // dwell is too long") -> 0.5 (pasada de resolución de renderer,
+    // pedido de producto explícito -- ver DEC-084 en
+    // docs/DECISION_LOG.md). El mecanismo en sí (dwell continuo,
+    // resets en salida/click/drag/cambio de estado, desacoplado del
+    // timer ambient) no cambia, solo este único umbral. `static
+    // constexpr` (no un anonymous-namespace constant en el .cpp)
+    // porque tanto el inicializador de hoverDwellTracker_ como el
+    // cálculo de hoverDwellDeadlineMs_ en SpikeApp.cpp lo necesitan.
+    static constexpr double kHoverDwellSeconds = 0.5;
 
 private:
     bool Init();
@@ -76,8 +78,8 @@ private:
     void PollHover();
     void UpdateClickThrough(bool cursorOverOpaque);
 
-    // TEMP diagnostic-only (Block 05 Bunny root-cause investigation) —
-    // ver el comentario de kDevDumpFramesDirEnvVar en SpikeApp.cpp.
+    // Diagnóstico DEV genérico y reusado (no descartable) — ver el
+    // comentario de kDevDumpFramesDirEnvVar en SpikeApp.cpp.
     void DumpCurrentRenderedFrame(const std::string& dir);
 
     // Marca needsRedraw_ Y arma confirmRedrawDeadlineMs_ (Block 05 —
@@ -181,8 +183,8 @@ private:
     // anterior). El owner pidió explícitamente: "no quiero que se
     // dispare una animación apenas el mouse entra" — hover ahora exige
     // DWELL: el cursor debe permanecer CONTINUAMENTE sobre la región
-    // interactiva durante kHoverDwellSeconds (1s, segunda pasada de
-    // corrección post-QA -- bajado de 5s) antes de disparar. Si sale
+    // interactiva durante kHoverDwellSeconds (0.5s, pasada de
+    // resolución de renderer -- bajado de 1s) antes de disparar. Si sale
     // antes, el contador se reinicia por completo (ver
     // core::HoverDwellTracker). Sigue disparando la MISMA
     // TriggerHoverAction() que el timer ambient puede disparar (vía el
@@ -323,7 +325,7 @@ private:
     double dragGrabOffsetX_ = 0.0;
     double dragGrabOffsetY_ = 0.0;
 
-    // TEMP diagnostic-only — ver DumpCurrentRenderedFrame().
+    // Diagnóstico DEV — ver DumpCurrentRenderedFrame().
     int devDumpFrameCount_ = 0;
 };
 

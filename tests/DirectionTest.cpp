@@ -92,7 +92,7 @@ PetDefinition MakeProductionShapedDirectionalPet() {
     ambientLeft.animation.frames[1].durationMs = 50.0;
     ambient.directionOverrides = {ambientLeft};
     state.ambientActions = {ambient};
-    state.ambientIntervalSeconds = 15.0;
+    state.ambientIntervalSeconds = 12.0;  // matches product policy -- ver DEC-084
 
     pet.states = {state};
     return pet;
