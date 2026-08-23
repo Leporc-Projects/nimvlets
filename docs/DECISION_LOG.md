@@ -2925,3 +2925,222 @@ como límite honesto de ESE test específico, no un hueco de cobertura:
 `CompiledFrinEndpointContinuityTest` y `CompiledSelfLoopEndpointContinuityTest`
 sí ejercitan contenido real con densidad de alpha no uniforme, contra
 los packs compilados reales).
+
+---
+
+### DEC-094 — Hover dwell: 0.2s -> 0.4s; Frin rest delay: 10.0s -> 12.0s (revierte DEC-089)
+**Status:** DECIDIDO · Block 05, pasada de continuidad de frontera
+
+Dos pedidos de producto explícitos, independientes entre sí, agrupados
+en un único DEC porque los dos son "un solo número, mecanismo sin
+cambios":
+
+**Hover dwell.** `core::kDefaultHoverDwellSeconds` pasa de 0.2 (DEC-090)
+a **0.4** segundos. Mismo mecanismo de siempre (dwell CONTINUO, reset
+completo en salida/click/drag/cambio de estado, un disparo por
+episodio, nunca spam) -- ver `core::HoverDwellTracker`, sin tocar.
+
+**Frin rest delay.** `REST_DELAY_SECONDS` en
+`tools/generate_frin_pack.py` pasa de 10.0 (DEC-089) de vuelta a
+**12.0** -- vuelve a coincidir numéricamente con el intervalo ambient
+de Bunny/Nidir (DEC-084), aunque conceptualmente siguen siendo dos
+relojes independientes (uno por-estado, vía
+`BehaviorState::ambientIntervalSeconds`, nunca hardcodeado por
+especie) que HOY comparten valor por decisión de producto, no por
+restricción del modelo. `lying` sigue sin `ambient_actions` -- nunca
+hay timer armado ahí.
+
+Semánticas de reset sin cambios en ninguno de los dos casos.
+
+---
+
+### DEC-095 — Escala de una acción self-loop derivada del RETORNO, no del arranque
+**Status:** DECIDIDO · Block 05, pasada de continuidad de frontera
+
+DEC-092 (pasada anterior) resolvió la COLOCACIÓN de la punta de regreso
+de una acción self-loop (`groom`/`click` de Bunny, `howl`/`tail_greet`
+de Frin sentado) anclándola por su último frame contra la base --
+pero preservó DELIBERADAMENTE `content_scale`, que seguía
+derivándose SIEMPRE del PRIMER frame de la acción contra la base. QA
+manual confirmó que eso no alcanzaba: "the stable base pose and the
+animation boundary can still represent the same character at slightly
+different SCALE" -- un personaje puede estar perfectamente COLOCADO en
+la punta de regreso y aun así verse ligeramente más grande o más chico
+que la base, si la ESCALA se calibró contra una pose distinta (el
+arranque) de la que efectivamente toca la base al terminar.
+
+**Corrección:** `group_content_size()` (dentro de
+`compute_frame_normalization_plan()`) mide ahora el ÚLTIMO frame en vez
+del primero para cualquier grupo presente en el nuevo parámetro
+`scale_from_last_frame_entries` -- poblado, en
+`compile_pet_pack.py`'s `add_actions()`, con exactamente las mismas
+entradas self-loop que ya tenían `align_endpoint_to_target_base` de
+DEC-092 (el mismo flag ahora gobierna PLACEMENT *y* SCALE juntos, sin
+un flag nuevo -- una sola palanca de contenido para "este endpoint
+representa la base destino").
+
+**Por qué SOLO self-loop, nunca una transición que cambia de estado**
+(evidencia, no intuición -- ver el docstring de
+`scale_from_last_frame_entries`): en una acción self-loop, el frame 0 Y
+el último frame comparten la MISMA postura que la base (sentado todo el
+tiempo, "default" todo el tiempo), así que comparar CUALQUIERA de los
+dos contra la base compara la MISMA silueta. En `lie_to_sit`
+(acostado -> sentado), el último frame tiene una postura GENUINAMENTE
+distinta de la base de ORIGEN (`lying`) -- comparar por tamaño ahí sería
+exactamente la comparación entre-posturas inválida que DEC-075 ya
+prohibió. Para `lie_to_sit` la escala se sigue derivando del PRIMER
+frame contra la base de origen, sin cambios -- ver DEC-096 para su
+propio mecanismo, centrado en TRASLACIÓN, no escala.
+
+**Resultado medido, packs compilados, radio RMS ponderado por alpha del
+ÚLTIMO frame contra la base (antes -> después):**
+
+| acción | antes | después |
+|---|---|---|
+| Frin macho `howl` | 0.261% off | **0.002% off** |
+| Frin macho `tail_greet` | 0.334% off | **0.053% off** |
+| Frin hembra `tail_greet` | 0.011% off (ya bueno) | 0.030% off (sigue bueno) |
+| Bunny `groom`/`click` | ya dentro de tolerancia (0.5%) en ambas puntas | sin cambio de `content_scale` -- ver nota |
+
+Nota honesta sobre Bunny: su contenido YA caía dentro de la tolerancia
+de 0.5% tanto midiendo desde el frame 0 como desde el último, así que
+`content_scale` no cambió de valor para ninguna de sus tres acciones
+self-loop -- el pedido del brief ("scale ratio as close to 1.000 as
+practical") ya estaba satisfecho antes de esta pasada; lo que SÍ mejora
+para Bunny es la PLACEMENT (ver el informe de este bloque). Un
+residual sub-0.5% para Frin hembra `howl` (0.125% -> 0.391%) resultó
+ser ruido de RESAMPLEO -- el canvas de trabajo compartido creció
+levemente por DEC-096 (`lie_to_sit` necesitando más margen), lo que
+cambia el ratio de downscale de RUNTIME aplicado a TODO el pet
+(compartido), no un cambio real en `content_scale` (que se midió en
+1.000000 exacto, sin rescale, antes y después) -- documentado, no
+escondido.
+
+Uniformidad garantizada por construcción: `content_scale` sigue siendo
+UN solo valor por grupo, aplicado a TODOS los frames de esa animación
+por igual -- nunca hay compensación de zoom por-frame. Si algún frame
+recibiera una escala distinta sus dimensiones compiladas divergirían,
+y `_compile_animation()` ya falla fuerte ante eso (invariante
+preexistente, reverificado con un test explícito -- ver
+`ReturnEndpointScaleContinuityTest`).
+
+`assets/dev/nidir_pack.nvpack` queda BYTE-IDÉNTICO tras
+regenerarlo -- Nidir nunca activa `align_endpoint_to_target_base`, así
+que `scale_from_last_frame_entries` es siempre el conjunto vacío para
+su generador, y la condición de `group_content_size()` se reduce, por
+construcción, al comportamiento anterior a esta pasada.
+
+**Tests:** `ReturnEndpointScaleContinuityTest` (packs reales, ambos
+pets, tolerancia 1%) y `AlignEndpointToTargetBaseTest` (ya existente,
+extendido para cubrir que la escala también cambia con el flag, no
+solo la colocación).
+
+---
+
+### DEC-096 — Registro de DOS PUNTAS para `lie_to_sit`, con interpolación lineal de traslación cuando un transform constante no alcanza
+**Status:** DECIDIDO · Block 05, pasada de continuidad de frontera
+
+QA manual, específico: "when lying and the owner clicks to stand up,
+the stable lying pose immediately jumps in position when the FIRST
+lie_to_sit frame appears". DEC-087/DEC-092 ya habían anclado la punta
+FINAL de `lie_to_sit` (por-último-frame contra `seated_base`) -- pero
+nunca la punta INICIAL: sin ningún registro contra `lying_base`,
+`lie_to_sit` se colocaba SOLO por su propio frame 0, dejando que
+aterrizara donde fuera que su export nativo lo pusiera.
+
+**Medido antes de tocar nada** (centroide de alpha, frame 0 de
+`lie_to_sit` contra `lying_base`, packs compilados): sin NINGÚN
+registro, la distancia dependía enteramente de dónde el export nativo
+de `lie_to_sit` casualmente cayera dentro del canvas de trabajo
+compartido -- el salto que el owner reportó.
+
+**Extensión genérica del sistema existente** (no un hack por-pet, per
+el brief de este bloque): nuevo campo de contenido
+`align_transition_both_endpoints` (WeightedActionManifest, opcional,
+default False, solo tiene efecto si `target_state_id` cambia de
+estado). Cuando está en `true`, además del registro por-último-frame
+que `changes_state` ya activa incondicionalmente, se registra TAMBIÉN
+el PRIMER frame contra la base del estado de ORIGEN (`state_id`, el
+propio estado bajo el que la acción está autorada) -- mismo mecanismo
+de registro (centroide de alpha, `registration_point()`) que la punta
+final ya usaba.
+
+**Modelo de resolución, evidencia-primero** (no se asumió que hiciera
+falta interpolar): se calculan `start_offset` (registro de frame 0
+contra origen) y `end_offset` (registro del último frame contra
+destino, sin cambios respecto al mecanismo existente) y se COMPARAN. Si
+coinciden dentro de 1px de tolerancia, se usa un ÚNICO offset
+constante -- el mismo comportamiento de siempre, sin ningún cambio
+observable. Solo si divergen de verdad se interpola:
+
+```
+offset(i) = lerp(start_offset, end_offset, i / (frame_count - 1))
+```
+
+-- lineal, SOLO traslación (nunca escala, nunca por-eje independiente,
+nunca deforma anatomía ni re-temporiza), un offset entero por frame.
+`lie_to_sit` SÍ necesitó interpolación en las 4 combinaciones
+variante×dirección medidas (divergencia real de 10-50px entre las dos
+puntas, muy por encima de la tolerancia de 1px) -- confirmado
+directamente contra `_build_normalization_plan()`'s salida, no
+supuesto.
+
+`sit_to_lie` NO recibe este flag -- sus dos puntas YA son archivos
+compartidos con `seated_base`/`lying_base` (containment las deja
+exactas sin ningún registro por contenido, DEC-087), así que
+`align_transition_both_endpoints` sería ruido sin efecto ahí. Fijado
+como test explícito (`test_sit_to_lie_is_not_flagged_for_two_endpoint_
+registration`), no solo por omisión.
+
+**Arquitectura de implementación** (ver
+`tools/prep_dev_sprite.py`/`tools/compile_pet_pack.py`):
+- `compute_frame_normalization_plan()` gana `source_target_entry`
+  (complemento de `transition_target_entry`, apunta al ORIGEN),
+  `scale_from_last_frame_entries` (ver DEC-095) y
+  `per_frame_offsets_out` (parámetro de salida MUTABLE -- nunca se
+  cambió el TIPO de retorno de la función, que sigue siendo el mismo
+  `dict[str, 5-tuple]` que sus ~6 call sites existentes ya
+  destructuran; el nuevo dato es aditivo e invisible para cualquier
+  llamador que no lo pida).
+- El canvas de trabajo compartido se agranda para contener el frame en
+  AMBAS posiciones (arranque y destino), no solo la de destino --
+  verificado: el guard ruidoso de `_compile_frame()` (contenido
+  excediendo el canvas) NUNCA se disparó al recompilar el contenido
+  real.
+- `_compile_animation()` (compile_pet_pack.py) resuelve, por índice de
+  frame, el offset efectivo vía `lerp_offset_schedule()` cuando esta
+  entrada tiene un schedule de dos puntas -- `content_scale`/
+  `working_width`/`working_height` siguen siendo el ÚNICO valor
+  uniforme del plan para TODOS los frames; solo `offset_x`/`offset_y`
+  varía por índice.
+- CERO cambios en `src/` -- el runtime C++ nunca supo ni necesita saber
+  que esto existe: el pack compilado ya trae las posiciones correctas
+  bakeadas frame por frame, `content::PetPackLoader` las lee
+  exactamente igual que cualquier otro frame.
+
+**Resultado medido, packs compilados (centroide de alpha, antes ->
+después):**
+
+| medición | antes | después |
+|---|---|---|
+| `lie_to_sit` frame 0 vs `lying_base` | sin registro (el salto reportado) | **0.80-1.16px** |
+| `lie_to_sit` último frame vs `seated_base` | 0.25-0.87px (ya bueno, DEC-087/092) | 0.40-0.87px (se mantiene bueno) |
+
+Movimiento verificado SUAVE sobre los 25 frames reales (sin saltos
+grandes escondidos en medio de la interpolación) -- ver
+`test_translation_correction_never_produces_a_large_frame_to_frame_jump`.
+
+**Escala de `lie_to_sit`:** NO se tocó, per §9 del brief ("this pass
+should primarily solve translation continuity... do not interpolate
+zoom unless overwhelming evidence"). Medido antes de decidir: el ratio
+de escala implícito en cada punta (radio RMS del frame 0 contra
+`lying_base`, y del último frame contra `seated_base`) está a
+±0.1-0.7% de 1.0 en las 4 combinaciones -- consistente entre las dos
+puntas, sin evidencia de que el export cambie de escala. Se mantiene UN
+solo `content_scale` uniforme para toda la transición, derivado (sin
+cambios) del primer frame contra la base de origen.
+
+**Tests:** `LerpOffsetScheduleTest`/`TwoEndpointFrameOffsetsTest`
+(mecanismo puro, sin manifest), `LieToSitTwoEndpointContinuityTest`
+(contra los packs reales que se envían, las 4 combinaciones
+variante×dirección).
