@@ -80,23 +80,23 @@ RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 # Cuánto reposo GENUINO necesita Frin sentado antes de acostarse
 # (`seated` --sit_to_lie--> `lying`). Historial: 45.0 (DEC-066, nunca
 # confirmado por el owner) -> 15.0 (DEC-074) -> 12.0 (DEC-084,
-# unificado con Bunny/Nidir) -> 10.0 (pasada de estabilización, pedido
-# de producto explícito, ver DEC-089 en docs/DECISION_LOG.md).
-#
-# A partir de DEC-089 este valor YA NO está unificado con el intervalo
-# ambient de Bunny/Nidir (que se queda en 12.0): son dos ritmos
-# distintos a propósito -- "cada cuánto el pet hace un gesto ocioso" vs.
-# "cuánto tarda en cambiar de POSTURA". Que se pueda diferenciar sin
-# tocar una sola línea de motor es justamente el punto del modelo: es
-# un dato de CONTENIDO por-estado (BehaviorState::ambientIntervalSeconds),
-# nunca hardcodeado por especie -- Artu (futuro, misma forma de grafo)
-# define el suyo sin tocar código.
+# unificado con Bunny/Nidir) -> 10.0 (DEC-089, pasada de estabilización,
+# pedido de producto explícito) -> 12.0 (pasada de continuidad de
+# frontera, pedido de producto explícito -- revierte DEC-089's 10.0,
+# vuelve a unificarse con Bunny/Nidir).
 #
 # Las semánticas de reset no cambian: click, hover, drag y la
 # terminación de cualquier acción reinician la cuenta desde ese
 # instante (ver SpikeApp::RearmAmbientDeadline()). `lying` sigue sin
-# ambient_actions, así que nunca hay timer armado ahí.
-REST_DELAY_SECONDS = 10.0
+# ambient_actions, así que nunca hay timer armado ahí. El valor sigue
+# siendo un dato de CONTENIDO por-estado
+# (BehaviorState::ambientIntervalSeconds), nunca hardcodeado por
+# especie -- que hoy coincida numéricamente con Bunny/Nidir es una
+# decisión de producto, no una restricción del modelo: Artu (futuro,
+# misma forma de grafo) define el suyo sin tocar código, y este mismo
+# número puede volver a diferenciarse sin tocar una sola línea de
+# motor.
+REST_DELAY_SECONDS = 12.0
 
 # 70/30 entre howl y tail_greet -- mismo mecanismo genérico que el
 # ambient 70/30 de Bunny/Nidir (content::ChooseWeightedActionIndex()),
@@ -255,25 +255,45 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         source_direction = _invert_runtime_direction(runtime_direction)
         return frame_entries[f"{anim_id}_real"] if source_direction == canonical_direction else frame_entries[f"{anim_id}_derived"]
 
-    def action(anim_id: str, weight: float, target_state_id: str, *, align_endpoint_to_target_base: bool = False) -> dict:
-        """`align_endpoint_to_target_base` (pasada de pulido final -- ver
-        DEC-092 en docs/DECISION_LOG.md): default False porque para
-        `sit_to_lie`/`lie_to_sit` (target_state_id distinto del estado
-        propio) no hace ninguna diferencia -- ya se registran para
-        anclaje por último frame vía `changes_state`, sin importar este
-        flag (ver `compile_pet_pack.py`'s `add_actions()`). Se pasa
-        explícitamente True SOLO para `howl`/`tail_greet` (self-loop:
-        target_state_id == "seated", el propio estado), donde SIN el
-        flag no había ninguna registración -- la colocación se anclaba
-        solo por el frame 0 de la propia acción, dejando sin protección
-        la punta de REGRESO a la pose sentada estable (el "size snap"
-        que QA manual reportó: "seated click actions appear slightly
-        wider/larger than the seated base")."""
+    def action(
+        anim_id: str,
+        weight: float,
+        target_state_id: str,
+        *,
+        align_endpoint_to_target_base: bool = False,
+        align_transition_both_endpoints: bool = False,
+    ) -> dict:
+        """`align_endpoint_to_target_base` (DEC-092): default False
+        porque para `sit_to_lie`/`lie_to_sit` (target_state_id distinto
+        del estado propio) no hace ninguna diferencia en su REGISTRO --
+        ya se registran para anclaje por último frame vía
+        `changes_state`, sin importar este flag (ver
+        `compile_pet_pack.py`'s `add_actions()`). Se pasa explícitamente
+        True SOLO para `howl`/`tail_greet` (self-loop: target_state_id
+        == "seated", el propio estado), donde SIN el flag no había
+        ninguna registración -- la colocación (y, desde la pasada de
+        continuidad de frontera, TAMBIÉN la escala -- ver
+        `scale_from_last_frame_entries`) se anclaba solo por el frame 0
+        de la propia acción, dejando sin protección la punta de REGRESO
+        a la pose sentada estable.
+
+        `align_transition_both_endpoints` (pasada de continuidad de
+        frontera -- ver docs/DECISION_LOG.md): SOLO tiene efecto cuando
+        `target_state_id` SÍ cambia de estado (`sit_to_lie`/
+        `lie_to_sit`) -- registra TAMBIÉN el PRIMER frame contra la
+        base del estado de ORIGEN, además del anclaje por-último-frame
+        que `changes_state` ya activa incondicionalmente. `sit_to_lie`
+        no lo necesita (sus dos puntas YA son archivos compartidos con
+        seated_base/lying_base -- containment las deja exactas sin
+        ningún registro por contenido); `lie_to_sit` sí, porque es un
+        export independiente en ambos extremos -- ver el informe de
+        este bloque para la medición real."""
         return {
             "id": anim_id,
             "weight": weight,
             "target_state_id": target_state_id,
             "align_endpoint_to_target_base": align_endpoint_to_target_base,
+            "align_transition_both_endpoints": align_transition_both_endpoints,
             "kind": "one_shot",
             "fps": fps_by_anim[anim_id],
             "returns_to_idle": True,
@@ -343,7 +363,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "ambient_actions": [],  # "No random howl/tail-greet while lying"
                 "hover_uses_ambient_actions": False,
                 "hover_actions": [],
-                "click_actions": [action("lie_to_sit", 1.0, "seated")],
+                "click_actions": [action("lie_to_sit", 1.0, "seated", align_transition_both_endpoints=True)],
             },
         ],
     }

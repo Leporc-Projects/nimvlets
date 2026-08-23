@@ -522,3 +522,84 @@ sin definir hover propio (`hover_uses_ambient_actions: false`,
   con Bunny) contra un fixture propio compilado de verdad, no un pet
   real -- confirma placement/no-op/escala-nunca-tocada de forma
   aislada.
+
+## 10. Pasada de continuidad de frontera (Block 05): escala del retorno, dos-puntas para lie_to_sit, timing
+
+Continuación directa de §9, misma familia de correcciones -- ver
+`docs/DECISION_LOG.md` DEC-094/095/096 para el detalle completo.
+
+### 10.1 Timing (DEC-094)
+
+`REST_DELAY_SECONDS` vuelve de 10.0 (§9.3/DEC-089) a **12.0** --
+unificado otra vez con Bunny/Nidir por pedido de producto explícito.
+Hover dwell (motor, no específico de Frin) sube de 0.2s a **0.4s**.
+
+### 10.2 Escala de `howl`/`tail_greet` derivada del retorno, no del arranque (DEC-095)
+
+QA manual: "Frin still feels slightly 'fatter' during animations than
+while in the stable pose" -- distinto del salto de COLOCACIÓN que §9.2
+ya había resuelto. `align_endpoint_to_target_base` (el mismo flag de
+§9.2) ahora gobierna TAMBIÉN la escala: se deriva del ÚLTIMO frame
+contra la base, no del primero.
+
+| acción | scale drift antes (último frame vs base) | después |
+|---|---|---|
+| macho `howl` | 0.26% | **0.002%** |
+| macho `tail_greet` | 0.33% | **0.05%** |
+| hembra `tail_greet` | 0.01% | 0.03% (sigue bueno) |
+| hembra `howl` | 0.13% | 0.39% *(ruido de resampleo -- ver DEC-095, `content_scale` sigue en 1.000000 exacto en ambos casos; el canvas compartido creció levemente por §10.3 y cambió el ratio de downscale de runtime aplicado a TODO el pet)* |
+
+Todos los casos quedan bajo el 1% de tolerancia del test de regresión.
+
+### 10.3 `lie_to_sit`: registro de dos puntas (DEC-096)
+
+QA manual, el hallazgo central de esta pasada: "when lying and the
+owner clicks to stand up, the stable lying pose immediately jumps in
+position when the FIRST lie_to_sit frame appears". §9/§8 (pasadas
+anteriores) solo habían anclado la punta FINAL de `lie_to_sit`; la
+INICIAL nunca tuvo ningún registro.
+
+`align_transition_both_endpoints: true` en `lie_to_sit` (macho y
+hembra) -- registra TAMBIÉN el primer frame contra `lying_base`. Medido
+ANTES de decidir cómo resolverlo: las dos puntas divergen 10-50px entre
+sí (según variante/dirección), muy por encima de cualquier tolerancia
+de redondeo -- un solo transform constante NO alcanzaba, así que el
+compilador interpola LINEALMENTE la traslación (nunca la escala) a lo
+largo de los 25 frames reales.
+
+| medición | antes | después |
+|---|---|---|
+| frame 0 vs `lying_base` | sin registro (el salto reportado) | **0.80-1.16px** |
+| último frame vs `seated_base` | 0.25-0.87px (ya bueno) | 0.40-0.87px (se mantiene bueno) |
+
+Movimiento verificado suave sobre los 25 frames -- ningún salto grande
+escondido en medio del movimiento autorado real. `sit_to_lie` NO se
+tocó: sus dos puntas ya son archivos compartidos con las bases
+(containment exacto, §5/§7), así que el flag no aplicaría ahí.
+
+Escala de `lie_to_sit`: sin cambios (ver DEC-096) -- las dos puntas
+midieron consistentes entre sí (±0.1-0.7% de 1.0), sin evidencia de que
+el export cambie de escala, así que se mantiene un único
+`content_scale` uniforme derivado del primer frame contra `lying_base`,
+como siempre.
+
+Canvas de trabajo: creció levemente para contener el frame en las DOS
+posiciones (macho 548x657 -> 575x657; hembra 494x531 -> 492x532) --
+`visual_scale` se queda en 1.05, el cambio es demasiado chico para
+justificar re-derivarla.
+
+### 10.4 Regresión verificada
+
+- `sit_to_lie` -> `lying`: sigue pixel-idéntico, las dos direcciones,
+  las dos variantes.
+- Inversión de dirección runtime (§9.1): sin cambios, sigue verificada.
+- `assets/dev/nidir_pack.nvpack`: **byte-idéntico** (Nidir nunca activa
+  ninguno de los dos flags de esta pasada).
+
+### 10.5 Tests
+
+`tools/test_asset_pipeline.py`: `ReturnEndpointScaleContinuityTest`
+(§10.2), `LerpOffsetScheduleTest`/`TwoEndpointFrameOffsetsTest`
+(mecanismo puro de §10.3) y `LieToSitTwoEndpointContinuityTest`
+(contra los packs reales, incluyendo el chequeo de movimiento suave y
+de que `sit_to_lie` NO recibió el flag).
