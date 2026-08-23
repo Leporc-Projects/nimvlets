@@ -65,6 +65,21 @@ WeightedActionManifest:
       "target_state_id": "seated",  # which state to enter when this one-shot finishes -- the
                                      # SAME id as the state it's authored under is a self-loop
                                      # (the normal case for a single-state pet's click/ambient)
+      "align_endpoint_to_target_base": false,  # optional, default false, BUILD-TIME ONLY (never
+                                     # reaches the compiled .nvpack -- see normalize_visual_scale
+                                     # below). When true AND returns_to_idle is true, this action's
+                                     # placement (never its content_scale) is anchored by its LAST
+                                     # frame against target_state_id's base_animation instead of by
+                                     # its own frame 0 -- same mechanism a state-CHANGING action
+                                     # already gets unconditionally (see compute_frame_
+                                     # normalization_plan()'s transition_target_entry), extended
+                                     # here to a self-loop action (target_state_id == the state it's
+                                     # authored under) whose content is meant to visually return to
+                                     # that exact base pose. Only meaningful with
+                                     # normalize_visual_scale: true. No-op (and therefore no change
+                                     # to the compiled bytes) unless a pet's own generator script
+                                     # sets it explicitly, per-action -- see docs/DECISION_LOG.md
+                                     # DEC-092.
       ...AnimationManifest...,
       "direction_overrides": [ {"direction": "left", ...AnimationManifest...}, ... ]  # optional
     }
@@ -572,13 +587,49 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
             add_animation(am, context, group, state_id)
             target_state_id = am.get("target_state_id")
             changes_state = target_state_id is not None and target_state_id != state_id
-            if changes_state:
+            # `align_endpoint_to_target_base` (opcional, default False --
+            # ver el docstring del módulo): pedido de contenido EXPLÍCITO
+            # de que esta acción concreta también se registre para
+            # anclaje por último frame contra la base de su estado
+            # destino, aunque sea un self-loop (target_state_id ==
+            # state_id). Pasada de pulido final -- ver DEC-092 en
+            # docs/DECISION_LOG.md. Antes de esto SOLO una transición que
+            # CAMBIA de estado (changes_state) se registraba acá; una
+            # acción con target_state_id == state_id (el caso normal de
+            # click/ambient de un pet de un solo estado, o de una acción
+            # "vuelve a la misma postura" como howl/tail_greet/groom/
+            # click de Frin/Bunny) se colocaba solo por su PROPIO frame 0
+            # (ver compute_frame_normalization_plan()) -- lo que deja sin
+            # protección la punta de REGRESO a la base (exactamente el
+            # "size snap al volver a idle" que QA manual reportó).
+            # `returns_to_idle` sigue gobernando si esta acción REALMENTE
+            # transiciona al terminar (ver _compile_animation()) -- si es
+            # False (se queda congelada en el último frame para
+            # siempre), no hay ningún instante de "entrar a la base" que
+            # proteger, así que el flag no tiene efecto ahí.
+            align_to_target = bool(am.get("align_endpoint_to_target_base", False))
+            returns_to_idle = bool(am.get("returns_to_idle", True))
+            register = target_state_id is not None and returns_to_idle and (changes_state or align_to_target)
+            if register:
                 pending_transitions[context] = (target_state_id, None)
                 transition_manifest[context] = (am, context)
             for i, om in enumerate(am.get("direction_overrides", [])):
                 override_context = f"{context}_direction_overrides[{i}]"
                 add_animation(om, override_context, group, state_id)  # right/left share content_scale
-                if changes_state:
+                # `align_endpoint_to_target_base` es una propiedad de la
+                # ACCIÓN (misma familia que `target_state_id`, que
+                # tampoco se re-lee por-dirección -- ver
+                # _compile_weighted_action()), no de cada dirección por
+                # separado: si el contenido declara que esta acción
+                # vuelve a su base, eso vale igual para su espejo
+                # derivado. `returns_to_idle`, en cambio, SÍ es un campo
+                # propio de cada AnimationManifest (canónico Y override
+                # pueden declararlo distinto -- igual que
+                # _compile_animation() lo lee de cada uno por separado),
+                # así que se relee de `om`.
+                om_returns_to_idle = bool(om.get("returns_to_idle", True))
+                om_register = target_state_id is not None and om_returns_to_idle and (changes_state or align_to_target)
+                if om_register:
                     pending_transitions[override_context] = (target_state_id, om.get("direction"))
                     transition_manifest[override_context] = (om, override_context)
 

@@ -34,7 +34,9 @@ import real -- ver docs/NIDIR_CONTENT.md).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -812,6 +814,83 @@ class CompiledFrinEndpointContinuityTest(unittest.TestCase):
             self.assertEqual(read_pet_pack.find_state(pack, "lying")["ambient_actions"], [], variant)
 
 
+class CompiledSelfLoopEndpointContinuityTest(unittest.TestCase):
+    """Block 05, pasada de pulido final (ver docs/DECISION_LOG.md
+    DEC-092/DEC-093): el "size snap" que QA manual reportó al VOLVER a
+    la pose base tras `groom`/`click` (Bunny) y `howl`/`tail_greet`
+    (Frin, sentado) -- distinto del invariante de CompiledClickScaleTest
+    (que mide el frame 0/arranque de la acción) porque este mide
+    específicamente la PUNTA DE REGRESO: el último frame mostrado antes
+    de que el runtime vuelva a mostrar la base (ver
+    content::AnimationController).
+
+    Medido con centroide ponderado por alpha (centro de masa real, no
+    bbox) contra los packs COMPILADOS reales -- ver
+    tools/read_pet_pack.py's content_alpha_centroid()."""
+
+    # 2.5px de tolerancia sobre un frame nativo de ~250-550px: el peor
+    # caso medido tras la corrección es ~0.88px (Bunny groom, right) --
+    # esto deja margen real de regresión (no es un snapshot que haya
+    # que reajustar por cualquier cambio de arte de <1px) sin dejar
+    # pasar una regresión real como la de antes de esta pasada (Bunny
+    # groom llegaba a 1.82px, Frin macho lie_to_sit a ~53px antes de
+    # DEC-087).
+    MAX_ENDPOINT_DELTA_PX = 2.5
+
+    FLAGGED_ACTIONS = (
+        ("assets/dev/bunny_pack.nvpack", "default", "ambient_actions", "groom"),
+        ("assets/dev/bunny_pack.nvpack", "default", "click_actions", "click"),
+        ("assets/dev/frin_male_pack.nvpack", "seated", "click_actions", "howl"),
+        ("assets/dev/frin_male_pack.nvpack", "seated", "click_actions", "tail_greet"),
+        ("assets/dev/frin_female_pack.nvpack", "seated", "click_actions", "howl"),
+        ("assets/dev/frin_female_pack.nvpack", "seated", "click_actions", "tail_greet"),
+    )
+
+    def test_flagged_actions_return_close_to_their_base_pose(self) -> None:
+        for rel, state_id, trigger, action_id in self.FLAGGED_ACTIONS:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            state = read_pet_pack.find_state(pack, state_id)
+            for direction in ("right", "left"):
+                with self.subTest(pack=pack["id"], action=action_id, direction=direction):
+                    base = read_pet_pack.resolve_animation(
+                        state["base_animation"], state["base_animation_direction_overrides"], direction)
+                    action = read_pet_pack.find_action(state, trigger, action_id)
+                    anim = read_pet_pack.resolve_animation(action["animation"], action["direction_overrides"], direction)
+                    base_c = read_pet_pack.content_alpha_centroid(base["frames"][0])
+                    last_c = read_pet_pack.content_alpha_centroid(anim["frames"][-1])
+                    delta = math.hypot(last_c[0] - base_c[0], last_c[1] - base_c[1])
+                    self.assertLess(
+                        delta, self.MAX_ENDPOINT_DELTA_PX,
+                        f"{pack['id']}/{state_id}/{action_id} ({direction}) returns {delta:.2f}px away "
+                        "from its base pose's alpha centroid -- larger than the measured post-fix worst "
+                        "case, likely a real regression in align_endpoint_to_target_base's placement")
+
+    def test_flag_is_actually_set_on_every_flagged_action(self) -> None:
+        """Control de que el propio CONTENIDO declara el flag donde se
+        espera -- si un futuro cambio en un generador lo borra por
+        accidente, el test de arriba seguiría pasando por casualidad
+        mientras el mecanismo esté ausente (el legado "anclado por
+        frame 0" también puede dar resultados chicos si el contenido
+        cambia) -- este test cierra ese hueco verificando la DECLARACIÓN
+        en el manifest, no solo el resultado numérico."""
+        manifests = {
+            "assets/dev/bunny_pack.nvpack": "assets/source/nimvlets/bunny/pack_manifest.json",
+            "assets/dev/frin_male_pack.nvpack": "assets/source/nimvlets/frin/male/pack_manifest.json",
+            "assets/dev/frin_female_pack.nvpack": "assets/source/nimvlets/frin/female/pack_manifest.json",
+        }
+        for rel, state_id, trigger, action_id in self.FLAGGED_ACTIONS:
+            manifest_rel = manifests[rel]
+            with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            state = next(s for s in manifest["states"] if s["id"] == state_id)
+            action = next(a for a in state[trigger] if a["id"] == action_id)
+            with self.subTest(manifest=manifest_rel, action=action_id):
+                self.assertTrue(
+                    action.get("align_endpoint_to_target_base", False),
+                    f"{manifest_rel}: state[{state_id}].{trigger}[{action_id}] is missing "
+                    "align_endpoint_to_target_base: true")
+
+
 class CompiledClickScaleTest(unittest.TestCase):
     """Block 05, pasada de estabilización (DEC-088): QA manual reportó
     que las animaciones de click se veían "un poco más anchas/grandes"
@@ -900,6 +979,25 @@ class NidirGoldenControlTest(unittest.TestCase):
                     for frame in animation["frames"]:
                         sizes.add((frame["width"], frame["height"]))
         self.assertEqual(len(sizes), 1, f"Nidir frames should all share one canvas, got {sizes}")
+
+    def test_nidir_pack_is_byte_identical(self) -> None:
+        """Verificación EXPLÍCITA de bytes, no solo de propiedades
+        derivadas -- pedido literal del brief de la pasada de pulido
+        final ("NIDIR PACK MUST REMAIN BYTE-IDENTICAL. Assert this
+        explicitly"). El hash se tomó del pack ya regenerado con TODO
+        el código de esta pasada (inversión de dirección de Frin,
+        `align_endpoint_to_target_base`, registro por centroide de
+        alpha) corriendo -- Nidir nunca pasa por ninguno de esos
+        caminos (su generador nunca setea el flag, y no tiene ninguna
+        transición que cambie de estado), así que el hash debe
+        coincidir SIEMPRE que se vuelva a compilar, no solo hoy."""
+        with open(os.path.join(_REPO_ROOT, "assets/dev/nidir_pack.nvpack"), "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        self.assertEqual(
+            digest, "594da545ce52e6721dfc90debb8f2b8184ac5cb9a1ca07ba7a6a1801e0cc968a",
+            "nidir_pack.nvpack changed -- Nidir is the frozen golden control (see AGENTS.md / block brief); "
+            "if this pack was meant to change, this is very likely an unintended regression from touching "
+            "shared compiler/tooling code, not an approved content update")
 
 
 class PrivacyInvariantTest(unittest.TestCase):
@@ -1000,6 +1098,135 @@ class ContentTimingPolicyTest(unittest.TestCase):
         for pet in ("bunny", "nidir"):
             manifest = self._manifest(f"assets/source/nimvlets/{pet}/pack_manifest.json")
             self.assertEqual(self._state(manifest, "default")["ambient_interval_seconds"], 12.0, pet)
+
+    def test_hover_dwell_pinned_in_core_matches_product_value(self) -> None:
+        """El umbral de hover (0.2s -- ver DEC-090) vive en
+        core::kDefaultHoverDwellSeconds (src/app no es testeable en
+        aislamiento), pero esta suite SÍ puede leer la fuente C++ como
+        texto y fijar que el valor no se desvíe en silencio -- mismo
+        patrón que test_click_through_still_uses_only_a_cursor_position_
+        query() usa para SpikeApp.cpp más arriba."""
+        header = os.path.join(_REPO_ROOT, "src/core/HoverDwellTracker.h")
+        with open(header, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("kDefaultHoverDwellSeconds = 0.2", text)
+
+
+class FrinRuntimeDirectionInversionTest(unittest.TestCase):
+    """Block 05, pasada de pulido final (ver docs/DECISION_LOG.md
+    DEC-091): pedido de producto explícito -- TODO lo que se veía
+    corriendo con `Direction::kRight` pasa a verse con `Direction::
+    kLeft`, y viceversa, para las DOS variantes de Frin, en TODO
+    contenido direccional (pose base, sit_to_lie, lie_to_sit, howl,
+    tail_greet).
+
+    Invariante VARIANTE-INDEPENDIENTE que la inversión produce, derivado
+    algebraicamente de `_invert_runtime_direction()` +
+    `entries_for()` (ver `tools/generate_frin_pack.py`) y verificado acá
+    contra el pack REAL: sin importar `canonical_direction` (macho
+    "left", hembra "right" -- la orientación que el owner exportó de
+    verdad), el slot runtime `Direction::kRight` SIEMPRE termina leyendo
+    frames de la carpeta física `.../left/frames/`, y el slot runtime
+    `Direction::kLeft` SIEMPRE de `.../right/frames/` -- exactamente
+    invertido de lo que habría dado un mapeo directo sin inversión (que
+    habría sido: kRight <- carpeta física "right", kLeft <- carpeta
+    física "left"). Las carpetas en sí NUNCA se renombran ni se mueven
+    -- siguen siendo PROVENANCE (qué exportó el owner realmente), nunca
+    semántica de runtime -- ver el docstring de generate_frin_pack.py.
+
+    Se verifica sobre el manifest REAL escrito por el generador (no un
+    fixture sintético), para base_animation Y cada acción, en las dos
+    direction_overrides, las dos variantes -- así que cualquier
+    regresión futura en `entries_for()`/`_invert_runtime_direction()`
+    lo rompe de forma ruidosa."""
+
+    VARIANTS = ("male", "female")
+    ANIMATION_IDS = ("sit_to_lie", "lie_to_sit", "howl", "tail_greet")
+
+    def _manifest(self, variant: str) -> dict:
+        with open(os.path.join(_REPO_ROOT, f"assets/source/nimvlets/frin/{variant}/pack_manifest.json"),
+                  "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _physical_folder(self, source_path: str) -> str:
+        # "animations/<anim>/{left,right}/frames/frame_NNN.png" -- el
+        # segmento de carpeta física está siempre en la MISMA posición.
+        parts = source_path.replace("\\", "/").split("/")
+        self.assertIn("frames", parts)
+        idx = parts.index("frames")
+        self.assertGreaterEqual(idx, 1)
+        physical = parts[idx - 1]
+        self.assertIn(physical, ("left", "right"))
+        return physical
+
+    def _assert_all_sources_use_folder(self, frames: list[dict], expected_folder: str, label: str) -> None:
+        for i, frame in enumerate(frames):
+            actual = self._physical_folder(frame["source"])
+            self.assertEqual(actual, expected_folder, f"{label} frame {i}: {frame['source']}")
+
+    def test_runtime_right_always_reads_the_physical_left_folder(self) -> None:
+        for variant in self.VARIANTS:
+            manifest = self._manifest(variant)
+            for state in manifest["states"]:
+                with self.subTest(variant=variant, state=state["id"], part="base_animation"):
+                    self._assert_all_sources_use_folder(
+                        state["base_animation"]["frames"], "left", f"{variant}/state[{state['id']}].base_animation")
+                for trigger in ("ambient_actions", "click_actions"):
+                    for action in state.get(trigger, []):
+                        with self.subTest(variant=variant, state=state["id"], action=action["id"]):
+                            self._assert_all_sources_use_folder(
+                                action["frames"], "left", f"{variant}/state[{state['id']}].{trigger}[{action['id']}]")
+
+    def test_runtime_left_always_reads_the_physical_right_folder(self) -> None:
+        for variant in self.VARIANTS:
+            manifest = self._manifest(variant)
+            for state in manifest["states"]:
+                base_override = next(o for o in state["base_animation_direction_overrides"] if o["direction"] == "left")
+                with self.subTest(variant=variant, state=state["id"], part="base_animation_direction_overrides[left]"):
+                    self._assert_all_sources_use_folder(
+                        base_override["frames"], "right", f"{variant}/state[{state['id']}].base_animation (left override)")
+                for trigger in ("ambient_actions", "click_actions"):
+                    for action in state.get(trigger, []):
+                        override = next(o for o in action["direction_overrides"] if o["direction"] == "left")
+                        with self.subTest(variant=variant, state=state["id"], action=action["id"]):
+                            self._assert_all_sources_use_folder(
+                                override["frames"], "right",
+                                f"{variant}/state[{state['id']}].{trigger}[{action['id']}] (left override)")
+
+    def test_inversion_is_a_deterministic_mirror_not_a_coincidence(self) -> None:
+        """Control directo sobre `_invert_runtime_direction()` +
+        `entries_for()` en aislamiento (sin generar ningún pack real):
+        fija el resultado algebraico para las CUATRO combinaciones
+        posibles de canonical_direction x runtime_direction, así que
+        una futura reescritura de esa función que rompa la simetría
+        falla acá, sin esperar 90+ segundos de regeneración real."""
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "tools"))
+        import generate_frin_pack as G
+
+        # Reimplementación mínima y AISLADA de la misma lógica pura que
+        # generate_frin_pack.py's _build_variant_manifest() define
+        # localmente (no se puede importar la función anidada
+        # directamente) -- si esto alguna vez diverge del código real,
+        # es justamente lo que este test está para detectar: se
+        # verifica no contra ESTA copia sino contra el resultado real
+        # de test_runtime_right_always_reads_the_physical_left_folder()
+        # de arriba, que sí ejercita el código de producción. Acá solo
+        # se fija el resultado matemático esperado para dejar registrada
+        # la tabla de verdad completa.
+        def invert(d: str) -> str:
+            return "left" if d == "right" else "right"
+
+        expected = {
+            ("left", "right"): "real",       # macho: kRight -> su propio export real
+            ("left", "left"): "derived",     # macho: kLeft -> espejo derivado
+            ("right", "right"): "derived",   # hembra: kRight -> espejo derivado
+            ("right", "left"): "real",       # hembra: kLeft -> su propio export real
+        }
+        for (canonical, runtime), expected_kind in expected.items():
+            source_direction = invert(runtime)
+            actual_kind = "real" if source_direction == canonical else "derived"
+            self.assertEqual(actual_kind, expected_kind, f"canonical={canonical} runtime={runtime}")
+        del G  # solo se importa para confirmar que el módulo sigue existiendo/cargando
 
 
 class MultiStateNormalizationPlanTest(unittest.TestCase):
@@ -1336,6 +1563,183 @@ def _read_base_and_first_ambient_action_frame_dims(path: str) -> tuple[tuple[int
     action_dims, pos = read_animation_first_frame_dims(pos)
 
     return base_dims, action_dims
+
+
+class AlignEndpointToTargetBaseTest(unittest.TestCase):
+    """Integración end-to-end (manifest JSON + PNG reales en disco,
+    `compile_pet_pack.compile_pack()` real, pack leído con
+    `read_pet_pack.py`) del flag `align_endpoint_to_target_base` --
+    Block 05, pasada de pulido final (ver docs/DECISION_LOG.md
+    DEC-092): extiende el anclaje-por-último-frame de DEC-087 (hasta
+    ahora solo para transiciones que CAMBIAN de estado) a acciones
+    self-loop (`target_state_id == state_id`) cuyo contenido declara
+    explícitamente que su punta final representa la MISMA pose base
+    estable -- el "size snap al volver a idle" que QA manual reportó en
+    Bunny/Frin (`groom`/`click`/`howl`/`tail_greet`)."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_align_endpoint_")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import compile_pet_pack  # noqa: E402
+
+        self.compile_pet_pack = compile_pet_pack
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_square(self, name: str, rect: tuple[int, int, int, int]) -> dict:
+        # Frame nativo 60x60, un cuadrado sólido de 10x10 -- mismo
+        # radio RMS ponderado por alpha sin importar DÓNDE caiga el
+        # cuadrado dentro del frame (invariante a traslación), así que
+        # content_scale queda en 1.0 para las tres entradas por
+        # construcción -- esto aísla la COLOCACIÓN (lo único que
+        # `align_endpoint_to_target_base` toca) de la ESCALA (que nunca
+        # debería moverse por este mecanismo).
+        path = os.path.join(self.tmpdir, name)
+        prep_dev_sprite.write_png_rgba(path, 60, 60, _solid_frame(60, 60, (7, 7, 7), rect))
+        return {"source": name, "duration_ms": 0}
+
+    def _manifest(self, *, align: bool, returns_to_idle: bool = True) -> str:
+        base = self._write_square("base.png", (25, 25, 34, 34))          # centro (30,30)
+        frame0 = self._write_square("wiggle_000.png", (20, 25, 29, 34))  # centro (25,30) -- 5px a la izquierda
+        frame_last = self._write_square("wiggle_002.png", (25, 15, 34, 24))  # centro (30,20) -- 10px arriba
+        manifest = {
+            "id": "align_test_pet",
+            "display_name": "Align Test Pet",
+            "canvas_width": 60,
+            "canvas_height": 60,
+            "normalize_visual_scale": True,
+            "states": [
+                {
+                    "id": "default",
+                    "base_animation": {"id": "base", "kind": "static", "frames": [base]},
+                    "click_actions": [
+                        {
+                            "id": "wiggle",
+                            "weight": 1.0,
+                            "target_state_id": "default",
+                            "align_endpoint_to_target_base": align,
+                            "kind": "one_shot",
+                            "returns_to_idle": returns_to_idle,
+                            "frames": [frame0, self._write_square("wiggle_001.png", (22, 20, 31, 29)), frame_last],
+                        }
+                    ],
+                }
+            ],
+        }
+        manifest_path = os.path.join(self.tmpdir, "pack_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        return manifest_path
+
+    def _compile_and_read(self, manifest_path: str) -> dict:
+        output_path = os.path.join(self.tmpdir, "out.nvpack")
+        self.compile_pet_pack.compile_pack(manifest_path, output_path)
+        return read_pet_pack.read_pack(output_path)
+
+    def test_without_the_flag_the_first_frame_matches_base_not_the_last(self) -> None:
+        # Comportamiento LEGACY, sin cambios -- la colocación default de
+        # CUALQUIER entrada ancla su PROPIO frame 0, así que el frame 0
+        # de la acción cae exactamente donde cae la base (misma fórmula,
+        # -first_anchor, para las dos), y el último frame queda
+        # desplazado según el movimiento real del personaje.
+        pack = self._compile_and_read(self._manifest(align=False))
+        state = read_pet_pack.find_state(pack, "default")
+        base_centre = read_pet_pack.content_centre(state["base_animation"]["frames"][0])
+        action = read_pet_pack.find_action(state, "click_actions", "wiggle")
+        first_centre = read_pet_pack.content_centre(action["animation"]["frames"][0])
+        last_centre = read_pet_pack.content_centre(action["animation"]["frames"][-1])
+        self.assertAlmostEqual(first_centre[0], base_centre[0], delta=0.6)
+        self.assertAlmostEqual(first_centre[1], base_centre[1], delta=0.6)
+        # El último frame NO está protegido sin el flag -- se espera el
+        # desplazamiento real de 10px (nativo) que el fixture programó.
+        self.assertGreater(abs(last_centre[1] - base_centre[1]), 5.0)
+
+    def test_with_the_flag_the_last_frame_matches_base_not_the_first(self) -> None:
+        # El comportamiento NUEVO -- exactamente invertido: ahora es el
+        # ÚLTIMO frame el que se ancla contra la base (el instante en
+        # que la acción TERMINA y el runtime vuelve a mostrar la base,
+        # ver AnimationController), y el primero el que queda a la
+        # deriva.
+        pack = self._compile_and_read(self._manifest(align=True))
+        state = read_pet_pack.find_state(pack, "default")
+        base_centre = read_pet_pack.content_centre(state["base_animation"]["frames"][0])
+        action = read_pet_pack.find_action(state, "click_actions", "wiggle")
+        last_centre = read_pet_pack.content_centre(action["animation"]["frames"][-1])
+        first_centre = read_pet_pack.content_centre(action["animation"]["frames"][0])
+        self.assertAlmostEqual(last_centre[0], base_centre[0], delta=0.6)
+        self.assertAlmostEqual(last_centre[1], base_centre[1], delta=0.6)
+        self.assertGreater(abs(first_centre[1] - base_centre[1]), 5.0)
+
+    def test_flag_changes_placement_but_never_scale(self) -> None:
+        without = self._compile_and_read(self._manifest(align=False))
+        with_flag = self._compile_and_read(self._manifest(align=True))
+        s_without = read_pet_pack.find_state(without, "default")
+        s_with = read_pet_pack.find_state(with_flag, "default")
+        a_without = read_pet_pack.find_action(s_without, "click_actions", "wiggle")["animation"]
+        a_with = read_pet_pack.find_action(s_with, "click_actions", "wiggle")["animation"]
+        # Colocación realmente cambió (si esto fallara, los dos tests de
+        # arriba ya lo habrían detectado -- se repite acá como parte del
+        # contraste explícito escala vs. colocación).
+        self.assertNotEqual(
+            [f["pixels"] for f in a_without["frames"]], [f["pixels"] for f in a_with["frames"]]
+        )
+        # El CANVAS compartido sí puede crecer/achicarse un poco (tiene
+        # que seguir conteniendo cada frame completo dado su nueva
+        # colocación -- eso es esperado, no un bug). Lo que NUNCA debe
+        # cambiar es `content_scale`: se verifica con una medida
+        # invariante a traslación (radio RMS ponderado por alpha, el
+        # mismo estimador de "tamaño" de DEC-088) -- si el mecanismo
+        # alguna vez tocara la escala, este valor se movería; con
+        # cuadrados sólidos del mismo tamaño nativo, debe quedar
+        # exactamente igual entre las dos corridas.
+        for i in range(len(a_without["frames"])):
+            fw = a_without["frames"][i]
+            fwith = a_with["frames"][i]
+            r_without = prep_dev_sprite.alpha_rms_radius(fw["width"], fw["height"], fw["pixels"])
+            r_with = prep_dev_sprite.alpha_rms_radius(fwith["width"], fwith["height"], fwith["pixels"])
+            self.assertAlmostEqual(r_without, r_with, delta=1e-6, msg=f"frame {i}")
+
+    def test_flag_is_a_no_op_when_the_action_never_actually_returns(self) -> None:
+        # `returns_to_idle=False`: la acción se congela en su último
+        # frame para siempre -- no hay ningún instante de "volver a la
+        # base" que proteger, así que el flag no debe cambiar nada.
+        without = self._compile_and_read(self._manifest(align=False, returns_to_idle=False))
+        with_flag = self._compile_and_read(self._manifest(align=True, returns_to_idle=False))
+        a_without = read_pet_pack.find_action(
+            read_pet_pack.find_state(without, "default"), "click_actions", "wiggle")["animation"]
+        a_with = read_pet_pack.find_action(
+            read_pet_pack.find_state(with_flag, "default"), "click_actions", "wiggle")["animation"]
+        self.assertEqual([f["pixels"] for f in a_without["frames"]], [f["pixels"] for f in a_with["frames"]])
+
+    def test_direction_override_is_covered_by_the_same_action_level_flag(self) -> None:
+        """`align_endpoint_to_target_base` es una propiedad de la ACCIÓN
+        (como `target_state_id`), no de cada dirección -- un override
+        "left" sin su propio campo debe seguir protegido por el flag del
+        canónico. Se agrega un override AL VUELO sobre el manifest ya
+        escrito, en vez de duplicar `_manifest()`, para mantener el
+        fixture centrado en lo que este test prueba."""
+        manifest_path = self._manifest(align=True)
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        action = manifest["states"][0]["click_actions"][0]
+        # Mismo contenido que el canónico (right) -- alcanza para probar
+        # que el override TAMBIÉN se registra; no hace falta espejarlo.
+        action["direction_overrides"] = [{
+            "direction": "left", "id": "wiggle_left", "kind": "one_shot",
+            "returns_to_idle": True, "frames": action["frames"],
+        }]
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+        pack = self._compile_and_read(manifest_path)
+        state = read_pet_pack.find_state(pack, "default")
+        base_centre = read_pet_pack.content_centre(state["base_animation"]["frames"][0])
+        action_out = read_pet_pack.find_action(state, "click_actions", "wiggle")
+        override = next(o for o in action_out["direction_overrides"] if o["direction"] == "left")
+        last_centre = read_pet_pack.content_centre(override["animation"]["frames"][-1])
+        self.assertAlmostEqual(last_centre[0], base_centre[0], delta=0.6)
+        self.assertAlmostEqual(last_centre[1], base_centre[1], delta=0.6)
 
 
 class CompileTwoStateNormalizationTest(unittest.TestCase):

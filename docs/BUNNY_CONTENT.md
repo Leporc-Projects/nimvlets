@@ -591,3 +591,67 @@ contenido, no como deuda.
 
 El pack de Nidir, regenerado con la métrica nueva, queda
 **byte-idéntico** — el control dorado no se movió ni un bit.
+
+## 17. Pasada de pulido final (Block 05, sexta pasada): la punta de REGRESO a la base, medida y corregida (`groom`/`click`)
+
+§16 midió el desvío de TAMAÑO del frame 0 de cada acción contra la
+base, y encontró que ya estaba bien (métrica ponderada por alpha,
+DEC-088). QA manual siguió reportando algo relacionado pero distinto:
+
+> "the character feels very slightly wider/larger while animation
+> content is active, so returning to the static base can reveal a tiny
+> apparent size snap."
+
+La clave está en "returning" -- no es el ARRANQUE de la acción (§16 ya
+lo cubre), es la PUNTA DE REGRESO: el último frame mostrado antes de
+que el runtime vuelva a mostrar la base (`AnimationController` termina
+el one-shot y entra a `Base` mode).
+
+Medido (centroide de alpha, último frame vs. base, packs compilados
+reales, ANTES de tocar nada):
+
+| acción | delta LAST-vs-BASE |
+|---|---|
+| `idle_breathing` | 0.87-0.88px |
+| `groom` | 0.85-1.82px (asimétrico entre direcciones) |
+| `click` | 0.84-0.85px |
+
+Ninguna transición que CAMBIA de estado protegía esto porque Bunny no
+tiene estados reales -- `groom`/`click`/`idle_breathing` son las tres
+self-loop (`target_state_id == "default"`, el propio estado), y el
+mecanismo de anclaje-por-último-frame de `docs/DECISION_LOG.md`
+DEC-087 solo cubría transiciones que cambian de estado hasta esta
+pasada.
+
+**Corrección** (ver DEC-092): nuevo campo de contenido opcional
+`align_endpoint_to_target_base: true`, activado en `groom` y `click`
+(y, por consistencia de intención de contenido, también en
+`idle_breathing` -- aunque ahí es un no-op observable: su frame 0 ya ES
+el mismo archivo que la base, así que el containment de DEC-087 ya la
+protegía exacta en la punta de ENTRADA; el flag no cambia un solo byte
+compilado para esa acción específica, verificado). El punto de anclaje
+en sí es el centroide ponderado por alpha, no el centro de bounding
+box -- ver DEC-093 para la evidencia de por qué (medido en `groom`:
+anclar por bbox alineaba el CONTORNO casi perfecto mientras el centro
+de MASA real se disparaba a ~4px, peor que sin corregir nada).
+
+Resultado tras recompilar:
+
+| acción | antes | después |
+|---|---|---|
+| `idle_breathing` | 0.87-0.88px | 0.87-0.88px *(sin cambio -- no-op esperado, ver arriba)* |
+| `groom` (derecha) | 0.88px | 0.88px *(sin cambio -- coincidencia de redondeo)* |
+| `groom` (izquierda) | 1.82px | **0.19px** |
+| `click` (derecha) | 0.84px | **0.67px** |
+| `click` (izquierda) | 0.85px | **0.65px** |
+
+Ningún caso empeora. El pack de Nidir, regenerado con el mismo código,
+queda **byte-idéntico** (sha256 fijado en
+`tools/test_asset_pipeline.py`'s `NidirGoldenControlTest`) -- el
+mecanismo nuevo es 100% opt-in por-acción y Nidir nunca activa el flag.
+
+### Tests
+
+`tools/test_asset_pipeline.py`'s `CompiledSelfLoopEndpointContinuityTest`
+(contra el pack real, `groom`/`click`) y `AlignEndpointToTargetBaseTest`
+(el mecanismo genérico, compartido con Frin, contra un fixture propio).

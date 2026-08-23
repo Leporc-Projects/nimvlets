@@ -300,6 +300,24 @@ def main() -> int:
                         "id": "idle_breathing",
                         "weight": AMBIENT_ACTION_WEIGHTS[0],
                         "target_state_id": "default",
+                        # `align_endpoint_to_target_base` (pasada de
+                        # pulido final -- ver DEC-092 en
+                        # docs/DECISION_LOG.md): esta acción se propone
+                        # que TERMINE mostrando la misma pose que la
+                        # base, así que se declara acá igual que en
+                        # groom/click de abajo, por consistencia de
+                        # contenido -- aunque en la práctica es un
+                        # no-op observable para idle_breathing: su
+                        # frame 0 ya ES literalmente el archivo de la
+                        # base (compartido), así que el mecanismo de
+                        # containment de compute_frame_normalization_
+                        # plan() ya la alinea EXACTO en la punta de
+                        # entrada sin necesitar este flag -- ver el
+                        # comentario de `add_actions()` en
+                        # tools/compile_pet_pack.py para la regla que
+                        # evita el registro redundante cuando ya hay un
+                        # archivo compartido.
+                        "align_endpoint_to_target_base": True,
                         "kind": "one_shot",
                         "fps": idle_playback_fps,
                         "returns_to_idle": True,
@@ -319,6 +337,23 @@ def main() -> int:
                         "id": "groom",
                         "weight": AMBIENT_ACTION_WEIGHTS[1],
                         "target_state_id": "default",
+                        # `align_endpoint_to_target_base` (pasada de
+                        # pulido final -- ver DEC-092): groom vive en su
+                        # propio directorio de export, sin ningún
+                        # archivo compartido con la base -- SIN este
+                        # flag, su colocación se ancla por su PROPIO
+                        # frame 0 (delta contra la base ~0.3% RMS,
+                        # 0.85px de centroide, aceptable pero medible);
+                        # CON el flag, se ancla por su ÚLTIMO frame
+                        # contra la base -- exactamente el instante en
+                        # que la animación TERMINA y el runtime vuelve a
+                        # mostrar la base (mode Base), que es
+                        # precisamente la transición que QA manual
+                        # reportó como perceptible ("returning to the
+                        # static base can reveal a tiny apparent size
+                        # snap"). Medido antes/después: ver el informe
+                        # de este bloque.
+                        "align_endpoint_to_target_base": True,
                         "kind": "one_shot",
                         "fps": groom_playback_fps,
                         "returns_to_idle": True,
@@ -346,6 +381,9 @@ def main() -> int:
                         "id": "click",
                         "weight": 1.0,
                         "target_state_id": "default",
+                        # Ver el comentario de "groom" arriba -- misma
+                        # razón, mismo mecanismo (DEC-092).
+                        "align_endpoint_to_target_base": True,
                         "kind": "one_shot",
                         "fps": click_playback_fps,
                         "returns_to_idle": True,

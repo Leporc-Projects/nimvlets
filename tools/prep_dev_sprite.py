@@ -428,6 +428,39 @@ def compose_on_canvas(
     return bytes(out)
 
 
+def alpha_weighted_centroid(width: int, height: int, pixels: bytes) -> tuple[float, float] | None:
+    """Centroide (cx, cy) ponderado por alpha de un frame RGBA8 --
+    "dónde está el CENTRO DE MASA de lo visible", a diferencia del
+    centro geométrico de su bounding box (que solo mira los pixeles
+    EXTREMOS). Extraído de `alpha_rms_radius()` (Block 05, pasada de
+    estabilización) para reusarlo también en el registro de PUNTOS DE
+    ANCLAJE de `compute_frame_normalization_plan()` (Block 05, pasada
+    de pulido final -- ver docs/DECISION_LOG.md DEC-093 para la
+    evidencia real de por qué el centro de bbox no alcanza ahí).
+
+    Devuelve None para un frame completamente transparente -- el
+    llamador decide qué hacer (nunca se inventa un centro para
+    contenido que no existe)."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(
+            f"alpha_weighted_centroid: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8"
+        )
+    total = 0
+    sum_x = 0
+    sum_y = 0
+    for y in range(height):
+        row = y * width * 4
+        for x in range(width):
+            a = pixels[row + x * 4 + 3]
+            if a:
+                total += a
+                sum_x += x * a
+                sum_y += y * a
+    if total == 0:
+        return None
+    return sum_x / total, sum_y / total
+
+
 def alpha_rms_radius(width: int, height: int, pixels: bytes) -> float:
     """Radio RMS ponderado por alpha alrededor del centroide de alpha —
     el estimador de "qué tan grande es este personaje" que usa
@@ -456,27 +489,12 @@ def alpha_rms_radius(width: int, height: int, pixels: bytes) -> float:
 
     Devuelve 0.0 para un frame completamente transparente — el llamador
     ya trata ese caso (nunca se divide por él sin chequear)."""
-    if len(pixels) != width * height * 4:
-        raise ValueError(
-            f"alpha_rms_radius: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8"
-        )
+    centroid = alpha_weighted_centroid(width, height, pixels)
+    if centroid is None:
+        return 0.0
+    cx, cy = centroid
 
     total = 0
-    sum_x = 0
-    sum_y = 0
-    for y in range(height):
-        row = y * width * 4
-        for x in range(width):
-            a = pixels[row + x * 4 + 3]
-            if a:
-                total += a
-                sum_x += x * a
-                sum_y += y * a
-    if total == 0:
-        return 0.0
-
-    cx = sum_x / total
-    cy = sum_y / total
     variance = 0.0
     for y in range(height):
         row = y * width * 4
@@ -484,6 +502,7 @@ def alpha_rms_radius(width: int, height: int, pixels: bytes) -> float:
         for x in range(width):
             a = pixels[row + x * 4 + 3]
             if a:
+                total += a
                 variance += a * ((x - cx) ** 2 + dy2)
     return math.sqrt(variance / total)
 
@@ -600,6 +619,24 @@ def compute_frame_normalization_plan(
     - offset_x/offset_y: dónde colocar el frame (post-content_scale,
       sin recortar) dentro de ese canvas de trabajo compartido, para
       que su ancla de contenido caiga exactamente en el centro.
+
+    `transition_target_entry`/`last_frames` (opcionales, Block 05 --
+    ver DEC-087 y, para su extensión a self-loop + el cambio de punto
+    de anclaje, DEC-093): cuando una entrada tiene un destino
+    registrado (una transición que cambia de estado, o una acción
+    self-loop con `align_endpoint_to_target_base` en el manifest --
+    ver tools/compile_pet_pack.py), su colocación se ancla por su
+    ÚLTIMO frame contra la pose base de destino en vez de por su propio
+    frame 0 -- salvo que ya esté vinculada por archivo compartido
+    (containment, que es exacto por construcción y tiene prioridad).
+    Ese anclaje usa el CENTROIDE PONDERADO POR ALPHA de cada punta
+    (`registration_point()`, no `anchor_of()`) -- medido en este bloque
+    que anclar por centro de bounding box puede alinear los pixeles
+    EXTREMOS perfectamente mientras el centro de MASA real queda peor
+    que sin ningún anclaje, para una pose con margen asimétrico. Fuera
+    de esta rama (colocación DEFAULT de cualquier entrada sin destino
+    registrado, y la posición del propio destino) sigue siendo
+    exclusivamente centro-de-bbox, sin cambios.
 
     Nunca recorta contenido -- solo agrega margen transparente
     (compose_on_canvas() nunca resamplea). Sin ninguna rama específica
@@ -723,6 +760,51 @@ def compute_frame_normalization_plan(
         minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
         return ((minx + maxx + 1) / 2.0 * scale, (miny + maxy + 1) / 2.0 * scale)
 
+    def registration_point(entry_key: str, frame: tuple[int, int, bytes]) -> tuple[float, float]:
+        """Punto de anclaje para REGISTRAR una transición contra su
+        destino (usado únicamente dentro de la rama de `place()` de más
+        abajo) -- el centroide ponderado por alpha ("centro de masa" de
+        lo visible), NO el centro geométrico del bounding box que usa
+        `anchor_of()`/`first_anchor` para la colocación DEFAULT de cada
+        entrada.
+
+        Por qué un punto de registro distinto (Block 05, pasada de
+        pulido final -- ver docs/DECISION_LOG.md DEC-093, evidencia
+        medida, no supuesta): al extender el mecanismo de anclaje por
+        último-frame de DEC-087 a acciones self-loop (howl/tail_greet
+        de Frin, groom/click de Bunny -- ver `align_endpoint_to_target_
+        base`), registrar por CENTRO DE BBOX produjo resultados
+        object­ivamente peores en el centroide de alpha real: medido en
+        `groom` de Bunny, el centro de bbox del último frame quedó a
+        <1px del de la base (excelente por ESA métrica), pero su
+        centroide de masa REAL se disparó a ~4px de distancia (peor que
+        antes de la corrección) -- el bbox de ese frame concreto tiene
+        margen asimétrico (una pose con la postura del cuerpo
+        desplazada dentro de un contorno de ancho similar), así que
+        alinear sus DOS PIXELES EXTREMOS no alinea dónde está realmente
+        el peso visual del personaje. `alpha_rms_radius()` (DEC-088) ya
+        había establecido que la MEDIDA correcta de "tamaño" es
+        ponderada por alpha, no por bbox -- esto aplica la misma lógica
+        a la COLOCACIÓN: si el peso es lo que define el tamaño
+        percibido, el centro de masa es lo que define la posición
+        percibida.
+
+        Cae a `anchor_of()` (bbox-center) solo si el frame es
+        completamente transparente (`alpha_weighted_centroid()`
+        devuelve None) -- un caso degenerado que nunca debería
+        alcanzar contenido real, conservado por robustez, no porque se
+        espere ejercitarlo."""
+        scale = scale_by_group[groups[entry_key]]
+        w, h, pixels = frame
+        centroid = alpha_weighted_centroid(w, h, pixels)
+        if centroid is None:
+            return anchor_of(entry_key, frame)
+        cx, cy = centroid
+        # +0.5: mismo convenio de "índice de pixel -> centro de pixel"
+        # que ya usa anchor_of() (su "+1" dividido por 2) -- un pixel
+        # con índice x cubre [x, x+1), así que su centro es x+0.5.
+        return (cx + 0.5) * scale, (cy + 0.5) * scale
+
     first_anchor: dict[str, tuple[float, float]] = {}
     scaled_size: dict[str, tuple[float, float]] = {}
     for entry_key, (w, h, pixels) in entries.items():
@@ -790,8 +872,9 @@ def compute_frame_normalization_plan(
             # disimula. Ver DEC-087 y docs/FRIN_CONTENT.md para la
             # medición de ambas puntas.
             tx, ty = place(target_entry)
-            tax, tay = first_anchor[target_entry]
-            lax, lay = anchor_of(entry_key, last)
+            target_first_w, target_first_h, target_first_px = entries[target_entry]
+            tax, tay = registration_point(target_entry, (target_first_w, target_first_h, target_first_px))
+            lax, lay = registration_point(entry_key, last)
             pos[entry_key] = (tx + tax - lax, ty + tay - lay)
             return pos[entry_key]
 

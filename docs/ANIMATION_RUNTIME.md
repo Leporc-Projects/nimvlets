@@ -723,3 +723,63 @@ sobre los PNG nativos.
 `CompiledFrinEndpointContinuityTest` (los packs REALES que se envían,
 decodificados con `tools/read_pet_pack.py`, ambas variantes × ambas
 direcciones).
+
+## 13. Extensión a acciones self-loop: `align_endpoint_to_target_base` (Block 05, pasada de pulido final)
+
+§12 arriba resolvió la continuidad de una transición que CAMBIA de
+estado. QA manual encontró el mismo síntoma (un salto pequeño, no de
+50+px sino de <2px) en acciones **self-loop** — `target_state_id ==
+state_id`, el caso normal de click/ambient de Bunny y del click
+sentado de Frin — donde no había NINGÚN mecanismo protegiendo la punta
+de regreso a la base: la colocación se anclaba siempre por el frame 0
+de la propia acción, dejando que el personaje derivara libremente
+hacia donde la animación real lo llevara.
+
+**Extensión del invariante de §12**, ahora genérico sobre CUALQUIER
+acción que declare que su punta final representa la misma pose base
+estable — no solo las que cambian de estado:
+
+```
+"align_endpoint_to_target_base": true   # WeightedActionManifest, opcional, default false
+```
+
+Ver `tools/compile_pet_pack.py`'s docstring de módulo para el contrato
+completo. Cuando está en `true` (y `returns_to_idle` también, el
+default) la acción se registra para el MISMO mecanismo de
+anclaje-por-último-frame que §12 describe, aunque `target_state_id`
+sea el mismo estado en el que vive. Es un campo de CONTENIDO — cada
+generador (`tools/generate_bunny_pack.py`, `tools/generate_frin_pack.py`)
+decide qué acciones lo activan según SU PROPIA evidencia medida; Nidir
+nunca lo usa, así que su pack es estructuralmente inmune a este
+mecanismo (no solo "no le tocó cambiar" — el código toma exactamente
+el mismo camino que antes de esta pasada). Ver `docs/DECISION_LOG.md`
+DEC-092 para la evidencia completa, y DEC-093 para un refinamiento
+relacionado: el punto de anclaje de ESTA rama pasó de centro de
+bounding box a **centroide ponderado por alpha**
+(`prep_dev_sprite.registration_point()`), porque medir por los dos
+píxeles extremos del contorno puede alinear la SILUETA perfectamente
+mientras el CENTRO DE MASA real queda peor — evidencia concreta en ese
+DEC. Esto no cambia nada fuera de esta rama: la colocación default de
+cualquier entrada (el 100% de Nidir, y la inmensa mayoría de cualquier
+otro pet) sigue anclada por bbox, sin cambios.
+
+**Tests:** `tools/test_asset_pipeline.py`'s `AlignEndpointToTargetBaseTest`
+(integración compile_pack() real, fixture propio) y
+`CompiledSelfLoopEndpointContinuityTest` (contra los packs reales que
+se envían, Bunny `groom`/`click`, Frin `howl`/`tail_greet` macho y
+hembra).
+
+## 14. Inversión de dirección runtime, como concepto genérico del content pipeline (Block 05, pasada de pulido final)
+
+Frin es, a la fecha de este bloque, el único pet donde `Direction::kRight`/
+`Direction::kLeft` en tiempo de ejecución NO coinciden con la
+orientación de export real del owner (ver `docs/DECISION_LOG.md`
+DEC-091 y `docs/FRIN_CONTENT.md` §9) — un pedido de producto explícito,
+implementado enteramente en la capa de generación de contenido
+(`tools/generate_frin_pack.py`'s `entries_for()`), nunca en el motor:
+`content::AnimationController`/`content::ResolveAnimation()` no saben
+ni necesitan saber que esto pasó — reciben `Direction::kRight`/`kLeft`
+exactamente como siempre, y el pack compilado ya trae los frames
+correctos en el slot correcto. Un pet futuro que necesite lo mismo (o
+lo contrario) lo resuelve en SU propio generador, sin tocar
+`src/content/` ni `src/app/`.

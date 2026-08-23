@@ -200,6 +200,39 @@ def content_centre(frame: dict) -> tuple[float, float] | None:
     return ((min_x + max_x + 1) / 2.0, (min_y + max_y + 1) / 2.0)
 
 
+def content_alpha_centroid(frame: dict) -> tuple[float, float] | None:
+    """Centroide ("centro de masa") ponderado por alpha de un frame --
+    a diferencia de `content_centre()` (centro geométrico del bounding
+    box, decidido por los DOS pixeles más extremos), este integra TODOS
+    los pixeles con su alpha como peso.
+
+    Es la misma noción que `prep_dev_sprite.alpha_weighted_centroid()`
+    (Block 05, pasada de pulido final -- ver docs/DECISION_LOG.md
+    DEC-093), reimplementada acá en vez de importada para que este
+    módulo se mantenga sin dependencias de terceros NI de otras partes
+    del pipeline -- ver el docstring del módulo. Ambas deben coincidir
+    exactamente para el mismo buffer de pixeles; si alguna vez
+    divergen, es un bug en una de las dos, no una discrepancia de
+    diseño esperada.
+
+    Devuelve None para un frame completamente transparente."""
+    width, height, pixels = frame["width"], frame["height"], frame["pixels"]
+    total = 0
+    sum_x = 0
+    sum_y = 0
+    for y in range(height):
+        row = y * width * 4
+        for x in range(width):
+            a = pixels[row + x * 4 + 3]
+            if a:
+                total += a
+                sum_x += x * a
+                sum_y += y * a
+    if total == 0:
+        return None
+    return sum_x / total, sum_y / total
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
