@@ -9,6 +9,7 @@
 #include "FrameSchedulerTest.h"
 #include "HoverDwellTrackerTest.h"
 #include "LinuxBackendPolicyTest.h"
+#include "RendererPolicyTest.h"
 #include "PersistenceIntegrationTest.h"
 #include "PersistenceSchedulerTest.h"
 #include "PetCatalogLoaderTest.h"
@@ -39,6 +40,7 @@ int main() {
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
+    nimvlets::tests::RegisterRendererPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 

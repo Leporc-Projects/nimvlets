@@ -1,12 +1,19 @@
 # Librería pura, siempre compilada en cualquier plataforma (a
 # diferencia de src/platform/macos, src/platform/windows y
 # src/platform/linux, que el CMakeLists.txt raíz agrega solo en su OS
-# correspondiente) -- ver LinuxBackendPolicy.h para por qué esta lógica
-# necesita vivir afuera de src/platform/linux/: así tests/ puede
-# ejercitarla en cualquier host, incluido este dev machine macOS.
+# correspondiente) -- ver LinuxBackendPolicy.h/RendererPolicy.h para
+# por qué esta lógica necesita vivir afuera de un directorio por-OS:
+# así tests/ puede ejercitarla en cualquier host, incluido este dev
+# machine macOS. RendererPolicy.h además declara CurrentRendererPlatform(),
+# implementada UNA vez por cada src/platform/<os>/TransparentWindowSupport.*
+# -- esta librería solo provee su declaración/la parte pura, no esos
+# tres cuerpos (ver el CMakeLists.txt de cada adapter, que ya linkea
+# esta librería para poder definirla).
 add_library(nimvlets_platform_policy STATIC
   LinuxBackendPolicy.h
   LinuxBackendPolicy.cpp
+  RendererPolicy.h
+  RendererPolicy.cpp
 )
 
 target_include_directories(nimvlets_platform_policy PUBLIC ${CMAKE_SOURCE_DIR}/src)

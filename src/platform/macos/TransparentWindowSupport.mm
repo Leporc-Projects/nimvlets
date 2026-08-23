@@ -1,4 +1,5 @@
 #include "platform/TransparentWindowSupport.h"
+#include "platform/RendererPolicy.h"
 
 #include <SDL3/SDL.h>
 
@@ -89,16 +90,44 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return nsWindow.ignoresMouseEvents == YES;
 }
 
-bool NativeShapeHitTestIsRenderSafe() {
-    return true;
+bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
+    // Hallazgo de Block 05 (pasada de resolución de renderer, ver
+    // DEC-083 y la sección de diagnóstico del informe final): un
+    // programa SDL3 standalone mínimo (~50 líneas, sin ningún código de
+    // esta app) aisló que UNA SOLA llamada a SDL_SetWindowShape()
+    // corrompe permanentemente todo SDL_RenderPresent() posterior bajo
+    // el driver "software" en esta máquina -- el frame se vuelve un
+    // silueta blanca opaca sólida, para siempre, sin importar el orden
+    // relativo a RenderFrame() ni si se llama una sola vez o en cada
+    // frame. Un segundo repro standalone descartó que sea el mecanismo
+    // de Cocoa_UpdateWindowShape() descrito arriba (togglear
+    // NSWindow.ignoresMouseEvents directamente -- el mismo mecanismo
+    // que usa SetWindowClickThrough() más abajo -- no corrompió nada en
+    // 4 ciclos consecutivos contra el mismo renderer): la ruptura vive
+    // en la parte de SDL_video.c genérica de SDL_SetWindowShape()
+    // (conversión/almacenamiento de la superficie de forma) que corre
+    // ANTES de llegar a Cocoa, no en nada que este archivo controle o
+    // pueda evitar reordenando llamadas.
+    return !usingSoftwareRenderer;
 }
 
-bool ClickThroughPollingIsMeaningful() {
-    // Nunca se consulta en la práctica -- NativeShapeHitTestIsRenderSafe()
+bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
+    // Con el driver acelerado (el histórico), NativeShapeHitTestIsRenderSafe()
     // ya es true en macOS, así que SpikeApp jamás entra a la rama de
-    // polling. Retorna false por documentación/consistencia, no
-    // porque se haya medido nada acá.
-    return false;
+    // polling -- false por documentación/consistencia, no porque se
+    // haya medido nada acá.
+    //
+    // Con `usingSoftwareRenderer` true (DEC-083), en cambio, SÍ se
+    // consulta de verdad: el hallazgo de arriba obliga a SpikeApp a
+    // caer al fallback poll-driven (SetWindowClickThrough(), confirmado
+    // seguro contra el software renderer en el mismo repro standalone)
+    // para no perder el click-through por completo.
+    return usingSoftwareRenderer;
+}
+
+
+RendererPlatform CurrentRendererPlatform() {
+    return RendererPlatform::kMacOS;
 }
 
 }  // namespace nimvlets::platform

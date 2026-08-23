@@ -6,5 +6,5 @@ target_include_directories(nimvlets_platform_macos PUBLIC ${CMAKE_SOURCE_DIR}/sr
 
 target_link_libraries(nimvlets_platform_macos
   PUBLIC nimvlets_core SDL3::SDL3
-  PRIVATE nimvlets_warnings "-framework AppKit"
+  PRIVATE nimvlets_platform_policy nimvlets_warnings "-framework AppKit"
 )

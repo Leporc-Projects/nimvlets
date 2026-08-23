@@ -1,5 +1,7 @@
 #include "platform/TransparentWindowSupport.h"
 
+#include "platform/RendererPolicy.h"
+
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -69,23 +71,33 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return (after & WS_EX_TRANSPARENT) != 0;
 }
 
-bool NativeShapeHitTestIsRenderSafe() {
+bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
     // Conservative "no" — not verified in this block (no Windows
     // machine available). See this function's doc comment in
     // platform/TransparentWindowSupport.h for the community reports
     // (libsdl-org/SDL#11199) this default is based on. SetWindowClickThrough()
     // above is the mechanism src/app actually uses as a result.
+    //
+    // `usingSoftwareRenderer` doesn't change this answer: it's already
+    // false unconditionally, and platform::RendererPolicy never forces
+    // "software" on Windows outside of the NIMVLETS_DEV_RENDERER_DRIVER
+    // override (see Block 05/DEC-083) — the parameter exists only to
+    // keep this function's signature the same across all three
+    // platform adapters.
+    (void)usingSoftwareRenderer;
     return false;
 }
 
-bool ClickThroughPollingIsMeaningful() {
+bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
     // True: SetWindowClickThrough() above (WS_EX_TRANSPARENT) is a
     // real, working mechanism here — this is the platform this
     // fallback was built for (see its doc comment in
     // platform/TransparentWindowSupport.h). Added in Block 04.1 when
     // Linux/Wayland needed a way to say "false" for the same question
     // (see src/platform/linux/TransparentWindowSupport.cpp) without
-    // changing Windows' own behavior at all.
+    // changing Windows' own behavior at all. Independent of
+    // `usingSoftwareRenderer` for the same reason as above.
+    (void)usingSoftwareRenderer;
     return true;
 }
 
@@ -97,9 +109,17 @@ bool ClickThroughPollingIsMeaningful() {
 // invariant is ever broken.
 void ConfigureCompanionWindow(SDL_Window*) {}
 bool SetWindowClickThrough(SDL_Window*, bool clickThrough) { return clickThrough; }
-bool NativeShapeHitTestIsRenderSafe() { return false; }
-bool ClickThroughPollingIsMeaningful() { return false; }
+bool NativeShapeHitTestIsRenderSafe(bool) { return false; }
+bool ClickThroughPollingIsMeaningful(bool) { return false; }
 
 #endif
+
+// Único, fuera del #if/#else de arriba -- el valor no depende de cuál
+// rama compiló (esta traducción unit SOLO se agrega al build en
+// Windows, ver el comentario junto al #else), así que no necesita
+// duplicarse en las dos ramas.
+RendererPlatform CurrentRendererPlatform() {
+    return RendererPlatform::kWindows;
+}
 
 }  // namespace nimvlets::platform

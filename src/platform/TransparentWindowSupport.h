@@ -46,14 +46,18 @@ void ConfigureCompanionWindow(SDL_Window* window);
 // instrumentation).
 bool SetWindowClickThrough(SDL_Window* window, bool clickThrough);
 
-// True if, on this platform, SDL_SetWindowShape() only affects native
-// hit-testing (which pixels ignore the mouse) and does NOT touch or
-// replace the window's actually-rendered pixel content — i.e. it's safe
-// to use as the primary click-through mechanism alongside our own
-// SDL_Renderer-drawn content (src/graphics/BlobRenderer).
+// True if, on this platform (and with the ACTIVE renderer driver —
+// `usingSoftwareRenderer` says whether that's SDL's "software" driver,
+// see platform::RendererPolicy/DEC-083), SDL_SetWindowShape() only
+// affects native hit-testing (which pixels ignore the mouse) and does
+// NOT touch or replace the window's actually-rendered pixel content —
+// i.e. it's safe to use as the primary click-through mechanism
+// alongside our own SDL_Renderer-drawn content (src/graphics/BlobRenderer).
 //
-// - macOS: true. Confirmed by reading the pinned SDL 3.4.12 Cocoa
-//   backend source directly (not assumed): `Cocoa_UpdateWindowShape()`
+// - macOS, accelerated driver (Metal/GL/GPU — the historical case,
+//   still SDL's own default absent DEC-083's macOS override): true.
+//   Confirmed by reading the pinned SDL 3.4.12 Cocoa backend source
+//   directly (not assumed): `Cocoa_UpdateWindowShape()`
 //   (src/video/cocoa/SDL_cocoashape.m) only toggles
 //   `NSWindow.ignoresMouseEvents`; nothing in that path touches
 //   rendering. Even better: once a shape is set, SDL's own
@@ -64,6 +68,28 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough);
 //   mechanism requiring zero polling from us. See
 //   docs/PLATFORM_SPIKE.md's click-through investigation for how this
 //   was found and confirmed on this block's dev machine.
+// - macOS, `usingSoftwareRenderer` true: FALSE — a new finding from
+//   Block 05's renderer-resolution pass (see DEC-083's addendum and the
+//   final report's diagnostic section). Interactive QA under DEC-083's
+//   new macOS software-renderer default showed every animation frame
+//   after the very first one presenting as a solid opaque white
+//   silhouette; a minimal ~50-line standalone SDL3 program (no app code
+//   involved at all) isolated the cause to `SDL_SetWindowShape()`
+//   itself — a single call, in either order relative to rendering,
+//   permanently corrupts every subsequent `SDL_RenderPresent()` on the
+//   "software" driver on this dev machine. A second standalone repro
+//   proved this is NOT about `Cocoa_UpdateWindowShape()`'s
+//   `ignoresMouseEvents` toggle (the claim just above is still true in
+//   isolation: toggling `NSWindow.ignoresMouseEvents` directly, the
+//   exact mechanism SetWindowClickThrough() below already uses, was
+//   run 4 times in a row against the software renderer with zero
+//   corruption) — the breakage lives somewhere in SDL_video.c's
+//   platform-independent `SDL_SetWindowShape()` wrapper (the
+//   `SDL_ConvertSurface`/`SDL_SetSurfaceProperty` bookkeeping that runs
+//   before it ever reaches Cocoa's code), not in anything platform.mm
+//   controls or could work around by re-ordering calls. Filed as an
+//   honest, reproducible SDL3-on-macOS limitation — not something this
+//   codebase patches around inside vendored SDL3 source.
 // - Windows: false (conservative default; not verified in this block —
 //   no Windows machine was available). Community reports
 //   (libsdl-org/SDL#11199) describe `SDL_SetWindowShape` behaving
@@ -72,15 +98,18 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough);
 //   the window's rendered content rather than purely for hit-testing —
 //   which would blank out our own SDL_Renderer output. Windows keeps
 //   using SetWindowClickThrough() above instead until this is verified
-//   on real hardware.
-bool NativeShapeHitTestIsRenderSafe();
+//   on real hardware. `usingSoftwareRenderer` changes nothing here:
+//   already false regardless, and RendererPolicy never forces
+//   "software" on Windows outside of the DEV override anyway.
+bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer);
 
 // True if it's worth running the poll-driven click-through fallback
 // (src/app/SpikeApp.cpp's hoverScheduler_ / PollHover() /
 // UpdateClickThrough(), which calls SetWindowClickThrough() above) on
-// this platform. Only ever consulted when NativeShapeHitTestIsRenderSafe()
-// is false — irrelevant otherwise, since that fallback isn't used at
-// all when the native shape path is render-safe.
+// this platform (with this renderer driver). Only ever consulted when
+// NativeShapeHitTestIsRenderSafe() is false for the same
+// `usingSoftwareRenderer` value — irrelevant otherwise, since that
+// fallback isn't used at all when the native shape path is render-safe.
 //
 // This exists because "no native shape path" and "poll-driven
 // click-through would actually work" turned out NOT to always be the
@@ -98,13 +127,23 @@ bool NativeShapeHitTestIsRenderSafe();
 // all on a platform where it would be pointless, without src/app ever
 // needing to know *why* per-platform.
 //
-// - macOS: never actually consulted (NativeShapeHitTestIsRenderSafe()
-//   is already true there), returns false for documentation purposes.
+// - macOS, accelerated driver: never actually consulted
+//   (NativeShapeHitTestIsRenderSafe() is already true there), returns
+//   false for documentation purposes.
+// - macOS, `usingSoftwareRenderer` true: true — Block 05's finding
+//   above means the native shape path is no longer safe there, so
+//   SpikeApp needs this poll-driven fallback to actually run (it uses
+//   SetWindowClickThrough(), independently confirmed safe under the
+//   software renderer — see this function's doc comment above).
 // - Windows: true — same poll-driven mechanism this project has always
-//   used there.
+//   used there, independent of `usingSoftwareRenderer` (RendererPolicy
+//   doesn't touch Windows's renderer choice outside the DEV override).
 // - Linux/X11: never actually consulted (native shape path is
-//   render-safe there too — see the Linux adapter).
+//   render-safe there too — see the Linux adapter). Whether it would
+//   stay render-safe if `usingSoftwareRenderer` were ever forced true
+//   there via the DEV override is NOT verified in this block (no Linux
+//   machine available) — see docs/LINUX_PLATFORM.md.
 // - Linux/Wayland: false — see docs/LINUX_PLATFORM.md.
-bool ClickThroughPollingIsMeaningful();
+bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer);
 
 }  // namespace nimvlets::platform

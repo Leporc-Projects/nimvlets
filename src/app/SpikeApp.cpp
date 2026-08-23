@@ -1,6 +1,7 @@
 #include "app/SpikeApp.h"
 
 #include "catalog/PetCatalogLoader.h"
+#include "platform/RendererPolicy.h"
 #include "platform/TransparentWindowSupport.h"
 
 #include <algorithm>
@@ -41,6 +42,15 @@ constexpr const char* kDevClickTestCountEnvVar = "NIMVLETS_DEV_CLICK_TEST_COUNT"
 // SpikeApp::RunDevHoverSmokeTestIfRequested().
 constexpr const char* kDevHoverTestCountEnvVar = "NIMVLETS_DEV_HOVER_TEST_COUNT";
 
+// Lee NIMVLETS_DEV_RENDERER_DRIVER — mecanismo solo-DEV que fuerza un
+// driver de SDL_Renderer específico (p. ej. "opengl", "metal",
+// "software"), sin importar la plataforma o su default de producto
+// (ver platform::PreferredRendererDriverName() y DEC-083 en
+// docs/DECISION_LOG.md) -- así el owner puede comparar drivers en
+// cualquier sistema operativo sin recompilar. Ausente/vacía: no-op,
+// se usa el default de la plataforma actual.
+constexpr const char* kDevRendererDriverEnvVar = "NIMVLETS_DEV_RENDERER_DRIVER";
+
 // Lee NIMVLETS_DEV_SELECT_PET — mecanismo solo-DEV (Block 05, §10 del
 // brief: "leave a simple DEV mechanism to manually launch/select"). Si
 // está seteada a un "petId" o "petId/variantId" que exista en el
@@ -53,14 +63,19 @@ constexpr const char* kDevHoverTestCountEnvVar = "NIMVLETS_DEV_HOVER_TEST_COUNT"
 // comportamiento que sin esta variable.
 constexpr const char* kDevSelectPetEnvVar = "NIMVLETS_DEV_SELECT_PET";
 
-// TEMP diagnostic-only, Block 05 Bunny root-cause investigation: si
-// está seteada a un directorio, cada RenderFrame() real vuelca los
-// pixeles YA COMPUESTOS por el renderer (SDL_RenderReadPixels, lo que
-// de verdad se presentó) a un .rgba crudo -- evidencia directa de la
-// etapa E (textura/render) contra el pipeline real corriendo, sin
-// captura de pantalla (lee el backbuffer de NUESTRO propio renderer,
-// nunca el escritorio). Ver el informe final para lo que esto encontró
-// y sus límites honestos.
+// Mecanismo DEV genérico y reusado varias veces ya (no una sonda
+// descartable de una sola investigación): si está seteada a un
+// directorio, cada RenderFrame() real vuelca los pixeles YA COMPUESTOS
+// por el renderer (SDL_RenderReadPixels, lo que de verdad se
+// presentó) a un .rgba crudo -- evidencia directa de lo que el
+// pipeline real produce, sin captura de pantalla (lee el backbuffer de
+// NUESTRO propio renderer, nunca el escritorio). Usado originalmente
+// para el diagnóstico de raíz de Bunny, y de nuevo para el A/B de
+// renderer reutilizable-vs-por-frame (ver DEC-081) y para comparar
+// software vs. acelerado en esta pasada (ver DEC-083) -- se conserva
+// como herramienta permanente porque comparar "lo que realmente se
+// presentó" entre dos configuraciones sigue siendo la forma más barata
+// de verificar equivalencia visual sin depender de captura de pantalla.
 constexpr const char* kDevDumpFramesDirEnvVar = "NIMVLETS_DEV_DUMP_FRAMES_DIR";
 
 // Separación de wall-clock del redraw de confirmación (ver el
@@ -323,10 +338,33 @@ bool SpikeApp::Init() {
         SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
 
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
-    if (renderer_ == nullptr) {
-        SDL_Log("nimvlets: SDL_CreateRenderer failed: %s", SDL_GetError());
-        return false;
+    {
+        const char* devOverride = std::getenv(kDevRendererDriverEnvVar);
+        const platform::RendererPlatform currentPlatform = platform::CurrentRendererPlatform();
+        const char* preferredDriver = platform::PreferredRendererDriverName(currentPlatform, devOverride);
+
+        renderer_ = SDL_CreateRenderer(window_, preferredDriver);
+        bool preferredDriverHonored = renderer_ != nullptr;
+        if (renderer_ == nullptr && preferredDriver != nullptr) {
+            // Fallback documentado, nunca silencioso: si el driver
+            // preferido (p. ej. "software" en macOS, ver DEC-083, o
+            // cualquier NIMVLETS_DEV_RENDERER_DRIVER inválido) no pudo
+            // crear un renderer en ESTA máquina -- SDL no lo tiene
+            // compilado, o algún otro fallo real -- se cae al default
+            // histórico de SDL en vez de fallar el arranque entero por
+            // una preferencia que no es esencial para funcionar.
+            SDL_Log(
+                "nimvlets: preferred renderer driver '%s' failed (%s); falling back to SDL's own default driver",
+                preferredDriver, SDL_GetError());
+            renderer_ = SDL_CreateRenderer(window_, nullptr);
+        }
+        if (renderer_ == nullptr) {
+            SDL_Log("nimvlets: SDL_CreateRenderer failed: %s", SDL_GetError());
+            return false;
+        }
+        const bool devOverrideRequested = devOverride != nullptr && devOverride[0] != '\0';
+        SDL_Log("nimvlets: renderer driver selected: '%s'%s", SDL_GetRendererName(renderer_),
+                (devOverrideRequested && preferredDriverHonored) ? " (NIMVLETS_DEV_RENDERER_DRIVER override)" : "");
     }
 
     SDL_SetRenderLogicalPresentation(
@@ -343,8 +381,17 @@ bool SpikeApp::Init() {
 
     UpdateDirectionFromWindowPosition();
 
-    usingNativeShapeHitTest_ = platform::NativeShapeHitTestIsRenderSafe();
-    usingPollDrivenClickThrough_ = !usingNativeShapeHitTest_ && platform::ClickThroughPollingIsMeaningful();
+    // Hecho de runtime, no de plataforma: qué driver terminó eligiendo
+    // SDL de verdad (ver el log "renderer driver selected" arriba), no
+    // cuál pedimos. Ambas funciones de políticas de click-through abajo
+    // lo necesitan porque Block 05 encontró que SDL_SetWindowShape()
+    // corrompe el render bajo el driver "software" en macOS -- ver
+    // NativeShapeHitTestIsRenderSafe() en platform/TransparentWindowSupport.h
+    // para la evidencia completa.
+    const bool usingSoftwareRenderer = SDL_strcmp(SDL_GetRendererName(renderer_), SDL_SOFTWARE_RENDERER) == 0;
+    usingNativeShapeHitTest_ = platform::NativeShapeHitTestIsRenderSafe(usingSoftwareRenderer);
+    usingPollDrivenClickThrough_ =
+        !usingNativeShapeHitTest_ && platform::ClickThroughPollingIsMeaningful(usingSoftwareRenderer);
     SDL_Log(
         "nimvlets: click-through mechanism = %s",
         usingNativeShapeHitTest_

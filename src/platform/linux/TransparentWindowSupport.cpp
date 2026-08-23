@@ -1,6 +1,7 @@
 #include "platform/TransparentWindowSupport.h"
 
 #include "platform/LinuxBackendPolicy.h"
+#include "platform/RendererPolicy.h"
 
 #include <SDL3/SDL.h>
 
@@ -110,12 +111,29 @@ bool SetWindowClickThrough(SDL_Window* window, bool clickThrough) {
     return false;
 }
 
-bool NativeShapeHitTestIsRenderSafe() {
+bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer) {
+    // El hallazgo de Block 05 (ver platform/TransparentWindowSupport.h
+    // y macos/TransparentWindowSupport.mm) de que SDL_SetWindowShape()
+    // corrompe el present bajo el driver "software" fue confirmado SOLO
+    // en macOS (no hay máquina Linux disponible en este bloque), y
+    // platform::RendererPolicy nunca fuerza "software" en Linux salvo
+    // vía el override NIMVLETS_DEV_RENDERER_DRIVER. Se ignora el
+    // parámetro deliberadamente en vez de asumir que el mismo bug
+    // aplica acá sin evidencia -- ver el informe final de Block 05 para
+    // esto como deuda/límite documentado si alguna vez se ejercita ese
+    // override en Linux.
+    (void)usingSoftwareRenderer;
     return LinuxBackendSupportsNativeShapeHitTest(DetectBackend());
 }
 
-bool ClickThroughPollingIsMeaningful() {
+bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
+    (void)usingSoftwareRenderer;
     return LinuxBackendClickThroughPollingIsMeaningful(DetectBackend());
+}
+
+
+RendererPlatform CurrentRendererPlatform() {
+    return RendererPlatform::kLinux;
 }
 
 }  // namespace nimvlets::platform
