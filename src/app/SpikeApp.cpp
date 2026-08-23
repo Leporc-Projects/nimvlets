@@ -694,7 +694,10 @@ void SpikeApp::MaybeTriggerHoverAction(bool cursorOverOpaque, double nowMs) {
         // previo (ya reiniciado arriba, pero una acción real
         // completada lo confirma/reafirma).
         RearmAmbientDeadline(nowMs);
-        SDL_Log("nimvlets: hover-triggered action after %.0fs dwell (state='%s')", kHoverDwellSeconds, animController_->CurrentStateId().c_str());
+        // %.1f, no %.0f -- con kHoverDwellSeconds=0.2 (DEC-090) un
+        // formato de cero decimales redondearía a "0s", un log
+        // engañoso que sugeriría que no hubo dwell alguno.
+        SDL_Log("nimvlets: hover-triggered action after %.1fs dwell (state='%s')", kHoverDwellSeconds, animController_->CurrentStateId().c_str());
     }
 }
 

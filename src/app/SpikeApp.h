@@ -51,16 +51,17 @@ public:
     // MaybeTriggerHoverAction()). Historial: 5.0 (primera versión real)
     // -> 1.0 (segunda pasada de corrección post-QA, "current 5-second
     // dwell is too long") -> 0.5 (pasada de resolución de renderer,
-    // pedido de producto explícito -- ver DEC-084 en
-    // docs/DECISION_LOG.md). El mecanismo en sí (dwell continuo,
-    // resets en salida/click/drag/cambio de estado, desacoplado del
-    // timer ambient) no cambia, solo este único umbral. `static
-    // constexpr` (no un anonymous-namespace constant en el .cpp)
-    // porque tanto el inicializador de hoverDwellTracker_ como el
-    // cálculo de hoverDwellDeadlineMs_ en SpikeApp.cpp lo necesitan.
-    // El VALOR en sí vive en core::kDefaultHoverDwellSeconds (pasada de
-    // estabilización) para que la CI pueda fijarlo: src/app no es
-    // testeable en aislamiento (arrastra SDL y una ventana real).
+    // DEC-084) -> 0.2 (pasada de pulido final, pedido de producto
+    // explícito -- ver DEC-090 en docs/DECISION_LOG.md). El mecanismo
+    // en sí (dwell continuo, resets en salida/click/drag/cambio de
+    // estado, desacoplado del timer ambient) no cambia, solo este
+    // único umbral. `static constexpr` (no un anonymous-namespace
+    // constant en el .cpp) porque tanto el inicializador de
+    // hoverDwellTracker_ como el cálculo de hoverDwellDeadlineMs_ en
+    // SpikeApp.cpp lo necesitan. El VALOR en sí vive en
+    // core::kDefaultHoverDwellSeconds (pasada de estabilización) para
+    // que la CI pueda fijarlo: src/app no es testeable en aislamiento
+    // (arrastra SDL y una ventana real).
     static constexpr double kHoverDwellSeconds = core::kDefaultHoverDwellSeconds;
 
 private:
@@ -201,9 +202,9 @@ private:
     // anterior). El owner pidió explícitamente: "no quiero que se
     // dispare una animación apenas el mouse entra" — hover ahora exige
     // DWELL: el cursor debe permanecer CONTINUAMENTE sobre la región
-    // interactiva durante kHoverDwellSeconds (0.5s, pasada de
-    // resolución de renderer -- bajado de 1s) antes de disparar. Si sale
-    // antes, el contador se reinicia por completo (ver
+    // interactiva durante kHoverDwellSeconds (0.2s, pasada de pulido
+    // final -- bajado de 0.5s) antes de disparar. Si sale antes, el
+    // contador se reinicia por completo (ver
     // core::HoverDwellTracker). Sigue disparando la MISMA
     // TriggerHoverAction() que el timer ambient puede disparar (vía el
     // pool efectivo de hover del estado activo — ver

@@ -40,10 +40,11 @@ namespace nimvlets::core {
 // de repetirlo, así que no puede haber dos valores en desacuerdo.
 //
 // Historial: 5.0 (primera versión) -> 1.0 ("current 5-second dwell is
-// too long") -> 0.5 (DEC-084, pedido de producto explícito). La pasada
-// de estabilización lo mantiene en 0.5 -- solo cambió Frin
-// (ver DEC-089), no este umbral.
-inline constexpr double kDefaultHoverDwellSeconds = 0.5;
+// too long") -> 0.5 (DEC-084, pedido de producto explícito) -> 0.2
+// (DEC-090, pasada de pulido final, pedido de producto explícito). La
+// pasada de estabilización previa había dejado esto en 0.5 -- solo
+// había cambiado Frin (ver DEC-089), no este umbral.
+inline constexpr double kDefaultHoverDwellSeconds = 0.2;
 
 class HoverDwellTracker {
 public:
