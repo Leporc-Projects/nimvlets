@@ -34,6 +34,7 @@ import real -- ver docs/NIDIR_CONTENT.md).
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -41,7 +42,10 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import prep_dev_sprite  # noqa: E402
+import read_pet_pack  # noqa: E402
 import validate_frame_sequence  # noqa: E402
 
 
@@ -472,7 +476,63 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         plan = self._plan(entries, groups, reference_group="idle")
         content_scale = plan["click"][0]
         self.assertGreater(content_scale, 1.0)  # el contenido "click" es más chico -> hay que agrandarlo
-        self.assertAlmostEqual(content_scale, 10.0 / 4.0, places=6)
+
+        # El factor exacto sale de `alpha_rms_radius`, no del lado más
+        # largo del bounding box (Block 05, pasada de estabilización --
+        # ver DEC-088 y el docstring de esa función). Para un bloque
+        # sólido discreto de n x n la varianza por eje es (n^2-1)/12, así
+        # que el radio RMS es sqrt(2*(n^2-1)/12): 10x10 -> 4.0620,
+        # 4x4 -> 1.5811, ratio 2.5690 en vez del 2.5 exacto que daba la
+        # medida vieja por bounding box. La diferencia es el efecto de
+        # grilla discreta, no un cambio de intención: ambas medidas
+        # coinciden en el límite continuo.
+        expected = prep_dev_sprite.alpha_rms_radius(*entries["idle"]) / prep_dev_sprite.alpha_rms_radius(*entries["click"])
+        self.assertAlmostEqual(content_scale, expected, places=6)
+        self.assertAlmostEqual(content_scale, 2.569046, places=5)
+
+    def test_size_metric_is_far_less_sensitive_to_a_pose_change_than_bbox(self) -> None:
+        """La razón real por la que la medida dejó de ser el lado más
+        largo del bounding box (Block 05, DEC-088): una pose autorada
+        que estira algo hacia un costado NO es un cambio de tamaño, y
+        una medida decidida por dos pixeles extremos no puede
+        distinguirlos.
+
+        Caso real que motivó esto: el `howl` de Frin macho mide +4.5% de
+        ANCHO de bbox contra la pose base sentada con EXACTAMENTE la
+        misma altura, y sin embargo su radio RMS ponderado por alpha
+        está a menos de 1%."""
+        size = 60
+        body = (10, 10, 50, 50)  # cuerpo de 40x40
+        base_w, base_h, base_px = self._entry(size, size, body)
+        posed = bytearray(base_px)
+        # Una "cola" fina de 8px que sobresale a un costado: el bbox se
+        # ensancha 20%, la masa de alpha apenas cambia (8 pixeles contra
+        # 1600).
+        for x in range(50, 58):
+            offset = (30 * size + x) * 4
+            posed[30 * size * 4 + x * 4:offset + 4] = bytes((5, 5, 5, 255))
+
+        def bbox_longest(w: int, h: int, pixels: bytes) -> int:
+            minx, miny, maxx, maxy = prep_dev_sprite.compute_content_bbox(w, h, pixels)
+            return max(maxx - minx + 1, maxy - miny + 1)
+
+        bbox_ratio = bbox_longest(size, size, bytes(posed)) / bbox_longest(base_w, base_h, base_px)
+        rms_ratio = prep_dev_sprite.alpha_rms_radius(size, size, bytes(posed)) / prep_dev_sprite.alpha_rms_radius(
+            base_w, base_h, base_px
+        )
+
+        # La pose es más ancha de verdad, y el bbox lo grita...
+        self.assertGreater(bbox_ratio, 1.15)
+        # ...pero el tamaño real del personaje no cambió, y la
+        # registración por alpha lo refleja: al menos un orden de
+        # magnitud menos de desvío.
+        self.assertLess(abs(rms_ratio - 1.0), abs(bbox_ratio - 1.0) / 10.0)
+
+        entries = {"base": (base_w, base_h, base_px), "action": (size, size, bytes(posed))}
+        groups = {"base": "base", "action": "action"}
+        plan = self._plan(entries, groups, reference_group="base")
+        # Y el plan real no aplasta la pose autorada.
+        self.assertLess(abs(plan["action"][0] - 1.0), 0.02)
 
     def test_all_entries_share_the_same_working_canvas_dimensions(self) -> None:
         entries = {
@@ -536,6 +596,311 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         first = self._plan(entries, groups, reference_group="idle")
         second = self._plan(entries, groups, reference_group="idle")
         self.assertEqual(first, second)
+
+
+class TransitionEndpointContinuityTest(unittest.TestCase):
+    """Block 05, pasada de estabilización (ver docs/DECISION_LOG.md
+    DEC-087): el invariante de continuidad de una transición que CAMBIA
+    de estado --
+
+        último frame mostrado de la transición
+            ==
+        primer frame mostrado de la pose base del estado destino
+
+    -- cuando el contenido declara/reusa el mismo asset de punta.
+
+    Antes de esta corrección cada entrada se colocaba anclando el
+    centro de contenido de su PROPIO frame 0 al centro del canvas de
+    trabajo. Para `state[lying].base_animation`, cuyo único frame ES el
+    frame final de `sit_to_lie`, eso significaba colocar los MISMOS
+    pixeles en dos lugares distintos -- medido en el pack real de Frin
+    macho antes del arreglo: 62px de salto vertical al entrar a
+    `lying`, con bounding box y suma de alpha IDÉNTICOS (o sea:
+    traslación pura, no un problema de escala ni de contenido)."""
+
+    def _frame(self, w: int, h: int, rect: tuple[int, int, int, int]) -> tuple[int, int, bytes]:
+        return w, h, _solid_frame(w, h, (5, 5, 5), rect)
+
+    def _two_state_plan(self, *, lying_base_path: str, sit_to_lie_last_path: str | None = None,
+                        lie_to_sit_last=None):
+        """Grafo mínimo pero realista: seated (base == frame 0 de
+        sit_to_lie), sit_to_lie -> lying, lying (base == frame final de
+        sit_to_lie), lie_to_sit -> seated."""
+        seated_pose = self._frame(40, 40, (14, 6, 25, 33))   # alto/angosto
+        lying_pose = self._frame(40, 40, (4, 24, 35, 33))    # bajo/ancho, MÁS ABAJO en el frame
+        entries = {
+            "state[seated].base_animation": seated_pose,
+            "state[seated].ambient_actions[sit_to_lie]": seated_pose,  # frame 0 de la transición
+            "state[lying].base_animation": lying_pose,
+            "state[lying].click_actions[lie_to_sit]": lying_pose,      # frame 0 de la reversa
+        }
+        groups = {k: k for k in entries}
+        seated_path = "/fake/sit_to_lie/frame_000.png"
+        entry_frame_paths = {
+            "state[seated].base_animation": [seated_path],
+            "state[seated].ambient_actions[sit_to_lie]": [
+                seated_path, sit_to_lie_last_path if sit_to_lie_last_path is not None else lying_base_path
+            ],
+            "state[lying].base_animation": [lying_base_path],
+            "state[lying].click_actions[lie_to_sit]": ["/fake/lie_to_sit/frame_000.png",
+                                                       "/fake/lie_to_sit/frame_024.png"],
+        }
+        kwargs = {}
+        if lie_to_sit_last is not None:
+            kwargs["last_frames"] = {"state[lying].click_actions[lie_to_sit]": lie_to_sit_last}
+            kwargs["transition_target_entry"] = {
+                "state[lying].click_actions[lie_to_sit]": "state[seated].base_animation"
+            }
+        return prep_dev_sprite.compute_frame_normalization_plan(
+            entries, groups,
+            reference_group="state[seated].base_animation",
+            group_frame_paths={k: list(v) for k, v in entry_frame_paths.items()},
+            state_of_group={
+                "state[seated].base_animation": "seated",
+                "state[seated].ambient_actions[sit_to_lie]": "seated",
+                "state[lying].base_animation": "lying",
+                "state[lying].click_actions[lie_to_sit]": "lying",
+            },
+            base_group_of_state={"seated": "state[seated].base_animation",
+                                 "lying": "state[lying].base_animation"},
+            entry_frame_paths=entry_frame_paths,
+            **kwargs,
+        )
+
+    def test_state_base_that_reuses_a_transition_frame_gets_the_same_placement(self) -> None:
+        plan = self._two_state_plan(lying_base_path="/fake/sit_to_lie/frame_024.png")
+        transition = plan["state[seated].ambient_actions[sit_to_lie]"]
+        lying_base = plan["state[lying].base_animation"]
+        # Misma escala, mismo canvas Y MISMO OFFSET -- lo último es el
+        # arreglo: el frame compartido aterriza pixel por pixel en el
+        # mismo lugar en las dos entradas, así que el switch de estado
+        # no puede saltar.
+        self.assertEqual(lying_base, transition)
+
+    def test_seated_base_also_stays_pinned_to_the_transition_start(self) -> None:
+        plan = self._two_state_plan(lying_base_path="/fake/sit_to_lie/frame_024.png")
+        self.assertEqual(plan["state[seated].base_animation"],
+                         plan["state[seated].ambient_actions[sit_to_lie]"])
+
+    def test_without_the_shared_file_the_two_placements_really_do_differ(self) -> None:
+        """Control negativo: si el contenido NO reusa el asset de punta,
+        no hay nada que heredar y las dos colocaciones divergen -- que
+        es exactamente el bug que el reuso real evita. Sin este control,
+        el test de arriba pasaría aunque el mecanismo no hiciera nada."""
+        linked = self._two_state_plan(lying_base_path="/fake/sit_to_lie/frame_024.png")
+        # Sin reuso: la pose base de "lying" es un asset propio, y el
+        # frame final de sit_to_lie es OTRO archivo distinto.
+        unlinked = self._two_state_plan(lying_base_path="/fake/unrelated_lying/frame_000.png",
+                                        sit_to_lie_last_path="/fake/sit_to_lie/frame_024.png")
+        self.assertEqual(linked["state[lying].base_animation"],
+                         linked["state[seated].ambient_actions[sit_to_lie]"])
+        self.assertNotEqual(unlinked["state[lying].base_animation"],
+                            unlinked["state[seated].ambient_actions[sit_to_lie]"])
+
+    def test_independent_reverse_transition_registers_on_its_last_frame(self) -> None:
+        """`lie_to_sit` es un export independiente: su frame final NO es
+        el mismo archivo que la pose base de `seated`, así que no hay
+        containment que lo ate. Se ancla por su ÚLTIMO frame contra
+        donde la base del estado destino realmente aterriza -- el
+        instante en que el personaje queda quieto, que es donde un salto
+        se ve."""
+        # Frame final de lie_to_sit: la misma pose sentada, pero
+        # encuadrada 7px más arriba en su frame nativo que la de seated.
+        last = self._frame(40, 40, (14, 6 - 7, 25, 33 - 7))
+        plan = self._two_state_plan(lying_base_path="/fake/sit_to_lie/frame_024.png",
+                                    lie_to_sit_last=last)
+        seated = plan["state[seated].base_animation"]
+        lie_to_sit = plan["state[lying].click_actions[lie_to_sit]"]
+        # El centro de contenido del último frame de lie_to_sit debe
+        # caer donde cae el de la pose base de seated.
+        def content_centre_y(offset_y: int, frame) -> float:
+            w, h, px = frame
+            _minx, miny, _maxx, maxy = prep_dev_sprite.compute_content_bbox(w, h, px)
+            return offset_y + (miny + maxy + 1) / 2.0
+        self.assertAlmostEqual(
+            content_centre_y(lie_to_sit[4], last),
+            content_centre_y(seated[4], (40, 40, _solid_frame(40, 40, (5, 5, 5), (14, 6, 25, 33)))),
+            delta=1.0,
+        )
+
+    def test_every_entry_still_shares_one_working_canvas(self) -> None:
+        last = self._frame(40, 40, (14, 0, 25, 27))
+        plan = self._two_state_plan(lying_base_path="/fake/sit_to_lie/frame_024.png",
+                                    lie_to_sit_last=last)
+        self.assertEqual(len({(w, h) for _s, w, h, _x, _y in plan.values()}), 1)
+
+    def test_result_is_deterministic(self) -> None:
+        kwargs = dict(lying_base_path="/fake/sit_to_lie/frame_024.png",
+                      lie_to_sit_last=self._frame(40, 40, (14, 0, 25, 27)))
+        self.assertEqual(self._two_state_plan(**kwargs), self._two_state_plan(**kwargs))
+
+
+class CompiledFrinEndpointContinuityTest(unittest.TestCase):
+    """El invariante de DEC-087 verificado sobre los PACKS COMPILADOS
+    REALES que se envían, no sobre un fixture sintético: se decodifican
+    los bytes que el runtime va a mostrar (`tools/read_pet_pack.py`, el
+    lado de lectura del mismo contrato que src/content/PetPackLoader.cpp)
+    y se comparan las dos puntas de cada transición de estado, para las
+    dos variantes y las dos direcciones.
+
+    Este es el test que falla si una recompilación futura vuelve a
+    romper la continuidad -- que es exactamente lo que pasó y que la QA
+    manual del owner detectó como "el lobo salta al quedar acostado"."""
+
+    PACKS = (("male", "assets/dev/frin_male_pack.nvpack"),
+             ("female", "assets/dev/frin_female_pack.nvpack"))
+    DIRECTIONS = ("right", "left")
+
+    def _pack(self, rel: str) -> dict:
+        return read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+
+    def _displayed(self, pack: dict, state_id: str, direction: str, action_id: str | None, trigger: str | None):
+        state = read_pet_pack.find_state(pack, state_id)
+        if action_id is None:
+            return read_pet_pack.resolve_animation(
+                state["base_animation"], state["base_animation_direction_overrides"], direction)
+        action = read_pet_pack.find_action(state, trigger, action_id)
+        return read_pet_pack.resolve_animation(action["animation"], action["direction_overrides"], direction)
+
+    def test_sit_to_lie_ends_exactly_on_the_lying_base_pose(self) -> None:
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    last = self._displayed(pack, "seated", direction, "sit_to_lie", "ambient_actions")["frames"][-1]
+                    base = self._displayed(pack, "lying", direction, None, None)["frames"][0]
+                    self.assertEqual((last["width"], last["height"]), (base["width"], base["height"]))
+                    # El contenido DECLARA el mismo asset de punta
+                    # (lying_base ES el frame final de sit_to_lie), así
+                    # que el contrato es igualdad pixel por pixel -- no
+                    # "parecido dentro de una tolerancia".
+                    self.assertEqual(last["pixels"], base["pixels"])
+
+    def test_seated_base_matches_the_first_frame_of_sit_to_lie(self) -> None:
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    first = self._displayed(pack, "seated", direction, "sit_to_lie", "ambient_actions")["frames"][0]
+                    base = self._displayed(pack, "seated", direction, None, None)["frames"][0]
+                    self.assertEqual(first["pixels"], base["pixels"])
+
+    def test_lie_to_sit_lands_on_the_seated_base_pose(self) -> None:
+        """`lie_to_sit` es un export INDEPENDIENTE: su frame final no es
+        el mismo archivo que la pose sentada, así que la igualdad pixel
+        a pixel no aplica ni sería honesta pedirla. Lo que sí debe
+        cumplirse es que quede REGISTRADO en su sitio: el centro de
+        contenido cae a pocos pixeles del de la pose base destino.
+
+        Antes de DEC-087 esta distancia era de ~53px verticales (medida
+        en el pack real), claramente visible como un salto al asentarse."""
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    last = self._displayed(pack, "lying", direction, "lie_to_sit", "click_actions")["frames"][-1]
+                    base = self._displayed(pack, "seated", direction, None, None)["frames"][0]
+                    lx, ly = read_pet_pack.content_centre(last)
+                    bx, by = read_pet_pack.content_centre(base)
+                    self.assertLess(abs(lx - bx), 4.0, f"{variant}/{direction} horizontal")
+                    self.assertLess(abs(ly - by), 4.0, f"{variant}/{direction} vertical")
+
+    def test_frin_packs_carry_the_ten_second_rest_delay(self) -> None:
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            self.assertEqual(read_pet_pack.find_state(pack, "seated")["ambient_interval_seconds"], 10.0, variant)
+            self.assertEqual(read_pet_pack.find_state(pack, "lying")["ambient_actions"], [], variant)
+
+
+class CompiledClickScaleTest(unittest.TestCase):
+    """Block 05, pasada de estabilización (DEC-088): QA manual reportó
+    que las animaciones de click se veían "un poco más anchas/grandes"
+    que la pose base aprobada de su estado.
+
+    Medido con REGISTRACIÓN POR ALPHA (`alpha_rms_radius`) y no con
+    ancho de bounding box -- que es lo que el brief pidió y lo que
+    distingue "el personaje es más grande" de "la pose autorada es más
+    ancha". Los dos casos del contenido real, para que quede escrito:
+      - Bunny `click`: bbox +1.9% de ancho contra la base, pero solo
+        +0.06% de radio RMS.
+      - Frin macho `howl`: bbox +2.1% de ancho con altura casi igual,
+        -0.12% de radio RMS.
+    O sea: lo que queda de diferencia visible está AUTORADO en el arte,
+    no lo introduce el compilador. Este test fija el lado que sí es
+    responsabilidad del compilador."""
+
+    # Tolerancia deliberadamente más ancha (1%) que el desvío real
+    # máximo medido tras la corrección (0.32%): esto es un guard contra
+    # una regresión de verdad -- como la de 1.43% que tenía
+    # `tail_greet` de Frin hembra antes -- no un snapshot que haya que
+    # actualizar cada vez que el arte cambie un pixel.
+    MAX_RELATIVE_SIZE_DRIFT = 0.01
+
+    PACKS = ("assets/dev/bunny_pack.nvpack", "assets/dev/nidir_pack.nvpack",
+             "assets/dev/frin_male_pack.nvpack", "assets/dev/frin_female_pack.nvpack")
+
+    def _size(self, frame: dict) -> float:
+        return prep_dev_sprite.alpha_rms_radius(frame["width"], frame["height"], frame["pixels"])
+
+    def test_every_action_matches_its_own_state_base_pose(self) -> None:
+        for rel in self.PACKS:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            for state in pack["states"]:
+                for direction in ("right", "left"):
+                    base = read_pet_pack.resolve_animation(
+                        state["base_animation"], state["base_animation_direction_overrides"], direction)
+                    base_size = self._size(base["frames"][0])
+                    self.assertGreater(base_size, 0.0)
+                    for trigger in ("ambient_actions", "hover_actions", "click_actions"):
+                        for action in state[trigger]:
+                            animation = read_pet_pack.resolve_animation(
+                                action["animation"], action["direction_overrides"], direction)
+                            drift = self._size(animation["frames"][0]) / base_size - 1.0
+                            with self.subTest(pack=pack["id"], state=state["id"],
+                                              direction=direction, action=action["id"]):
+                                self.assertLess(
+                                    abs(drift), self.MAX_RELATIVE_SIZE_DRIFT,
+                                    f"{pack['id']}/{state['id']}/{action['id']} ({direction}) is "
+                                    f"{drift * 100:+.2f}% off its state's base pose")
+
+
+class ContentTimingPolicyTest(unittest.TestCase):
+    """Los valores de ritmo que el owner fija como producto viven en el
+    CONTENIDO (manifests por-pet), no en el motor -- así que se fijan
+    acá, contra los manifests reales que alimentan al compilador.
+
+    Pasada de estabilización de Block 05 (DEC-089): Frin baja a 10s y
+    deja de estar unificado con Bunny/Nidir, que se quedan en 12s."""
+
+    def _manifest(self, rel: str) -> dict:
+        with open(os.path.join(_REPO_ROOT, rel), "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _state(self, manifest: dict, state_id: str) -> dict:
+        for state in manifest["states"]:
+            if state["id"] == state_id:
+                return state
+        raise AssertionError(f"state '{state_id}' not found")
+
+    def test_frin_seated_rest_delay_is_ten_seconds(self) -> None:
+        for variant in ("male", "female"):
+            manifest = self._manifest(f"assets/source/nimvlets/frin/{variant}/pack_manifest.json")
+            seated = self._state(manifest, "seated")
+            self.assertEqual(seated["ambient_interval_seconds"], 10.0, variant)
+            # Y que el timer realmente sirva para algo: el ambient de
+            # seated es la transición a lying.
+            self.assertEqual([a["id"] for a in seated["ambient_actions"]], ["sit_to_lie"], variant)
+            self.assertEqual(seated["ambient_actions"][0]["target_state_id"], "lying", variant)
+
+    def test_frin_lying_never_arms_an_ambient_timer(self) -> None:
+        for variant in ("male", "female"):
+            manifest = self._manifest(f"assets/source/nimvlets/frin/{variant}/pack_manifest.json")
+            self.assertEqual(self._state(manifest, "lying")["ambient_actions"], [], variant)
+
+    def test_bunny_and_nidir_ambient_interval_stays_twelve_seconds(self) -> None:
+        for pet in ("bunny", "nidir"):
+            manifest = self._manifest(f"assets/source/nimvlets/{pet}/pack_manifest.json")
+            self.assertEqual(self._state(manifest, "default")["ambient_interval_seconds"], 12.0, pet)
 
 
 class MultiStateNormalizationPlanTest(unittest.TestCase):

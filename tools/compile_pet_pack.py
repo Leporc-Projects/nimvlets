@@ -119,6 +119,7 @@ No third-party dependencies (json/struct/os are standard library).
 from __future__ import annotations
 
 import json
+import math
 import os
 import struct
 import sys
@@ -400,17 +401,106 @@ def _validate_target_state_ids(states: list[dict]) -> None:
                     )
 
 
-def _first_frame_pixels(anim_manifest: dict, manifest_dir: str, context: str) -> tuple[int, int, bytes]:
-    """Decodifica SOLO el primer frame de una animación -- usado
-    exclusivamente por el pre-pass de _build_normalization_plan()."""
+def _nth_frame_pixels(anim_manifest: dict, manifest_dir: str, context: str, index: int) -> tuple[int, int, bytes]:
+    """Decodifica UN frame puntual de una animación -- usado
+    exclusivamente por el pre-pass de _build_normalization_plan(), que
+    nunca necesita la secuencia entera: el frame 0 de cada entrada
+    (ancla histórica) y, solo para una transición que cambia de estado,
+    también el ÚLTIMO (ver DEC-087)."""
     frame_manifests = _require(anim_manifest, "frames", context)
     if not frame_manifests:
         raise PackCompileError(f"{context}: must have at least one frame")
-    source = _require(frame_manifests[0], "source", f"{context} frame 0")
+    resolved = index if index >= 0 else len(frame_manifests) + index
+    source = _require(frame_manifests[resolved], "source", f"{context} frame {resolved}")
     path = os.path.join(manifest_dir, source)
     if not os.path.isfile(path):
-        raise PackCompileError(f"{context} frame 0: source frame not found: {path}")
+        raise PackCompileError(f"{context} frame {resolved}: source frame not found: {path}")
     return prep_dev_sprite.read_png_rgba(path)
+
+
+def _first_frame_pixels(anim_manifest: dict, manifest_dir: str, context: str) -> tuple[int, int, bytes]:
+    return _nth_frame_pixels(anim_manifest, manifest_dir, context, 0)
+
+
+def _grow_working_canvas_for_runtime_rounding(
+    plan: dict[str, tuple[float, int, int, int, int]],
+    native_sizes: dict[str, tuple[int, int]],
+    runtime_max_frame_dimension: int,
+) -> dict[str, tuple[float, int, int, int, int]]:
+    """Agranda el canvas de trabajo compartido lo mínimo necesario para
+    que el redondeo del downscale de runtime no deje ningún frame
+    colgando 1px fuera.
+
+    Por qué hace falta (Block 05, pasada de estabilización): el plan
+    garantiza que cada frame entra en el canvas EN UNIDADES NATIVAS,
+    pero `_compile_frame()` redondea TRES cosas por separado al pasar a
+    espacio final -- el canvas (`round(working * ratio)`), el offset
+    (`round(offset * ratio)`) y el tamaño del frame
+    (`round(nativo * content_scale * ratio)`). Tres redondeos
+    independientes pueden sumar hasta ~1px de deriva, y entonces
+    `offset_final + ancho_final` supera al canvas final por 1 aunque en
+    float entrara perfecto. Medido en el `lie_to_sit` real de Frin
+    hembra: 4 + 294 = 298 contra un canvas de 297.
+
+    Antes esto no aparecía por suerte aritmética, no por diseño -- el
+    guard ruidoso de `_compile_frame()` existe precisamente porque el
+    dimensionado nunca fue exacto. Esta función lo vuelve exacto en vez
+    de dejarlo al azar: replica la MISMA aritmética que
+    `_compile_frame()` va a usar, mide cuánto falta de verdad, y crece
+    el canvas ese mínimo. Si nada falta -- el caso de Bunny/Nidir hoy --
+    devuelve el plan sin tocar un solo valor.
+
+    El ratio depende de `max(working_width, working_height)`, así que
+    crecer puede cambiarlo; se itera hasta punto fijo, con un tope duro
+    para no depender de que converja."""
+    if not plan:
+        return plan
+
+    def needed(working_width: int, working_height: int) -> tuple[int, int]:
+        ratio = 1.0
+        if max(working_width, working_height) > runtime_max_frame_dimension:
+            ratio = runtime_max_frame_dimension / max(working_width, working_height)
+        need_w = 0
+        need_h = 0
+        for entry_key, (content_scale, _w, _h, offset_x, offset_y) in plan.items():
+            native_w, native_h = native_sizes[entry_key]
+            combined = content_scale * ratio
+            frame_w = native_w if abs(combined - 1.0) <= 1e-9 else max(1, round(native_w * combined))
+            frame_h = native_h if abs(combined - 1.0) <= 1e-9 else max(1, round(native_h * combined))
+            need_w = max(need_w, round(offset_x * ratio) + frame_w)
+            need_h = max(need_h, round(offset_y * ratio) + frame_h)
+        have_w = max(1, round(working_width * ratio))
+        have_h = max(1, round(working_height * ratio))
+        return need_w - have_w, need_h - have_h
+
+    _first = next(iter(plan.values()))
+    working_width, working_height = _first[1], _first[2]
+    for _ in range(16):
+        deficit_w, deficit_h = needed(working_width, working_height)
+        if deficit_w <= 0 and deficit_h <= 0:
+            break
+        # El déficit se mide en espacio FINAL; se traduce a nativo con
+        # el ratio vigente y se redondea hacia arriba.
+        ratio = 1.0
+        if max(working_width, working_height) > runtime_max_frame_dimension:
+            ratio = runtime_max_frame_dimension / max(working_width, working_height)
+        if deficit_w > 0:
+            working_width += max(1, math.ceil(deficit_w / ratio))
+        if deficit_h > 0:
+            working_height += max(1, math.ceil(deficit_h / ratio))
+    else:
+        raise PackCompileError(
+            "no se pudo dimensionar el canvas de trabajo compartido de forma consistente con el "
+            "downscale de runtime tras 16 iteraciones -- esto no debería pasar; revisar "
+            "_grow_working_canvas_for_runtime_rounding()"
+        )
+
+    if (working_width, working_height) == (_first[1], _first[2]):
+        return plan
+    return {
+        key: (content_scale, working_width, working_height, offset_x, offset_y)
+        for key, (content_scale, _w, _h, offset_x, offset_y) in plan.items()
+    }
 
 
 def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tuple[float, int, int, int, int]]:
@@ -441,8 +531,18 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
     entries: dict[str, tuple[int, int, bytes]] = {}
     groups: dict[str, str] = {}
     group_frame_paths: dict[str, list[str]] = {}
+    entry_frame_paths: dict[str, list[str]] = {}
     state_of_group: dict[str, str] = {}
     base_group_of_state: dict[str, str] = {}
+    # (state_id, direction|None) -> entry_key del base_animation de ese
+    # estado para ESA dirección -- lo que una transición que cambia de
+    # estado necesita para saber contra qué punta registrarse.
+    base_entry_of_state_direction: dict[tuple[str, str | None], str] = {}
+    # entry_key -> (state_id destino, direction) de una acción que
+    # CAMBIA de estado; se resuelve a entry_key concreto más abajo, una
+    # vez que todos los base_animation están registrados.
+    pending_transitions: dict[str, tuple[str, str | None]] = {}
+    transition_manifest: dict[str, tuple[dict, str]] = {}
 
     states = _require(manifest, "states", "manifest")
     if not states:
@@ -455,10 +555,14 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
         groups[context] = group
         state_of_group.setdefault(group, state_id)
         paths = group_frame_paths.setdefault(group, [])
+        own: list[str] = []
         for frame_manifest in anim_manifest.get("frames", []):
             source = frame_manifest.get("source")
             if source is not None:
-                paths.append(os.path.realpath(os.path.join(manifest_dir, source)))
+                resolved = os.path.realpath(os.path.join(manifest_dir, source))
+                paths.append(resolved)
+                own.append(resolved)
+        entry_frame_paths[context] = own
 
     def add_actions(action_manifests: list[dict], state_id: str, trigger_name: str) -> None:
         for am in action_manifests:
@@ -466,9 +570,17 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
             context = _weighted_action_context(state_id, trigger_name, action_id)
             group = f"state[{state_id}].{trigger_name}.{action_id}"
             add_animation(am, context, group, state_id)
+            target_state_id = am.get("target_state_id")
+            changes_state = target_state_id is not None and target_state_id != state_id
+            if changes_state:
+                pending_transitions[context] = (target_state_id, None)
+                transition_manifest[context] = (am, context)
             for i, om in enumerate(am.get("direction_overrides", [])):
                 override_context = f"{context}_direction_overrides[{i}]"
                 add_animation(om, override_context, group, state_id)  # right/left share content_scale
+                if changes_state:
+                    pending_transitions[override_context] = (target_state_id, om.get("direction"))
+                    transition_manifest[override_context] = (om, override_context)
 
     for state in states:
         state_id = state["id"]
@@ -477,23 +589,57 @@ def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tu
         base_group_of_state[state_id] = base_group
         base_manifest = _require(state, "base_animation", f"state '{state_id}'")
         add_animation(base_manifest, base_context, base_group, state_id)
+        base_entry_of_state_direction[(state_id, None)] = base_context
         for i, om in enumerate(state.get("base_animation_direction_overrides", [])):
             override_context = f"{base_context}_direction_overrides[{i}]"
             add_animation(om, override_context, base_group, state_id)
+            base_entry_of_state_direction[(state_id, om.get("direction"))] = override_context
 
         add_actions(state.get("ambient_actions", []), state_id, "ambient_actions")
         if not bool(state.get("hover_uses_ambient_actions", True)):
             add_actions(state.get("hover_actions", []), state_id, "hover_actions")
         add_actions(state.get("click_actions", []), state_id, "click_actions")
 
-    return prep_dev_sprite.compute_frame_normalization_plan(
+    # Resuelve cada transición que cambia de estado contra el
+    # base_animation del estado DESTINO en su MISMA dirección (cayendo a
+    # la entrada canónica si ese estado no define override para esa
+    # dirección), y decodifica su último frame. Se omiten las que ya
+    # comparten un archivo real con esa base: ahí el containment de
+    # compute_frame_normalization_plan() es exacto por construcción y no
+    # hace falta ninguna registración por contenido (el `sit_to_lie` de
+    # Frin, cuyo frame final ES la pose base de `lying`).
+    last_frames: dict[str, tuple[int, int, bytes]] = {}
+    transition_target_entry: dict[str, str] = {}
+    for entry_key, (target_state_id, direction) in pending_transitions.items():
+        target_entry = base_entry_of_state_direction.get((target_state_id, direction))
+        if target_entry is None:
+            target_entry = base_entry_of_state_direction.get((target_state_id, None))
+        if target_entry is None:
+            continue
+        if set(entry_frame_paths.get(entry_key, ())) & set(entry_frame_paths.get(target_entry, ())):
+            continue
+        anim_manifest, context = transition_manifest[entry_key]
+        last_frames[entry_key] = _nth_frame_pixels(anim_manifest, manifest_dir, context, -1)
+        transition_target_entry[entry_key] = target_entry
+
+    plan = prep_dev_sprite.compute_frame_normalization_plan(
         entries,
         groups,
         reference_group=reference_group,
         group_frame_paths=group_frame_paths,
         state_of_group=state_of_group,
         base_group_of_state=base_group_of_state,
+        entry_frame_paths=entry_frame_paths,
+        last_frames=last_frames,
+        transition_target_entry=transition_target_entry,
     )
+
+    runtime_max_frame_dimension = manifest.get("runtime_max_frame_dimension")
+    if runtime_max_frame_dimension is not None:
+        plan = _grow_working_canvas_for_runtime_rounding(
+            plan, {key: (w, h) for key, (w, h, _px) in entries.items()}, int(runtime_max_frame_dimension)
+        )
+    return plan
 
 
 def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:

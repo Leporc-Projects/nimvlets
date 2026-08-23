@@ -30,6 +30,21 @@ namespace nimvlets::core {
 // Pura, sin SDL, sin reloj propio (nowMs siempre lo provee el
 // llamador) -- mismo idioma que DragClassifier/FrameScheduler, testeada
 // en aislamiento con timestamps fabricados, sin sleeps reales.
+// Umbral de dwell de PRODUCTO, en segundos: cuánto tiempo continuo
+// debe quedarse el cursor sobre pixel visible del pet antes de que
+// hover dispare una acción.
+//
+// Vive acá, y no como un número suelto en src/app, para que la CI
+// pueda fijarlo (src/app no es una librería testeable -- arrastra SDL y
+// una ventana real). SpikeApp::kHoverDwellSeconds lo referencia en vez
+// de repetirlo, así que no puede haber dos valores en desacuerdo.
+//
+// Historial: 5.0 (primera versión) -> 1.0 ("current 5-second dwell is
+// too long") -> 0.5 (DEC-084, pedido de producto explícito). La pasada
+// de estabilización lo mantiene en 0.5 -- solo cambió Frin
+// (ver DEC-089), no este umbral.
+inline constexpr double kDefaultHoverDwellSeconds = 0.5;
+
 class HoverDwellTracker {
 public:
     explicit HoverDwellTracker(double dwellSeconds) : dwellSeconds_(dwellSeconds) {}

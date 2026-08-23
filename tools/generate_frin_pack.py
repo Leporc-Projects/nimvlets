@@ -69,35 +69,64 @@ ALPHA_HIT_THRESHOLD = 128
 EXPORT_DURATION_SECONDS = 3.0
 RUNTIME_MAX_FRAME_DIMENSION = 2 * prep_dev_sprite.REFERENCE_LOGICAL_SIZE
 
-# Unificado con el intervalo ambient base de Bunny/Nidir (ver
-# tools/generate_bunny_pack.py) -- 45.0 (DEC-066, nunca confirmado por
-# el owner) -> 15.0 (DEC-074, "cambia el tiempo base de las animaciones
-# pasivas a 15 segundos por ahora") -> 12.0 (pasada de resolución de
-# renderer, pedido de producto explícito, ver DEC-084 en
-# docs/DECISION_LOG.md). Dato de CONTENIDO (por-estado, ver
-# BehaviorState::ambientIntervalSeconds), nunca hardcodeado por
-# especie -- Artu (futuro, misma forma de grafo) puede definir su
-# propio valor sin tocar ningún código.
-REST_DELAY_SECONDS = 12.0
+# Cuánto reposo GENUINO necesita Frin sentado antes de acostarse
+# (`seated` --sit_to_lie--> `lying`). Historial: 45.0 (DEC-066, nunca
+# confirmado por el owner) -> 15.0 (DEC-074) -> 12.0 (DEC-084,
+# unificado con Bunny/Nidir) -> 10.0 (pasada de estabilización, pedido
+# de producto explícito, ver DEC-089 en docs/DECISION_LOG.md).
+#
+# A partir de DEC-089 este valor YA NO está unificado con el intervalo
+# ambient de Bunny/Nidir (que se queda en 12.0): son dos ritmos
+# distintos a propósito -- "cada cuánto el pet hace un gesto ocioso" vs.
+# "cuánto tarda en cambiar de POSTURA". Que se pueda diferenciar sin
+# tocar una sola línea de motor es justamente el punto del modelo: es
+# un dato de CONTENIDO por-estado (BehaviorState::ambientIntervalSeconds),
+# nunca hardcodeado por especie -- Artu (futuro, misma forma de grafo)
+# define el suyo sin tocar código.
+#
+# Las semánticas de reset no cambian: click, hover, drag y la
+# terminación de cualquier acción reinician la cuenta desde ese
+# instante (ver SpikeApp::RearmAmbientDeadline()). `lying` sigue sin
+# ambient_actions, así que nunca hay timer armado ahí.
+REST_DELAY_SECONDS = 10.0
 
 # 70/30 entre howl y tail_greet -- mismo mecanismo genérico que el
 # ambient 70/30 de Bunny/Nidir (content::ChooseWeightedActionIndex()),
 # acá aplicado al trigger de click en vez de ambient.
 SEATED_CLICK_WEIGHTS = {"howl": 0.7, "tail_greet": 0.3}
 
-# Escala visual por-pet (Block 05, segunda pasada de corrección
-# post-QA -- ver docs/DECISION_LOG.md DEC-076). QA manual real: "Frin
+# Escala visual por-pet (Block 05 -- ver content::PetDefinition::
+# visualScale). DEC-076 fijó 1.30 tras QA manual real ("Frin
 # male/female currently feel too small; visibly larger, comparable in
-# presence to Bunny/Nidir." Medido con el bounding box de contenido
-# visible del pack compilado (no solo el canvas transparente): a
-# 1.0, Frin macho ~85x128pt / hembra ~91x138pt -- notablemente más
-# chico que Bunny (~114x159pt, la referencia aprobada). A 1.30:
-# macho ~110x166pt / hembra ~118x179pt -- comparable a Bunny/Nidir
-# (~154x176pt) en presencia de escritorio. UN SOLO valor para ambas
-# variantes (mismo personaje, mismo tamaño percibido esperado, sin
-# importar el género) -- trivial de ajustar: cambiar este único
+# presence to Bunny/Nidir"). Ese TAMAÑO EN PANTALLA sigue aprobado y no
+# cambia; lo que cambió en la pasada de estabilización es el
+# denominador del que se deriva.
+#
+# Por qué el número bajó a 1.05 sin que Frin se vea más chico
+# (DEC-087): al arreglar la continuidad de las transiciones, la pose
+# base de `lying` dejó de exigir su propio centrado y pasó a heredar la
+# colocación de `sit_to_lie`. Eso saca margen transparente muerto del
+# canvas de trabajo compartido -- macho 543x815 -> 546x657, hembra
+# 496x653 -> 495x531 -- así que el canvas lógico derivado pasa de
+# 117x176 a 146x176 (macho) y de 134x176 a 163x176 (hembra), y el mismo
+# personaje ocupa una fracción mucho mayor de él.
+#
+# El valor se DERIVA, no se tantea. El alto de contenido en pantalla es
+#   (alto_contenido_nativo * content_scale / alto_canvas_trabajo) * alto_logico * visual_scale
+# y se resuelve para dejarlo igual que antes:
+#   macho:  (593/815)*176*1.30 = 166.5pt  ->  (593/657)*176*V  ->  V = 1.048
+#   hembra: (513/653)*176*1.30 = 179.7pt  ->  (513/531)*176*V  ->  V = 1.057
+# 1.05 queda a menos de 1% de ambos, y sigue siendo UN SOLO valor para
+# las dos variantes (mismo personaje, mismo tamaño percibido esperado,
+# sin importar el género) -- trivial de ajustar: cambiar este único
 # número y volver a correr este script.
-VISUAL_SCALE = 1.30
+#
+# Efecto secundario real y bienvenido: con el canvas más ajustado, el
+# tope de `runtime_max_frame_dimension` (320) recorta menos -- el ratio
+# de downscale del macho pasa de 0.393 a 0.487, o sea que Frin se
+# compila a ~24% más resolución efectiva para el mismo tamaño en
+# pantalla.
+VISUAL_SCALE = 1.05
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:

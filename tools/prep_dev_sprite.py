@@ -65,6 +65,7 @@ No external dependencies (standard library only — struct + zlib).
 
 from __future__ import annotations
 
+import math
 import struct
 import sys
 import zlib
@@ -427,6 +428,66 @@ def compose_on_canvas(
     return bytes(out)
 
 
+def alpha_rms_radius(width: int, height: int, pixels: bytes) -> float:
+    """Radio RMS ponderado por alpha alrededor del centroide de alpha —
+    el estimador de "qué tan grande es este personaje" que usa
+    compute_frame_normalization_plan().
+
+    Por qué NO el lado más largo del bounding box (Block 05, pasada de
+    estabilización — ver docs/DECISION_LOG.md DEC-088): el lado más
+    largo se decide con DOS pixeles extremos, así que una pose autorada
+    que estira una oreja, una cola o un hocico cambia la "medida" del
+    personaje sin que su tamaño haya cambiado en absoluto. Medido en el
+    contenido real de este repo: el `howl` de Frin macho tiene el bbox
+    +4.5% más ANCHO que la pose base sentada con EXACTAMENTE la misma
+    altura — no es escala, es la silueta autorada (la cabeza sube y la
+    cola se abre). Un correctivo calculado sobre ancho de bbox
+    aplastaría esa pose real.
+
+    El radio RMS integra TODOS los pixeles con su alpha como peso, así
+    que escala linealmente con un reescalado uniforme (que es lo que
+    queremos medir) y apenas se mueve con un cambio de pose (que no lo
+    es). Es la "alpha-registration" que este bloque pidió explícitamente
+    en vez de "raw bbox width alone".
+
+    Es invariante a traslación (se mide contra el centroide propio), así
+    que dos frames del mismo personaje en distinta posición dentro de su
+    frame nativo dan el mismo valor.
+
+    Devuelve 0.0 para un frame completamente transparente — el llamador
+    ya trata ese caso (nunca se divide por él sin chequear)."""
+    if len(pixels) != width * height * 4:
+        raise ValueError(
+            f"alpha_rms_radius: pixel buffer is {len(pixels)} bytes, expected {width * height * 4} for {width}x{height} RGBA8"
+        )
+
+    total = 0
+    sum_x = 0
+    sum_y = 0
+    for y in range(height):
+        row = y * width * 4
+        for x in range(width):
+            a = pixels[row + x * 4 + 3]
+            if a:
+                total += a
+                sum_x += x * a
+                sum_y += y * a
+    if total == 0:
+        return 0.0
+
+    cx = sum_x / total
+    cy = sum_y / total
+    variance = 0.0
+    for y in range(height):
+        row = y * width * 4
+        dy2 = (y - cy) ** 2
+        for x in range(width):
+            a = pixels[row + x * 4 + 3]
+            if a:
+                variance += a * ((x - cx) ** 2 + dy2)
+    return math.sqrt(variance / total)
+
+
 def compute_frame_normalization_plan(
     entries: dict[str, tuple[int, int, bytes]],
     groups: dict[str, str],
@@ -434,7 +495,10 @@ def compute_frame_normalization_plan(
     group_frame_paths: dict[str, list[str]],
     state_of_group: dict[str, str],
     base_group_of_state: dict[str, str],
-    scale_tolerance: float = 0.02,
+    entry_frame_paths: dict[str, list[str]] | None = None,
+    last_frames: dict[str, tuple[int, int, bytes]] | None = None,
+    transition_target_entry: dict[str, str] | None = None,
+    scale_tolerance: float = 0.005,
 ) -> dict[str, tuple[float, int, int, int, int]]:
     """Política genérica de "canvas de trabajo compartido, anclado por
     contenido" (Block 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y
@@ -564,8 +628,7 @@ def compute_frame_normalization_plan(
     def group_content_size(group_key: str) -> float:
         entry_key = canonical_of_group[group_key]
         w, h, pixels = entries[entry_key]
-        minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
-        return max(maxx - minx + 1, maxy - miny + 1)
+        return alpha_rms_radius(w, h, pixels)
 
     # --- Union-Find de grupos vinculados por archivo REAL compartido
     # (cualquier frame, no solo el primero) -- ver el docstring de
@@ -639,29 +702,124 @@ def compute_frame_normalization_plan(
         local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
         scale_by_group[group_key] = state_scale * local_scale
 
-    needed_left = needed_right = needed_top = needed_bottom = 0.0
-    scaled_by_entry: dict[str, tuple[float, float, float, float]] = {}  # scaled_w, scaled_h, anchor_x, anchor_y
+    # --- Colocación (offset) ------------------------------------------
+    #
+    # `anchor(E)` = centro del bounding box de contenido del FRAME DE
+    # REGISTRO de E, ya escalado. `pos(E)` = coordenada flotante de la
+    # esquina superior-izquierda de E en un marco provisional donde el
+    # ancla compartida está en el origen; al final se traslada todo para
+    # que nada quede negativo y de ahí sale el canvas de trabajo.
+    #
+    # Sin containment ni transiciones de estado esto es EXACTAMENTE la
+    # aritmética anterior (pos = -anchor), solo reescrita: cada entrada
+    # pone el centro de contenido de su primer frame en el mismo punto.
+    entry_paths = entry_frame_paths or {}
+    last_frame_pixels = last_frames or {}
+    transition_targets = transition_target_entry or {}
+
+    def anchor_of(entry_key: str, frame: tuple[int, int, bytes]) -> tuple[float, float]:
+        scale = scale_by_group[groups[entry_key]]
+        w, h, pixels = frame
+        minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
+        return ((minx + maxx + 1) / 2.0 * scale, (miny + maxy + 1) / 2.0 * scale)
+
+    first_anchor: dict[str, tuple[float, float]] = {}
+    scaled_size: dict[str, tuple[float, float]] = {}
     for entry_key, (w, h, pixels) in entries.items():
         scale = scale_by_group[groups[entry_key]]
-        minx, miny, maxx, maxy = content_bbox_or_full_frame(w, h, pixels)
-        anchor_x = (minx + maxx + 1) / 2.0 * scale
-        anchor_y = (miny + maxy + 1) / 2.0 * scale
-        scaled_w = w * scale
-        scaled_h = h * scale
-        scaled_by_entry[entry_key] = (scaled_w, scaled_h, anchor_x, anchor_y)
-        needed_left = max(needed_left, anchor_x)
-        needed_right = max(needed_right, scaled_w - anchor_x)
-        needed_top = max(needed_top, anchor_y)
-        needed_bottom = max(needed_bottom, scaled_h - anchor_y)
+        first_anchor[entry_key] = anchor_of(entry_key, (w, h, pixels))
+        scaled_size[entry_key] = (w * scale, h * scale)
 
-    working_width = max(1, round(needed_left + needed_right))
-    working_height = max(1, round(needed_top + needed_bottom))
+    # --- Containment: una entrada cuyos frames son un SUBCONJUNTO de los
+    # de otra (el contrato first/last-frame que este proyecto ya exige:
+    # `state[lying].base_animation` ES, literalmente, el frame final de
+    # `sit_to_lie`) NO es una medición independiente que haya que
+    # reconciliar -- es el mismo archivo. Hereda la colocación de su
+    # contenedor TAL CUAL, así que el frame compartido queda
+    # pixel-por-pixel en el mismo lugar en las dos entradas, y la
+    # transición de estado no puede saltar. Es la misma idea que el
+    # union-find de escala de DEC-075, extendida de la ESCALA a la
+    # TRASLACIÓN -- ver DEC-087.
+    #
+    # El match es por RUTA DE ARCHIVO real a nivel de ENTRADA (no de
+    # grupo), así que right/left se emparejan con su propia dirección
+    # sin depender del orden de los direction_overrides.
+    container_of: dict[str, str] = {}
+    if entry_paths:
+        path_sets = {k: frozenset(v) for k, v in entry_paths.items() if v}
+        for entry_key, own in path_sets.items():
+            best: str | None = None
+            for other_key, other in path_sets.items():
+                if other_key == entry_key or not own < other:
+                    continue
+                # Determinista si hubiera más de un contenedor posible:
+                # gana el de más frames, y a igualdad el de clave menor.
+                if best is None or (len(path_sets[best]), best) < (len(other), other_key):
+                    best = other_key
+            if best is not None:
+                container_of[entry_key] = best
+
+    def resolve_container(entry_key: str, seen: set[str]) -> str:
+        parent = container_of.get(entry_key)
+        if parent is None or parent in seen:
+            return entry_key
+        seen.add(parent)
+        return resolve_container(parent, seen)
+
+    pos: dict[str, tuple[float, float]] = {}
+
+    def place(entry_key: str) -> tuple[float, float]:
+        if entry_key in pos:
+            return pos[entry_key]
+        root = resolve_container(entry_key, {entry_key})
+        if root != entry_key:
+            pos[entry_key] = place(root)
+            return pos[entry_key]
+
+        target_entry = transition_targets.get(entry_key)
+        last = last_frame_pixels.get(entry_key)
+        if target_entry is not None and last is not None and target_entry in entries:
+            # Transición que CAMBIA de estado y cuyo frame final NO es
+            # el mismo archivo que la pose base del estado destino (el
+            # `lie_to_sit` de Frin: un export inverso genuinamente
+            # distinto). No hay containment que la ate, así que se ancla
+            # por su ÚLTIMO frame contra donde la pose base del estado
+            # destino realmente aterriza -- el instante en que el
+            # personaje QUEDA QUIETO es donde un salto se ve; el
+            # arranque de la transición ya está en movimiento y lo
+            # disimula. Ver DEC-087 y docs/FRIN_CONTENT.md para la
+            # medición de ambas puntas.
+            tx, ty = place(target_entry)
+            tax, tay = first_anchor[target_entry]
+            lax, lay = anchor_of(entry_key, last)
+            pos[entry_key] = (tx + tax - lax, ty + tay - lay)
+            return pos[entry_key]
+
+        ax, ay = first_anchor[entry_key]
+        pos[entry_key] = (-ax, -ay)
+        return pos[entry_key]
+
+    for entry_key in entries:
+        place(entry_key)
+
+    left = min(p[0] for p in pos.values())
+    top = min(p[1] for p in pos.values())
+    right = max(pos[k][0] + scaled_size[k][0] for k in entries)
+    bottom = max(pos[k][1] + scaled_size[k][1] for k in entries)
+
+    working_width = max(1, round(right - left))
+    working_height = max(1, round(bottom - top))
 
     plan: dict[str, tuple[float, int, int, int, int]] = {}
-    for entry_key, (_scaled_w, _scaled_h, anchor_x, anchor_y) in scaled_by_entry.items():
-        offset_x = round(needed_left - anchor_x)
-        offset_y = round(needed_top - anchor_y)
-        plan[entry_key] = (scale_by_group[groups[entry_key]], working_width, working_height, offset_x, offset_y)
+    for entry_key in entries:
+        px, py = pos[entry_key]
+        plan[entry_key] = (
+            scale_by_group[groups[entry_key]],
+            working_width,
+            working_height,
+            round(px - left),
+            round(py - top),
+        )
 
     return plan
 

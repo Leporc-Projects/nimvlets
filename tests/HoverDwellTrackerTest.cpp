@@ -108,9 +108,26 @@ bool NeverOverNeverFires() {
     return true;
 }
 
+bool ProductDwellThresholdIsHalfASecond() {
+    // Valor de producto explícito (DEC-084), sin cambios en la pasada
+    // de estabilización -- se fija acá porque src/app no es testeable
+    // en aislamiento y este umbral es exactamente el tipo de constante
+    // que una pasada futura podría mover sin querer.
+    NIMVLETS_CHECK(core::kDefaultHoverDwellSeconds == 0.5);
+
+    // Y que el umbral realmente gobierne el disparo, no solo exista:
+    // a 499ms todavía no; a 500ms sí.
+    core::HoverDwellTracker tracker{core::kDefaultHoverDwellSeconds};
+    NIMVLETS_CHECK(!tracker.Update(true, 1000.0));
+    NIMVLETS_CHECK(!tracker.Update(true, 1000.0 + 499.0));
+    NIMVLETS_CHECK(tracker.Update(true, 1000.0 + 500.0));
+    return true;
+}
+
 }  // namespace
 
 void RegisterHoverDwellTrackerTests(testing::TestRunner& runner) {
+    runner.Add("HoverDwellTracker.ProductDwellThresholdIsHalfASecond", ProductDwellThresholdIsHalfASecond);
     runner.Add("HoverDwellTracker/StartsNotDwelling", StartsNotDwelling);
     runner.Add("HoverDwellTracker/DoesNotFireImmediatelyOnEntry", DoesNotFireImmediatelyOnEntry);
     runner.Add("HoverDwellTracker/FiresExactlyWhenThresholdIsCrossed", FiresExactlyWhenThresholdIsCrossed);

@@ -58,7 +58,10 @@ public:
     // constexpr` (no un anonymous-namespace constant en el .cpp)
     // porque tanto el inicializador de hoverDwellTracker_ como el
     // cálculo de hoverDwellDeadlineMs_ en SpikeApp.cpp lo necesitan.
-    static constexpr double kHoverDwellSeconds = 0.5;
+    // El VALOR en sí vive en core::kDefaultHoverDwellSeconds (pasada de
+    // estabilización) para que la CI pueda fijarlo: src/app no es
+    // testeable en aislamiento (arrastra SDL y una ventana real).
+    static constexpr double kHoverDwellSeconds = core::kDefaultHoverDwellSeconds;
 
 private:
     bool Init();

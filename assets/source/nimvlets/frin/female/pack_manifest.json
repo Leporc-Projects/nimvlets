@@ -3,7 +3,7 @@
   "display_name": "Frin",
   "variant_group": "frin",
   "alpha_hit_threshold": 128,
-  "visual_scale": 1.3,
+  "visual_scale": 1.05,
   "content_version": "block05-frin-1",
   "runtime_max_frame_dimension": 320,
   "normalize_visual_scale": true,
@@ -37,7 +37,7 @@
           ]
         }
       ],
-      "ambient_interval_seconds": 12.0,
+      "ambient_interval_seconds": 10.0,
       "ambient_actions": [
         {
           "id": "sit_to_lie",
@@ -966,6 +966,6 @@
       ]
     }
   ],
-  "canvas_width": 134,
+  "canvas_width": 164,
   "canvas_height": 176
 }
