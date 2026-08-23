@@ -673,3 +673,53 @@ por debajo de Bunny pese al ajuste previo), Frin macho ~111×167pt
 (antes: ~85×128pt), Frin hembra ~118×179pt (antes: ~91×138pt). Ver
 `docs/NIDIR_CONTENT.md`/`docs/BUNNY_CONTENT.md`/`docs/FRIN_CONTENT.md`
 y el informe de Block 05 para el detalle completo.
+
+## 12. Invariante de continuidad de punta en transiciones de estado (Block 05, pasada de estabilización)
+
+Contrato de contenido + compilador, permanente desde acá:
+
+> Para una acción que CAMBIA de estado, el **último frame mostrado de
+> la transición** debe ser el **primer frame mostrado de la pose base
+> del estado destino** — pixel por pixel, misma posición y mismo
+> tamaño — siempre que el contenido declare/reuse el mismo asset de
+> punta.
+
+Cero traslación y cero salto de escala en el instante del cambio de
+estado.
+
+**Por qué el contenido puede garantizarlo.** Este proyecto ya exige el
+contrato first/last-frame (ver `docs/NIDIR_CONTENT.md`): la pose base
+de un estado no es un asset nuevo, REFERENCIA un frame real de la
+animación que lleva a ese estado. Frin es el caso vivo:
+`state[lying].base_animation` ES el frame final de `sit_to_lie`.
+
+**Cómo lo garantiza el compilador.** `compute_frame_normalization_plan()`
+colocaba cada entrada anclando el centro de contenido de SU PROPIO
+frame 0, así que dos entradas que comparten un archivo terminaban
+poniendo los MISMOS pixeles en lugares distintos. Desde DEC-087 la
+colocación se **hereda**: una entrada cuyos archivos de frame son un
+subconjunto de los de otra toma su offset tal cual (match por ruta
+real, a nivel de entrada, así `right`/`left` se emparejan con su propia
+dirección). Es la misma idea que el union-find por archivo compartido
+de DEC-075, extendida de la ESCALA a la TRASLACIÓN.
+
+Para una transición que cambia de estado SIN ese vínculo de archivo (un
+export inverso independiente, como el `lie_to_sit` de Frin) el
+invariante estricto no aplica — no hay asset compartido que igualar.
+Ahí el compilador la ancla por su **último** frame contra donde la base
+del estado destino realmente aterriza: el instante en que el personaje
+queda quieto es donde un salto se ve, mientras que el arranque ya está
+en movimiento.
+
+**Qué NO hace, a propósito.** No deforma ni re-temporiza la animación
+autorada para cerrar una diferencia. Si las dos puntas de un par de
+transiciones no cierran (porque los dos exports no describen la misma
+trayectoria), eso es una pregunta de contenido y se reporta como tal —
+ver `docs/FRIN_CONTENT.md` §8.3, donde el desacuerdo real está medido
+sobre los PNG nativos.
+
+**Tests:** `tools/test_asset_pipeline.py`,
+`TransitionEndpointContinuityTest` (mecanismo, con control negativo) y
+`CompiledFrinEndpointContinuityTest` (los packs REALES que se envían,
+decodificados con `tools/read_pet_pack.py`, ambas variantes × ambas
+direcciones).

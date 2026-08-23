@@ -864,6 +864,105 @@ class CompiledClickScaleTest(unittest.TestCase):
                                     f"{drift * 100:+.2f}% off its state's base pose")
 
 
+class NidirGoldenControlTest(unittest.TestCase):
+    """Nidir es el control dorado establecido: se ve bien en todos los
+    caminos de renderer y ninguna pasada debe moverlo. Su geometría
+    aprobada se fija acá para que un cambio en la política de
+    normalización (que es exactamente lo que esta pasada tocó) falle
+    ruidosamente en vez de deslizarse.
+
+    En la pasada de estabilización de Block 05 el pack de Nidir quedó
+    BYTE-IDÉNTICO tras regenerarlo con la métrica nueva -- estos valores
+    son los de ese pack."""
+
+    def test_nidir_canvas_and_visual_scale_are_unchanged(self) -> None:
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/nidir_pack.nvpack"))
+        self.assertEqual((pack["canvas_width"], pack["canvas_height"]), (176, 173))
+        self.assertEqual(pack["visual_scale"], 1.25)
+        self.assertEqual(pack["alpha_hit_threshold"], 128)
+
+    def test_nidir_every_animation_is_compiled_at_scale_one(self) -> None:
+        """Ninguna animación de Nidir necesitó nunca un `content_scale`
+        distinto de 1.0 -- todas sus animaciones ya comparten encuadre.
+        Se verifica de forma observable: todos los frames comparten
+        dimensiones y todas las animaciones miden lo mismo."""
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/nidir_pack.nvpack"))
+        state = read_pet_pack.find_state(pack, "default")
+        sizes = set()
+        for direction in ("right", "left"):
+            base = read_pet_pack.resolve_animation(
+                state["base_animation"], state["base_animation_direction_overrides"], direction)
+            sizes.add((base["frames"][0]["width"], base["frames"][0]["height"]))
+            for trigger in ("ambient_actions", "hover_actions", "click_actions"):
+                for action in state[trigger]:
+                    animation = read_pet_pack.resolve_animation(
+                        action["animation"], action["direction_overrides"], direction)
+                    for frame in animation["frames"]:
+                        sizes.add((frame["width"], frame["height"]))
+        self.assertEqual(len(sizes), 1, f"Nidir frames should all share one canvas, got {sizes}")
+
+
+class PrivacyInvariantTest(unittest.TestCase):
+    """AGENTS.md §5/§14 son contratos duros: nada en el runtime instala
+    un hook global de input, captura pantalla, ni pide un permiso de
+    TCC. La pasada de estabilización de Block 05 tocó justamente el
+    código de plataforma de macOS donde un atajo así sería tentador
+    (había una alternativa técnicamente viable -- un monitor global de
+    `NSEvent` -- y se descartó explícitamente por esta razón, ver
+    DEC-086), así que el contrato se fija en un test en vez de quedar
+    solo escrito.
+
+    Vive en esta suite porque es la única suite de Python del repo; no
+    tiene nada que ver con assets. Es un chequeo de FUENTE, no de
+    comportamiento -- no puede probar que no aparezca un diálogo de
+    permiso, pero sí que no exista ninguna de las APIs que lo
+    provocarían."""
+
+    # Cada entrada: (símbolo prohibido, por qué).
+    FORBIDDEN = (
+        ("addGlobalMonitorForEvents", "monitor global de NSEvent -- hook de input system-wide"),
+        ("addLocalMonitorForEvents", "monitor de NSEvent a nivel app -- innecesario y fuera de contrato"),
+        ("CGEventTapCreate", "event tap -- requiere Accessibility"),
+        ("AXIsProcessTrusted", "consulta/solicitud de permiso de Accessibility"),
+        ("IOHIDManager", "acceso HID crudo -- requiere Input Monitoring"),
+        ("CGWindowListCreateImage", "captura de pantalla"),
+        ("CGDisplayCreateImage", "captura de pantalla"),
+        ("SCStream", "ScreenCaptureKit -- captura de pantalla"),
+    )
+
+    def _runtime_sources(self) -> list[str]:
+        paths = []
+        for root, _dirs, files in os.walk(os.path.join(_REPO_ROOT, "src")):
+            for name in files:
+                if name.endswith((".cpp", ".h", ".mm")):
+                    paths.append(os.path.join(root, name))
+        return paths
+
+    def test_no_global_input_hook_or_screen_capture_in_the_runtime(self) -> None:
+        sources = self._runtime_sources()
+        self.assertGreater(len(sources), 20, "source scan found suspiciously few files")
+        for path in sources:
+            # El check GUI de click-through no se envía con el producto,
+            # pero igual no usa ninguno de estos símbolos, así que no se
+            # exceptúa: si algún día los usara, queremos enterarnos.
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            for symbol, why in self.FORBIDDEN:
+                self.assertNotIn(
+                    symbol, text,
+                    f"{os.path.relpath(path, _REPO_ROOT)} uses '{symbol}' ({why}) -- "
+                    "prohibido por AGENTS.md §5/§14")
+
+    def test_click_through_still_uses_only_a_cursor_position_query(self) -> None:
+        """El único dato de entrada global que este producto lee es la
+        POSICIÓN del cursor, vía la API cross-platform de SDL. Si eso
+        cambiara a cualquier otra cosa, este test es el que lo nota."""
+        spike = os.path.join(_REPO_ROOT, "src/app/SpikeApp.cpp")
+        with open(spike, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("SDL_GetGlobalMouseState", text)
+
+
 class ContentTimingPolicyTest(unittest.TestCase):
     """Los valores de ritmo que el owner fija como producto viven en el
     CONTENIDO (manifests por-pet), no en el motor -- así que se fijan

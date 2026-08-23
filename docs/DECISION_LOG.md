@@ -2327,6 +2327,14 @@ de frame).
 
 ### DEC-085 — El A/B prometido en DEC-083 encontró un SEGUNDO bug: SDL_SetWindowShape() corrompe el software renderer en macOS; fallback a click-through poll-driven
 **Status:** DECIDIDO · Block 05, misma pasada de resolución de renderer
+· **CAUSA RAÍZ CORREGIDA POR DEC-086** — el HECHO observable de esta
+entrada (una forma instalada corrompe el render bajo el driver
+"software", y por lo tanto la ruta de shape no se puede usar ahí) sigue
+siendo cierto y sigue vigente. Lo que estaba MAL era la explicación:
+esta entrada culpaba a la parte genérica de `SDL_video.c` y afirmaba
+que la corrupción era PERMANENTE. Las dos cosas se midieron y son
+falsas — ver DEC-086. Se conserva el texto original tal cual, sin
+reescribir, para que quede el registro de cómo se llegó hasta acá
 -- este es el seguimiento directo de la validación que DEC-083 dejó
 pendiente ("Ver el informe de esta pasada para el A/B visual
 completo"), no una pasada nueva.
@@ -2409,3 +2417,239 @@ el log confirma "creation #1" por sesión, sin crecer por frame).
 Ver el informe final de esta pasada para los números de CPU/RSS bajo
 software (Nidir/Bunny/Frin macho, estático vs. durante animación) y el
 estado de la retest de la transición de dirección (§ notas de UX).
+
+---
+
+### DEC-086 — macOS click-through: Nimvlets es el ÚNICO escritor de NSWindow.ignoresMouseEvents (y la causa raíz real de DEC-085)
+**Status:** DECIDIDO · Block 05, pasada de estabilización
+
+Dos preguntas abiertas desde DEC-085 quedaron resueltas acá, las dos con
+evidencia medida (lectura de la fuente pineada de SDL 3.4.12 + repros
+nativos mínimos), no por inferencia. La entrada es una sola porque las
+dos respuestas están acopladas: la primera es la razón por la que no
+podemos usar la ruta de shape, y la segunda es la razón por la que la
+alternativa venía fallando.
+
+**(1) Por qué una forma corrompe el render bajo el driver "software".**
+No es `SDL_video.c` ni nada del backend Cocoa. Es el RENDERER:
+`SDL_RenderPresent()` llama a `SDL_RenderApplyWindowShape()`
+(`src/render/SDL_render.c:5463`) para toda ventana transparente. Esa
+función crea una textura a partir de la superficie de forma y le pide
+un blend mode CUSTOM —
+`SDL_ComposeCustomBlendMode(ZERO, SRC_ALPHA, ADD, ZERO, SRC_ALPHA, ADD)`,
+o sea "multiplicá el destino por el alpha de la forma". El renderer de
+software no implementa el hook `SupportsBlendMode`, así que
+`IsSupportedBlendMode()` (`SDL_render.c:1409`) rechaza cualquier modo
+custom y la llamada FALLA. SDL ignora ese fallo por diseño ("There's
+nothing we can do if this fails, so just keep on going"), con lo cual
+la textura de forma se queda con su `SDL_BLENDMODE_BLEND` por defecto
+— y en vez de enmascarar nuestro contenido, **lo pinta encima**. De ahí
+la silueta blanca opaca.
+
+Medido con un programa SDL3 standalone con los flags de ventana de
+producción: contra `"software"` el blend mode custom es rechazado
+("That operation is not supported") y el pixel central leído de vuelta
+pasa de `(0,0,0,0)` a `(255,255,255,255)` en el instante en que se
+instala una forma; contra `"metal"` el mismo blend mode es aceptado y
+el pixel leído no cambia nunca. Además `SDL_SetWindowShape(w, NULL)`
+restaura el render de inmediato: **la corrupción no es permanente**,
+dura exactamente lo que dure la forma instalada. DEC-085 afirmaba lo
+contrario en los dos puntos.
+
+**(2) Por qué el fallback poll-driven venía perdiendo.** En SDL 3.4.12
+hay exactamente DOS escritores de `NSWindow.ignoresMouseEvents`. El
+que importa es `-[Cocoa_WindowListener updateIgnoreMouseState:]`
+(`src/video/cocoa/SDL_cocoawindow.m:1073`), alcanzable solo desde
+`-mouseMoved:` (línea 1893) bajo la guarda
+`(window->flags & SDL_WINDOW_TRANSPARENT)`; `-mouseDragged:`,
+`-rightMouseDragged:` y `-otherMouseDragged:` reenvían todos ahí. Lee
+la forma desde `SDL_PROP_WINDOW_SHAPE_POINTER` y, **si no hay ninguna
+instalada, asigna `NO` incondicionalmente**. Medido con los flags de
+ventana de producción: UN solo `NSEventTypeMouseMoved` entregado a
+nuestra propia ventana da vuelta el valor de YES a NO.
+
+O sea: el poll histórico nunca estuvo mal medido — estaba PELEANDO
+contra otro escritor. Ninguna frecuencia de muestreo podía ganar esa
+carrera, solo achicarla. Y como `SpikeApp` cacheaba
+`currentlyClickThrough_`, cuando SDL pisaba el valor la app ni siquiera
+se enteraba: creía que ya estaba en el estado correcto y no volvía a
+mirar.
+
+**Decisión.** `platform::MakeClickThroughAuthoritative()` (nueva, en el
+seam de siempre, implementada en las tres plataformas) intercepta
+`-setIgnoresMouseEvents:` para NUESTRA ventana — agregando el override
+a su propia clase vía el runtime de Objective-C, con swizzle in-place
+solo si esa clase ya lo implementaba — y descarta toda escritura que no
+venga del adaptador. Nimvlets escribe llamando a la IMP original
+directamente. Windows/Linux devuelven `false` (no hay otro escritor
+contra el que protegerse).
+
+Alternativas evaluadas y descartadas, con motivo:
+- **Instalar igual la forma** (para que Cocoa haga el hit-test
+  per-pixel solo): imposible sin corromper el render — el renderer lee
+  la MISMA propiedad de ventana que Cocoa, no se pueden separar.
+- **Parchear la fuente pineada de SDL**: forkea una dependencia pineada
+  a un tag exacto (AGENTS.md §10), agrega `PATCH_COMMAND` al
+  `FetchContent`, y hay que revalidarlo en cada bump, en cuatro
+  plataformas. Desproporcionado para lo que se arregla.
+- **Segunda ventana invisible con forma, solo para hit-test**: choca
+  con la misma pared — la ventana VISUAL sigue siendo
+  `SDL_WINDOW_TRANSPARENT`, así que SDL le seguiría pisando
+  `ignoresMouseEvents` igual. Además duplica la gestión de posición/
+  nivel/Spaces.
+- **Monitor global de NSEvent para el mouse**: prohibido por AGENTS.md
+  §5/§14 (hook global de input), y además innecesario.
+
+**Muestreo.** `core::EvaluateClickThrough()` (nueva, pura, con tests)
+observa que **el estado de click-through es inobservable mientras el
+cursor está FUERA del rectángulo de la ventana** — ningún click de ahí
+puede llegarnos, esté como esté. Así que afuera se elige
+deliberadamente el estado NO-click-through: eso devuelve la entrega
+normal de eventos de mouse, con lo cual el ingreso a la ventana llega
+como EVENTO en vez de tener que descubrirlo encuestando. El muestreo
+periódico queda armado solo mientras el cursor está DENTRO del
+rectángulo. En reposo — el caso dominante — el loop no se despierta ni
+una vez por click-through.
+
+Límite honesto: mientras el click-through está ACTIVO la ventana no
+recibe eventos de mouse, así que detectar el regreso del cursor exige
+muestrear. Eso es inherente al mecanismo de `ignoresMouseEvents`, no
+una elección de este diseño (la propia ruta de shape de SDL tiene la
+misma forma: reevalúa en `-mouseMoved:`). Un "teletransporte" del
+cursor directo a un pixel transparente seguido de un click inmediato,
+sin ningún evento de movimiento intermedio, puede perderse por hasta un
+intervalo de muestreo.
+
+---
+
+### DEC-087 — Continuidad de punta en transiciones de estado: la colocación se hereda por archivo compartido, no se recalcula
+**Status:** DECIDIDO · Block 05, pasada de estabilización
+
+QA manual: "sit_to_lie termina visualmente y, al entrar a la base de
+lying, el lobo salta un poco hacia arriba" (y el simétrico al entrar a
+seated). Medido sobre el pack compilado real de Frin macho: bounding
+box IDÉNTICO, suma de alpha IDÉNTICA, `dy = -62px`. **Traslación pura
+de pixeles idénticos** — no era escala ni contenido, era colocación.
+
+Causa: `compute_frame_normalization_plan()` colocaba cada entrada
+anclando el centro de contenido de SU PROPIO frame 0. Como
+`state[lying].base_animation` es, literalmente, el frame final de
+`sit_to_lie` (el contrato first/last-frame que este proyecto ya exige),
+el compilador estaba poniendo EL MISMO ARCHIVO en dos lugares
+distintos.
+
+Corrección, estructural y no heurística: se extiende el union-find por
+archivo compartido de DEC-075 de la ESCALA a la TRASLACIÓN. Una entrada
+cuyos archivos de frame son un SUBCONJUNTO de los de otra hereda su
+colocación tal cual (match por ruta real, a nivel de entrada, así
+right/left se emparejan con su propia dirección). Una transición que
+cambia de estado y NO tiene ese vínculo (`lie_to_sit`, un export
+inverso independiente) se ancla por su ÚLTIMO frame contra donde
+aterriza de verdad la base del estado destino: el instante en que el
+personaje QUEDA QUIETO es donde un salto se ve; el arranque ya está en
+movimiento y lo disimula.
+
+Resultado, compilado, ambas variantes y ambas direcciones:
+- `sit_to_lie` último frame vs. base de `lying`: **idéntico pixel a
+  pixel** (antes `dy` -62 macho / -60 hembra).
+- `sit_to_lie` primer frame vs. base de `seated`: idéntico (sin
+  cambios, ya lo era).
+- `lie_to_sit` último frame vs. base de `seated`: centroide a menos de
+  1.2px (antes `dy` +52..+55).
+
+**Residual, declarado y no disimulado:** el ARRANQUE de `lie_to_sit`
+ahora difiere de la base de `lying` en (25.5, 10.7)px en macho y
+(3.0, 5.8)px en hembra. Es ARTE FUENTE, probado sobre los PNG nativos
+sin compilador de por medio: `sit_to_lie` mueve al lobo macho
+(-23, +158) px nativos mientras `lie_to_sit` lo mueve (-23, -118);
+si fueran reversas exactas la suma sería cero, y suman (-46, +40). El
+par de la hembra casi coincide ((-3, +13)), que es exactamente por qué
+su residual es chico. Ningún offset rígido puede satisfacer las dos
+puntas de un desacuerdo así, y deformar la animación autorada para
+taparlo estaba fuera de alcance. **Pregunta de CONTENIDO para el
+owner**, no deuda de compilador.
+
+Efecto secundario: al no exigir `lying` su propio centrado, el canvas
+de trabajo compartido pierde margen muerto (macho 543x815 -> 546x657,
+hembra 496x653 -> 495x531). `visual_scale` se RE-DERIVA 1.30 -> 1.05
+para dejar el tamaño en pantalla aprobado exactamente igual (la
+derivación está escrita en el comentario de la constante), y de yapa
+el pet se compila a ~24% más resolución efectiva bajo el mismo tope de
+`runtime_max_frame_dimension`.
+
+También se volvió exacto el dimensionado del canvas frente al redondeo
+del downscale de runtime (`_grow_working_canvas_for_runtime_rounding()`):
+antes tres redondeos independientes podían dejar un frame 1px afuera, y
+solo el guard ruidoso de `_compile_frame()` lo atajaba. Es no-op para
+Bunny/Nidir.
+
+---
+
+### DEC-088 — El tamaño de un grupo se mide por registración de alpha, no por el lado más largo del bounding box
+**Status:** DECIDIDO · Block 05, pasada de estabilización
+
+QA manual: las animaciones de click se ven "un poco más anchas/grandes"
+que la pose base aprobada de su estado (Bunny `click`; Frin `howl`/
+`tail_greet` sentado).
+
+`compute_frame_normalization_plan()` medía "qué tan grande es este
+personaje" como el LADO MÁS LARGO de su bounding box de contenido —
+una cifra decidida por dos pixeles extremos. Una pose autorada que
+estira una oreja, una cola o un hocico cambia esa medida sin que el
+personaje haya cambiado de tamaño. Medido en el contenido real: el
+`howl` de Frin macho tiene el bbox +4.5% más ANCHO que la base sentada
+con EXACTAMENTE la misma altura.
+
+Se reemplaza por `prep_dev_sprite.alpha_rms_radius()`: radio RMS
+ponderado por alpha alrededor del centroide de alpha. Integra TODOS los
+pixeles, así que escala linealmente con un reescalado real (lo que
+queremos medir) y apenas se mueve con un cambio de pose (lo que no).
+Es la "alpha-registration" que el brief pidió explícitamente en vez de
+"raw bbox width alone". Con la medida ya estable, la tolerancia baja de
+2% a 0.5% — que no cuesta calidad de imagen, porque el `content_scale`
+ya se combina con el downscale de runtime en un ÚNICO resize.
+
+Desvío de cada acción contra la pose base de su estado, antes -> después:
+
+| pet | animación | antes | después |
+|---|---|---|---|
+| Bunny | click | +0.75% | **+0.06%** |
+| Bunny | groom (aprobada) | +0.58% | **+0.27%** |
+| Nidir | wing_stretch | -0.16% | -0.16% (sin cambio) |
+| Nidir | click_fire | +0.12% | +0.12% (sin cambio) |
+| Frin macho | howl | +0.98% | **-0.12%** |
+| Frin macho | tail_greet | -0.72% | **-0.17%** |
+| Frin hembra | tail_greet | -1.43% | **+0.13%** |
+| Frin hembra | howl | +0.34% | **+0.28%** |
+
+**El pack de Nidir queda BYTE-IDÉNTICO tras regenerarlo** — el control
+dorado no se tocó, y eso es verificable, no una afirmación.
+
+Lo que queda de "más ancho" está AUTORADO en el arte (Bunny click:
+bbox +1.9% de ancho; Frin howl: +2.1% de ancho a altura casi igual).
+Corregir eso aplastaría una pose real, así que no se hace. Se declara
+como hecho de contenido.
+
+---
+
+### DEC-089 — Frin: rest delay a 10s, desacoplado del intervalo ambient de Bunny/Nidir
+**Status:** DECIDIDO · Block 05, pasada de estabilización
+
+Pedido de producto explícito del owner. Frin sentado pasa de 12s a
+**10s** de reposo genuino antes de `sit_to_lie` -> `lying`.
+Bunny y Nidir se quedan en **12s** (DEC-084, sin cambios), y el dwell
+de hover se queda en **0.5s** (DEC-084, sin cambios).
+
+Lo relevante más allá del número: DEC-084 había UNIFICADO los tres
+valores, y esto los vuelve a separar a propósito. Son dos ritmos
+distintos — "cada cuánto el pet hace un gesto ocioso" vs. "cuánto tarda
+en cambiar de POSTURA" — y no hay razón de producto para que coincidan.
+Que se puedan diferenciar sin tocar una línea de motor es justamente el
+punto del modelo: `ambient_interval_seconds` es un dato de CONTENIDO
+por-estado (`BehaviorState::ambientIntervalSeconds`), nunca hardcodeado
+por especie.
+
+Semánticas de reset sin cambios: click, hover, drag y la terminación de
+cualquier acción reinician la cuenta desde ese instante. `lying` sigue
+sin `ambient_actions`, así que nunca hay timer armado ahí — nada
+despierta el loop por ese motivo mientras el lobo está acostado.

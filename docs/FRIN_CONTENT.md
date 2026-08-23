@@ -288,3 +288,124 @@ contenido y el mismo código de runtime que macho (ninguno de los dos
 tiene una ruta de renderizado separada) pero no se relanzó por
 separado en esta pasada -- no verificado en vivo, riesgo bajo dado que
 no hay ninguna diferencia de código entre variantes.
+
+## 8. Corrección post-QA (Block 05, pasada de estabilización): continuidad de punta, rest delay a 10s, visual_scale re-derivada
+
+QA manual del owner tras §7: la corrupción visual grande ya no está, y
+las animaciones se ven bien. Quedaban dos cosas chicas, las dos en las
+PUNTAS de las transiciones de postura:
+
+> `sit_to_lie` termina visualmente y, al entrar a la base de `lying`,
+> el lobo salta un poco hacia ARRIBA; `lie_to_sit` termina y, al entrar
+> a la base de `seated`, salta un poco hacia ABAJO. En las dos
+> variantes.
+
+### 8.1 Lo que se midió antes de tocar nada
+
+Comparando los frames COMPILADOS que el runtime realmente muestra
+(vía `tools/read_pet_pack.py`, nuevo en esta pasada), macho, dirección
+`right`:
+
+| par comparado | dims | bbox | suma de alpha | delta |
+|---|---|---|---|---|
+| `sit_to_lie` frame 24 vs. base de `lying` | iguales | **idéntico** (178×125) | **idéntica** | `dx=-9, dy=-62` |
+| `sit_to_lie` frame 0 vs. base de `seated` | iguales | idéntico | idéntica | pixel a pixel igual |
+| `lie_to_sit` frame 24 vs. base de `seated` | iguales | 155×230 vs 155×233 | +1.5% | `dx=-11, dy=+52` |
+
+La primera fila es la prueba: **mismo bounding box, misma suma de
+alpha, desplazados**. Son literalmente los mismos pixeles puestos en
+dos lugares distintos — o sea un problema de COLOCACIÓN del compilador,
+no de escala ni de contenido. (Y tiene sentido: la base de `lying`
+REFERENCIA el frame final de `sit_to_lie`, no es un asset aparte.)
+
+### 8.2 La corrección
+
+Ver `docs/DECISION_LOG.md` DEC-087 para el diseño. En una línea: la
+colocación ahora se HEREDA por archivo compartido en vez de
+recalcularse — la misma idea que DEC-075 ya aplicaba a la escala,
+extendida a la traslación.
+
+Resultado, ambas variantes, ambas direcciones:
+
+| par comparado | antes | después |
+|---|---|---|
+| `sit_to_lie` último vs. base de `lying` | `dy` -62 (M) / -60 (F) | **idéntico pixel a pixel** |
+| `sit_to_lie` primero vs. base de `seated` | idéntico | idéntico (sin cambios) |
+| `lie_to_sit` último vs. base de `seated` | `dy` +52 (M) / +54 (F) | centroide a <1.2px |
+
+### 8.3 Lo que NO se arregló, y por qué
+
+El ARRANQUE de `lie_to_sit` ahora difiere de la base de `lying` en
+(25.5, 10.7)px en macho y (3.0, 5.8)px en hembra.
+
+Eso es **arte fuente**, no compilador. Medido sobre los PNG nativos,
+sin compilador de por medio, comparando cuánto mueve cada export al
+lobo dentro de su propio frame (centro de bbox, frame 0 -> frame 24):
+
+| variante | `sit_to_lie` mueve | `lie_to_sit` mueve | suma (0 si fueran reversas exactas) |
+|---|---|---|---|
+| macho | (-23, +158) | (-23, -118) | **(-46, +40)** |
+| hembra | (+4.5, +122) | (-7.5, -109) | (-3, +13) |
+
+El macho se acuesta desplazándose 23px hacia un lado y se levanta
+desplazándose 23px hacia **el mismo** lado — si fueran reversas, el
+segundo debería ir para el otro. La hembra casi coincide, y por eso su
+residual es chico.
+
+Ningún offset rígido puede satisfacer las dos puntas de un desacuerdo
+así. Se eligió que quede bien la punta donde el personaje QUEDA QUIETO
+(entrar a la pose base estable), porque ahí un salto se ve; el arranque
+de una transición ya está en movimiento y lo disimula. **Es una
+pregunta de contenido para el owner** (¿re-exportar `lie_to_sit` del
+macho como reversa real de `sit_to_lie`?), no deuda de compilador.
+
+### 8.4 Efecto secundario: canvas más ajustado, `visual_scale` re-derivada
+
+Al no exigir `lying` su propio centrado, el canvas de trabajo
+compartido pierde margen transparente muerto:
+
+| variante | canvas de trabajo | canvas lógico |
+|---|---|---|
+| macho | 543×815 -> **546×657** | 117×176 -> **146×176** |
+| hembra | 496×653 -> **495×531** | 134×176 -> **164×176** |
+
+Eso haría que Frin se viera ~24% más grande a `visual_scale` constante,
+así que la escala se **re-deriva** 1.30 -> **1.05** para dejar el tamaño
+en pantalla aprobado por DEC-076 exactamente igual (la aritmética está
+escrita en el comentario de `VISUAL_SCALE` en
+`tools/generate_frin_pack.py`). Efectivo en pantalla: macho 153×185,
+hembra 172×185.
+
+De yapa: con el canvas más ajustado el tope de
+`runtime_max_frame_dimension` (320) recorta menos — el ratio de
+downscale del macho pasa de 0.393 a 0.487, o sea **~24% más resolución
+efectiva** para el mismo tamaño en pantalla.
+
+### 8.5 Rest delay: 10 segundos
+
+`REST_DELAY_SECONDS` pasa de 12.0 a **10.0** (pedido de producto
+explícito — ver DEC-089). Ya **no** está unificado con el intervalo
+ambient de Bunny/Nidir, que se queda en 12s: son dos ritmos distintos a
+propósito ("cada cuánto hace un gesto ocioso" vs. "cuánto tarda en
+cambiar de postura"). El dwell de hover se queda en 0.5s.
+
+Semánticas de reset sin cambios: click, hover, drag y la terminación de
+cualquier acción reinician la cuenta. `lying` sigue sin
+`ambient_actions` — nunca hay timer armado mientras el lobo está
+acostado.
+
+### 8.6 Tests de regresión
+
+`tools/test_asset_pipeline.py`:
+- `CompiledFrinEndpointContinuityTest` — decodifica los packs REALES que
+  se envían y compara las dos puntas de cada transición, macho/hembra ×
+  right/left. La igualdad pixel a pixel se exige donde el contenido
+  declara el mismo asset de punta; donde el export es independiente
+  (`lie_to_sit`) se exige registración del centro de contenido.
+- `TransitionEndpointContinuityTest` — el mecanismo sobre grafos
+  sintéticos, **con control negativo**: sin reuso de archivo las dos
+  colocaciones sí divergen, así que el test positivo no puede pasar por
+  casualidad.
+- `ContentTimingPolicyTest` / `CompiledClickScaleTest` — 10s de Frin,
+  12s de Bunny/Nidir, y desvío de tamaño de cada acción contra la base
+  de su estado.

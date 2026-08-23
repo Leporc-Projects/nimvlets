@@ -912,6 +912,25 @@ void SpikeApp::PollHover() {
 }
 
 void SpikeApp::UpdateClickThrough(bool cursorInsideWindow, bool cursorOverOpaque) {
+    if (!usingPollDrivenClickThrough_) {
+        // Esta plataforma/driver NO usa el mecanismo propio de
+        // Nimvlets: o bien la ruta nativa de shape ya resuelve el
+        // hit-test por su cuenta (macOS con driver acelerado,
+        // Linux/X11 -- ahí escribir el estado a mano PELEARÍA contra
+        // SDL, que es exactamente el error que este bloque acaba de
+        // corregir en la dirección contraria), o bien no hay ningún
+        // mecanismo disponible (Linux/Wayland). En los dos casos esto
+        // es un no-op deliberado, y el muestreo queda desarmado.
+        //
+        // El guard vive acá y no en cada call site a propósito:
+        // HandleEvent() llama a esta función desde cinco lugares
+        // (motion/enter/leave/button-down/button-up) y repetir la
+        // condición en todos era la forma segura de que algún día uno
+        // quedara sin guardar.
+        clickThroughSamplingActive_ = false;
+        return;
+    }
+
     const core::ClickThroughDecision decision =
         core::EvaluateClickThrough(cursorInsideWindow, cursorOverOpaque, dragClassifier_.IsActive());
 

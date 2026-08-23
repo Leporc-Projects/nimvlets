@@ -19,6 +19,30 @@ input aimed at Nimvlets itself:
 No permissions beyond ordinary windowing are requested by this flow. No
 Accessibility. No Input Monitoring. No Screen Recording. No admin/root.
 
+**Actualización (Block 05, pasada de estabilización — DEC-086).** El
+mecanismo de click-through de macOS cambió; el perfil de privacidad
+**no**. Dos precisiones sobre el texto de arriba:
+
+- La cadencia "~cada 83 ms" ya no describe el comportamiento real. El
+  muestreo de posición de cursor ahora se **arma solo mientras el
+  cursor está dentro del rectángulo de nuestra ventana** (ver
+  `src/core/ClickThroughPolicy.h`): con el cursor en cualquier otro
+  lugar de la pantalla no se consulta la posición del cursor **en
+  absoluto**. Es estrictamente menos consulta que antes, no más.
+- Nimvlets ahora intercepta `-setIgnoresMouseEvents:` **de su propia
+  ventana**, dentro de **su propio proceso**, para que el backend Cocoa
+  de SDL no pise su decisión per-pixel. Eso es configuración de una
+  ventana propia vía el runtime de Objective-C — **no** es un hook de
+  input, no observa eventos de nadie más, no lee contenido de otras
+  ventanas ni qué aplicación está enfocada, y no requiere ningún
+  permiso de TCC.
+
+Sigue sin pedirse: Accessibility, Input Monitoring, Screen Recording,
+admin/root. Sigue sin instalarse ningún monitor global de `NSEvent`
+(que era una alternativa técnicamente viable para este problema y se
+descartó explícitamente por esta razón — ver DEC-086 y AGENTS.md
+§5/§14).
+
 ## B. Global click mode (future, opt-in — NOT implemented)
 
 A future, entirely separate, opt-in feature may let the user count

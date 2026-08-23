@@ -29,6 +29,16 @@ la fuente pineada — ver `docs/LINUX_PLATFORM.md` §3.2/§5); Linux/Wayland
 tiene limitaciones reales del protocolo (`xdg-shell`) documentadas ahí
 mismo, no acá.
 
+**Nota de alcance (Block 05, pasada de estabilización):** el mecanismo
+de click-through de macOS que §5.1 describe (`SDL_SetWindowShape`,
+event-driven, sin polling) **ya no es el que se envía**. La causa no es
+que §5.1 estuviera mal — sigue siendo cierto para el driver acelerado
+— sino que DEC-083 cambió el driver por default de macOS a "software"
+por razones de corrección VISUAL, y ahí la ruta de shape corrompe el
+render. El mecanismo actual, su causa raíz medida y las alternativas
+descartadas están en §11, más abajo; §5.1 y §5.5 se conservan
+íntegras como el registro de cómo se llegó hasta acá.
+
 ## 1. What was evaluated
 
 `SDL_SetWindowShape()` was evaluated first, as the block brief
@@ -412,3 +422,128 @@ source across this entire block.
 Reconsider only if a block hits an incompatibility SDL3 can't be
 worked around for with a small adapter — not encountered here, even
 after two full rounds of real interactive QA and a genuine bug hunt.
+
+---
+
+## 11. macOS click-through, estado actual (Block 05, pasada de estabilización)
+
+Esta sección reemplaza a §5.1 como descripción de **lo que se envía
+hoy** en macOS. §5.1 no se corrige ni se borra: era correcta para el
+driver acelerado, que era el default cuando se escribió.
+
+### 11.1 Por qué la ruta de shape ya no se puede usar
+
+`SDL_RenderPresent()` llama a `SDL_RenderApplyWindowShape()`
+(`src/render/SDL_render.c:5463` en la fuente pineada 3.4.12) para toda
+ventana transparente. Esa función crea una textura desde la superficie
+de forma y le pide un blend mode CUSTOM
+(`SDL_ComposeCustomBlendMode(ZERO, SRC_ALPHA, ADD, ZERO, SRC_ALPHA, ADD)`).
+El renderer de software no implementa `SupportsBlendMode`, así que
+`IsSupportedBlendMode()` (`SDL_render.c:1409`) rechaza todo modo custom
+y la llamada falla; SDL ignora el fallo por diseño, la textura de forma
+se queda en `SDL_BLENDMODE_BLEND`, y **el bitmap blanco de la forma se
+dibuja ENCIMA del contenido**. Esa es la "silueta blanca opaca".
+
+Repro mínimo (programa SDL3 standalone, flags de ventana de
+producción, sin código de la app):
+
+| driver | ¿acepta el blend mode de la forma? | pixel central tras instalar la forma |
+|---|---|---|
+| `software` | **NO** — "That operation is not supported" | `(255,255,255,255)` |
+| `metal` | sí | `(0,0,0,0)` (sin cambio) |
+
+`SDL_SetWindowShape(window, NULL)` restaura el render de inmediato, así
+que la corrupción **no es permanente** — dura exactamente lo que dure
+la forma instalada. DEC-085 afirmaba lo contrario; ver la corrección
+anotada ahí.
+
+### 11.2 Por qué el muestreo de cursor venía perdiendo
+
+En SDL 3.4.12 hay exactamente dos escritores de
+`NSWindow.ignoresMouseEvents` (`grep -rn ignoresMouseEvents src/`):
+
+1. `Cocoa_UpdateWindowShape()` — `src/video/cocoa/SDL_cocoashape.m:50`,
+   solo desde `SDL_SetWindowShape()`.
+2. `-[Cocoa_WindowListener updateIgnoreMouseState:]` —
+   `src/video/cocoa/SDL_cocoawindow.m:1073`, solo desde `-mouseMoved:`
+   (línea 1893), bajo `(window->flags & SDL_WINDOW_TRANSPARENT)`.
+   `-mouseDragged:`/`-rightMouseDragged:`/`-otherMouseDragged:`
+   reenvían todos ahí.
+
+El (2) lee la forma desde `SDL_PROP_WINDOW_SHAPE_POINTER` y, **sin
+forma instalada, asigna `NO` incondicionalmente**. Medido con los flags
+de producción: UN solo `NSEventTypeMouseMoved` entregado a nuestra
+propia ventana da vuelta el valor de YES a NO.
+
+Por eso §5.1 tenía razón en que la instrumentación "nunca mostró un
+mismatch": el toggle SIEMPRE funcionaba en el instante de la
+asignación. Lo que faltaba medir era el estado **después** de
+actividad de mouse real — que es exactamente el diagnóstico que esta
+pasada agregó (`ReadWindowClickThrough()`, lee sin escribir).
+
+### 11.3 Mecanismo que se envía
+
+`platform::MakeClickThroughAuthoritative()` intercepta
+`-setIgnoresMouseEvents:` para nuestra ventana (override agregado a su
+clase concreta vía el runtime de Objective-C; swizzle in-place solo si
+esa clase ya implementaba el selector) y descarta toda escritura que no
+venga del adaptador. Nimvlets escribe llamando a la IMP original
+directamente.
+
+Alternativas evaluadas y por qué no: ver DEC-086 (instalar la forma
+igual — imposible, renderer y Cocoa leen la MISMA propiedad; parchear
+SDL pineado — forkea una dependencia pineada a un tag exacto y hay que
+revalidarla en cuatro plataformas; segunda ventana con forma solo para
+hit-test — la ventana visual sigue siendo transparente, así que SDL le
+pisaría `ignoresMouseEvents` igual; monitor global de NSEvent —
+prohibido por AGENTS.md §5/§14).
+
+**Permisos:** ninguno nuevo. Todo esto es configuración de nuestra
+propia ventana dentro de nuestro propio proceso más consultas de
+POSICIÓN de cursor (`SDL_GetGlobalMouseState`). Sin Accessibility, sin
+Input Monitoring, sin Screen Recording, sin hook global de input.
+
+### 11.4 Política de muestreo
+
+`core::EvaluateClickThrough()` (pura, con tests): mientras el cursor
+está FUERA del rectángulo de la ventana el estado de click-through es
+inobservable — ningún click de ahí puede llegarnos — así que se elige
+deliberadamente NO-click-through, lo que devuelve la entrega normal de
+eventos y convierte el ingreso a la ventana en un EVENTO en vez de algo
+que haya que encuestar. El muestreo periódico queda armado **solo
+mientras el cursor está dentro del rectángulo**.
+
+Límite honesto: mientras el click-through está ACTIVO la ventana no
+recibe eventos de mouse, así que detectar el regreso del cursor exige
+muestrear. Es inherente a `ignoresMouseEvents`, no una elección de este
+diseño (la ruta de shape de SDL tiene la misma forma: reevalúa en
+`-mouseMoved:`). Un salto instantáneo del cursor a un pixel
+transparente seguido de un click inmediato, sin ningún evento de
+movimiento intermedio, puede perderse por hasta un intervalo de
+muestreo.
+
+### 11.5 Verificación nativa reproducible
+
+`src/platform/macos/ClickThroughOwnershipCheck.mm` — ejecutable
+opcional (no entra jamás a la corrida normal de CTest; la CI de las
+cuatro plataformas queda igual):
+
+```bash
+cmake --preset macos-debug -DNIMVLETS_ENABLE_GUI_CHECKS=ON
+cmake --build --preset macos-debug --target nimvlets_macos_clickthrough_check
+./build/macos-debug/src/platform/macos/nimvlets_macos_clickthrough_check
+```
+
+Ejercita el adaptador REAL con `NSEvent`s reales entregados a nuestra
+propia ventana (el camino exacto de AppKit que dispara el código de SDL
+de §11.2 — in-process, sin permisos): la forma nunca se instala, el
+render no se corrompe, 25 escrituras externas de SDL se interceptan y
+el estado aguanta, y 4 ciclos transparente -> opaco -> transparente
+salen correctos.
+
+**Lo que esta verificación NO prueba** (y por lo tanto sigue siendo QA
+interactiva del owner): que un click humano real sobre un pixel
+transparente llegue a la app de abajo. Mover la ventana por debajo de
+un cursor quieto genera CERO eventos de mouse (medido: `motion=0
+enter=0 leave=0` en ambos estados), así que este harness no puede
+simular movimiento real de cursor.

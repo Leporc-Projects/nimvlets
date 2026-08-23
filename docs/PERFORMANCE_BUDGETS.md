@@ -531,3 +531,93 @@ ciclo de animación/dirección.
 
 Los 4 pets siguen excediendo el budget de <100MB — sin cambio de
 conclusión respecto de la sección anterior, solo ~50-68 MB más cerca.
+
+## Mediciones reales: click-through con muestreo condicional (Block 05, pasada de estabilización)
+
+Release, arm64 nativo, `NIMVLETS_DEV_APPDATA_DIR` aislado, sin
+interacción humana durante la ventana de medición.
+
+**Metodología** (importa, porque el arranque de este binario NO es
+despreciable — cargar y decodificar un pack de 47-78 MB domina los
+primeros segundos): se muestrea el CPU acumulado del proceso
+(`ps -o time=`, resolución 10 ms) en T1 y en T2 y se toma el DELTA, así
+el arranque se cancela en vez de contaminar la cifra de reposo. Nunca
+se usa `%CPU` de `ps` (es un promedio decreciente sobre toda la vida
+del proceso, no la tasa instantánea).
+
+| Escenario | Ventana | CPU en régimen | RSS |
+|---|---|---|---|
+| Nidir, reposo, cursor FUERA de la ventana (sin muestreo) | 120 s | **0.06%** | 111 MB |
+| Nidir, reposo, cursor DENTRO (muestreo armado) | 120 s | 0.03% | 97 MB |
+| Nidir, animando (ambient cada 1 s) | 30 s | **3.00%** | 135 MB |
+| Bunny, reposo | 40 s | 0.03% | 162 MB |
+| Bunny, animando (self-loop, ambient cada 1 s) | 40 s | **1.80%** | 119 MB |
+| Frin macho, reposo SENTADO | 40 s | 0.03% | 206 MB |
+| Frin macho, reposo ACOSTADO (estado terminal, sin timer) | 40 s | 0.03% | 74 MB |
+
+### Lo que estas cifras SÍ dicen
+
+**En reposo el costo de click-through es cero medible.** Las filas de
+reposo están todas en 0.03-0.06%, que es el piso de esta medición (1-2
+ticks de 10 ms sobre 40-120 s). No se distinguen entre sí, y no se
+distinguen del costo base del loop (un despertar por segundo, acotado
+por `kMaxWaitMs` para que un SIGINT se note dentro de ~1 s).
+
+**Frin acostado es genuinamente gratis.** `lying` no define
+`ambient_actions`, así que nunca hay timer armado: el pet se queda
+quieto indefinidamente sin despertar el loop por comportamiento. Eso
+también explica por qué no hay una fila de "Frin animando" — con el
+intervalo ambient acelerado, Frin se acuesta una vez y se queda ahí; su
+animación no cicla como la de Bunny/Nidir.
+
+### Cuánto costaba el muestreo permanente (cota determinista)
+
+La comparación "cursor dentro vs. fuera" de arriba NO resuelve el costo
+del muestreo: las dos filas están en el piso, y el cursor físico se
+movió durante la ventana larga (no es controlable desde acá). Así que
+se midió aparte, con un programa determinista que hace **exactamente**
+lo que `SpikeApp::PollHover()` hace por muestra
+(`SDL_GetGlobalMouseState` + `SDL_GetWindowPosition` + un lookup en un
+hit-mask del mismo tamaño), sin depender de dónde esté el cursor:
+
+```
+4964 muestras en 100 s (49.6 Hz)   CPU: 0.09 s -> 0.27 s  =  0.18 s / 90 s
+```
+
+**≈0.20% de CPU por un muestreo continuo a ~50 Hz.**
+
+Esa es la cifra que el diseño anterior pagaba el **100% del tiempo**,
+porque encuestaba siempre. Con la política de
+`core::EvaluateClickThrough()` (Block 05, DEC-086) ese costo se paga
+solo mientras el cursor está DENTRO del rectángulo de la ventana del
+pet — una región chica y una fracción chica del tiempo — y es
+exactamente cero en cualquier otra parte de la pantalla. No es una
+optimización de CPU pico; es eliminar un loop de despertares
+permanente, que es lo que AGENTS.md §2 pide ("event-driven scheduling.
+Do not run a permanent 60/144 FPS game loop when nothing is changing on
+screen").
+
+### Cadencia que queda
+
+`hoverScheduler_` a 60 Hz (medido ~50 Hz real, por el redondeo de
+`SDL_Delay`), armado **solo** con el cursor dentro del rectángulo de la
+ventana. Es el mínimo inherente al mecanismo: mientras el click-through
+está ACTIVO la ventana no recibe eventos de mouse, así que detectar el
+regreso del cursor no puede ser event-driven — ver DEC-086 para por qué
+esto no es una elección de este diseño sino una propiedad de
+`NSWindow.ignoresMouseEvents` (la propia ruta de shape de SDL tiene la
+misma forma).
+
+### Honestidad sobre el RSS
+
+Las cifras de RSS de la tabla varían bastante entre corridas del MISMO
+escenario (Nidir 97-135 MB, Bunny 119-162 MB, Frin 74-206 MB) porque
+dependen de cuántos frames decodificados se tocaron antes del muestreo
+— un pack se carga entero pero sus páginas se residencian a medida que
+se dibujan. **No leer estos números como un ranking entre pets.** El
+término dominante sigue siendo el mismo que identificó la sección
+anterior: `FrameDefinition::pixels` queda residente porque
+`core::AlphaMask::FromAlphaChannel()` lo necesita en cada cambio de
+frame. Precalcular/cachear la máscara y liberar `pixels` sigue siendo
+la siguiente ganancia grande de memoria, y sigue pendiente — esta
+pasada no la abordó (estaba fuera de alcance).

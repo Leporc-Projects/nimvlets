@@ -544,3 +544,50 @@ poll-driven cuando el driver activo es "software"). Con el fix:
 volcado del backbuffer real (`SDL_RenderReadPixels`) de una animación
 ambient completa de 28 frames de Bunny bajo el driver "software" --
 **0 de 28 frames corruptos**, colores correctos en todos.
+
+## 16. Pasada de estabilización (Block 05, quinta pasada): el "click se ve un poco más ancho" se midió, y era arte
+
+QA manual tras §15: la corrupción grande ya no está y todas las
+animaciones renderizan bien. Quedaba una sola cosa chica: **al empezar
+la animación de click, Bunny se ve levemente más ancho/grande que la
+pose base**.
+
+Medido — y medido con la métrica correcta, que es el punto de toda esta
+sección. Contra la pose base aprobada, frame 0 de cada animación:
+
+| medida | `groom` (aprobada) | `click` |
+|---|---|---|
+| ancho de bbox | +1.4% | **+2.9%** |
+| alto de bbox | +0.3% | +0.7% |
+| radio RMS ponderado por alpha | +0.58% | **+0.75%** |
+
+El ancho de bbox lo deciden DOS pixeles extremos, así que una pose que
+estira una oreja o una pata cambia esa cifra sin que el personaje haya
+cambiado de tamaño. El radio RMS integra todos los pixeles con su alpha
+como peso: escala linealmente con un reescalado real y apenas se mueve
+con un cambio de pose. Por eso el brief de esta pasada pidió
+explícitamente "alpha-registration rather than raw bbox width alone".
+
+**Corrección aplicada** (ver DEC-088): la métrica de tamaño del
+compilador pasa de "lado más largo del bounding box" a
+`prep_dev_sprite.alpha_rms_radius()`, y la tolerancia de 2% a 0.5%
+(que la métrica más estable ahora se banca, y que no cuesta calidad
+porque el `content_scale` ya se combina con el downscale de runtime en
+un único resize).
+
+| animación | desvío antes | desvío después |
+|---|---|---|
+| `click` | +0.75% | **+0.06%** |
+| `groom` | +0.58% | **+0.27%** |
+
+`groom` sigue visualmente aprobada: se movió 0.31 puntos porcentuales,
+y HACIA la base, no lejos.
+
+**Lo que queda, y por qué se deja:** el bbox de `click` sigue siendo
++1.9% más ancho que el de la base. Eso está **autorado en el arte** —
+la pose del click abre la silueta. Corregirlo con un factor calculado
+sobre ancho aplastaría una pose real. Se declara como hecho de
+contenido, no como deuda.
+
+El pack de Nidir, regenerado con la métrica nueva, queda
+**byte-idéntico** — el control dorado no se movió ni un bit.
