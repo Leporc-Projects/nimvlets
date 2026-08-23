@@ -409,3 +409,116 @@ acostado.
 - `ContentTimingPolicyTest` / `CompiledClickScaleTest` — 10s de Frin,
   12s de Bunny/Nidir, y desvío de tamaño de cada acción contra la base
   de su estado.
+
+## 9. Pasada de pulido final (Block 05): inversión de dirección runtime, extensión de continuidad a howl/tail_greet, hover 0.2s
+
+Continuación directa de §8 -- misma pasada de pulido final que también
+tocó Bunny (ver `docs/BUNNY_CONTENT.md`) y el motor (hover dwell). Tres
+cambios independientes, cada uno con su propio DEC:
+
+### 9.1 Inversión de dirección runtime (DEC-091)
+
+Pedido de producto explícito: TODO lo que se veía corriendo con
+`Direction::kRight` pasa a verse con `Direction::kLeft`, y viceversa --
+las DOS variantes, TODO contenido direccional (pose base sentada, pose
+base acostada, `sit_to_lie`, `lie_to_sit`, `howl`, `tail_greet`).
+
+Las carpetas de import (`animations/<anim>/{left,right}/frames/`) **no
+se tocan** -- siguen registrando la orientación real que el owner
+exportó (PROVENANCE). Solo cambia, en un único lugar
+(`_invert_runtime_direction()` dentro de
+`tools/generate_frin_pack.py`'s `entries_for()`), qué carpeta alimenta
+el slot runtime `kRight` vs. el slot runtime `kLeft` del pack
+compilado.
+
+Invariante resultante, verificado, variante-independiente: el slot
+runtime `kRight` ahora SIEMPRE lee de la carpeta física
+`.../left/frames/`, y `kLeft` SIEMPRE de `.../right/frames/` -- para
+las dos variantes, sin excepción (`§1` de arriba documenta que macho es
+canónicamente "left" y hembra "right"; después de la inversión esa
+distinción deja de importar para efectos de qué se ve en cada slot
+runtime -- ambas quedan mapeadas de la misma forma).
+
+Ambos packs regenerados. La continuidad de `sit_to_lie -> lying` de
+§5/§7/§8 (pixel-idéntica) se preservó exacta en las dos direcciones tras
+la inversión -- esperado, porque el mecanismo de containment opera
+sobre el mismo `entries_for()` ya invertido.
+
+### 9.2 Continuidad de punta extendida a `howl`/`tail_greet` (DEC-092/093)
+
+§8 resolvió la continuidad de las transiciones que CAMBIAN de estado
+(`sit_to_lie`/`lie_to_sit`). QA manual encontró el mismo síntoma, más
+chico, en el click SENTADO: "seated click actions appear slightly
+wider/larger than the seated base."
+
+Medido (centroide de alpha, último frame de la acción contra la base de
+"seated", packs compilados reales, ANTES de tocar nada):
+
+| acción | delta LAST-vs-BASE |
+|---|---|
+| macho `howl` | 0.83-0.85px |
+| macho `tail_greet` | 0.46-0.56px |
+| hembra `howl` | 0.81px |
+| hembra `tail_greet` | 0.66px |
+
+Ninguno es corrupción -- todos sub-1px sobre frames nativos de
+~350-550px -- pero son reales y consistentes con el reporte: `howl` y
+`tail_greet` son self-loop (`target_state_id == "seated"`, el propio
+estado), así que NINGÚN mecanismo protegía su punta de regreso; solo se
+anclaban por su propio frame 0.
+
+Corrección: `align_endpoint_to_target_base: true` en `howl` y
+`tail_greet` (nuevo parámetro del helper `action()` en
+`tools/generate_frin_pack.py`, `sit_to_lie`/`lie_to_sit` lo dejan en
+`False` -- no hace diferencia para ellas, ya se registran vía
+`changes_state` sin condición). Ver `docs/DECISION_LOG.md` DEC-092 para
+el mecanismo genérico (compartido con Bunny, sin ninguna rama de código
+por-pet) y DEC-093 para el punto de anclaje (centroide de alpha, no
+bbox -- un refinamiento medido, no supuesto).
+
+Resultado tras recompilar:
+
+| acción | antes | después |
+|---|---|---|
+| macho `howl` | 0.83-0.85px | **0.59-0.64px** |
+| macho `tail_greet` | 0.46-0.56px | 0.56px *(sin cambio en una dirección -- redondeo)* |
+| hembra `howl` | 0.81px | **0.32-0.81px** *(mejora en una dirección)* |
+| hembra `tail_greet` | 0.66px | 0.66px *(sin cambio)* |
+
+Ningún caso empeora. Efecto colateral honesto sobre `lie_to_sit`
+(§8, ya registrada desde antes, comparte la misma rama de código): al
+cambiar el punto de anclaje de esa rama (DEC-093), su número TAMBIÉN se
+recalculó -- mejora en dos de los cuatro casos (macho-derecha 1.21px ->
+0.40px, hembra-derecha 1.20px -> 0.25px) y empeora levemente en los
+otros dos (macho-izquierda 0.44px -> 0.87px, hembra-izquierda 0.23px ->
+0.86px). Ningún caso supera 1px -- muy por debajo de lo perceptible, y
+muy por debajo del ~53px que existía antes de §8. Ver DEC-093 para por
+qué se aceptó ese trade-off en vez de mantener dos convenciones de
+anclaje distintas.
+
+Canvas de trabajo: efecto mínimo (macho 546x657 -> 548x657 tras sumar
+la inversión de §9.1; hembra 495x531 -> 494x531). `visual_scale` se
+queda en 1.05 (§8) -- el cambio de canvas es demasiado chico para
+justificar re-derivarla de nuevo.
+
+### 9.3 Hover dwell: 0.5s -> 0.2s (DEC-090)
+
+Sin relación específica con Frin -- pedido de producto que aplica a
+los cuatro pets por igual (el mecanismo vive en `core::
+kDefaultHoverDwellSeconds`, no en ningún manifest por-pet). Frin sigue
+sin definir hover propio (`hover_uses_ambient_actions: false`,
+`hover_actions: []` en las dos variantes) -- sin cambios.
+
+### 9.4 Tests de regresión
+
+`tools/test_asset_pipeline.py`:
+- `FrinRuntimeDirectionInversionTest` — el invariante de §9.1 contra el
+  pack real (right<->left carpeta física), macho + hembra, base + las 4
+  animaciones, más una tabla de verdad algebraica aislada.
+- `CompiledSelfLoopEndpointContinuityTest` — el delta de §9.2 contra
+  los packs reales, `howl`/`tail_greet` macho y hembra, con guard
+  explícito de que el flag esté realmente declarado en el manifest.
+- `AlignEndpointToTargetBaseTest` — el mecanismo genérico (compartido
+  con Bunny) contra un fixture propio compilado de verdad, no un pet
+  real -- confirma placement/no-op/escala-nunca-tocada de forma
+  aislada.

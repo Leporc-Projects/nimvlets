@@ -33,14 +33,22 @@ docs/ANIMATION_RUNTIME.md y content::AnimationController):
       click: lie_to_sit (one-shot) -> seated.
       sin hover propio.
 
-Direcciones canónicas, de los nombres de export FINALES del owner:
+Direcciones de PROVENANCE (de los nombres de export FINALES del owner --
+qué carpeta contiene qué orientación REAL, nunca renombrada):
     macho: LEFT (frin-macho-*-left)
     hembra: RIGHT (frin-hembra-*-right)
-Mismo cuidado de inversión que ya usa tools/generate_bunny_pack.py
-(canónico "left"): el campo CANÓNICO de cada animación (resuelto para
-Direction::kRight) usa los frames DERIVADOS (espejados) para el macho,
-y los frames REALES para la hembra -- y viceversa para el override
-"left" -- ver _build_variant_manifest().
+Mismo cuidado de inversión real/derivado que ya usa
+tools/generate_bunny_pack.py.
+
+Direcciones RUNTIME (pasada de pulido final -- ver DEC-091 en
+docs/DECISION_LOG.md): INVERTIDAS respecto de la provenance de arriba,
+a pedido explícito del owner. `Direction::kRight` en tiempo de
+ejecución muestra los frames DE PROVENANCE "left" de cada variante, y
+`Direction::kLeft` muestra los de provenance "right" -- lo opuesto de
+lo que un mapeo directo (sin inversión) habría dado. Ver
+`_invert_runtime_direction()` dentro de `_build_variant_manifest()`,
+el único lugar donde se aplica esta inversión -- ver
+_build_variant_manifest().
 
 Uso:
     python3 tools/generate_frin_pack.py
@@ -178,10 +186,12 @@ def _frame_entry(rel_dir: str, index: int) -> dict:
 
 def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canonical_direction: str) -> tuple[dict, dict]:
     """Construye el manifest de UN variante de Frin. `canonical_direction`
-    es "left" (macho) o "right" (hembra) -- la dirección REAL importada
-    para este variante; la opuesta se deriva acá por espejado
-    determinista. Retorna (manifest, reports) -- reports solo para
-    logging en main()."""
+    es "left" (macho) o "right" (hembra) -- la dirección de PROVENANCE:
+    la orientación REAL importada para este variante (nunca la
+    dirección runtime -- ver el docstring del módulo y
+    `_invert_runtime_direction()` más abajo para esa distinción). La
+    opuesta se deriva acá por espejado determinista. Retorna (manifest,
+    reports) -- reports solo para logging en main()."""
     variant_root = os.path.join(FRIN_ROOT, variant)
     opposite_direction = "right" if canonical_direction == "left" else "left"
 
@@ -210,14 +220,60 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
     # importado o "derivado" por espejo) vive en cada uno depende de
     # canonical_direction, exactamente el mismo cuidado de inversión que
     # tools/generate_bunny_pack.py ya documenta.
-    def entries_for(anim_id: str, direction: str) -> list[dict]:
-        return frame_entries[f"{anim_id}_real"] if direction == canonical_direction else frame_entries[f"{anim_id}_derived"]
+    #
+    # Inversión de dirección RUNTIME (pasada de pulido final, pedido de
+    # producto explícito -- ver DEC-091 en docs/DECISION_LOG.md): el
+    # owner pidió que TODO lo que hoy se ve corriendo con
+    # `Direction::kRight` pase a verse con `Direction::kLeft`, y
+    # viceversa, para las DOS variantes de Frin (macho y hembra) y para
+    # TODO contenido direccional (pose base sentada/acostada,
+    # sit_to_lie, lie_to_sit, howl, tail_greet).
+    #
+    # Esto es una inversión de SEMÁNTICA DE RUNTIME, no una
+    # reorganización de arte fuente: las carpetas de import
+    # (`animations/<anim>/{left,right}/frames/`) siguen significando
+    # exactamente lo que significaban -- registran qué orientación
+    # exportó el owner realmente ("left"/"right" en disco es
+    # PROVENANCE, nunca se renombra ni se mueve solo para que el nombre
+    # coincida con el nuevo significado runtime). Lo único que cambia es
+    # QUÉ carpeta alimenta el slot runtime kRight vs. el slot runtime
+    # kLeft del pack compilado.
+    #
+    # `_invert_runtime_direction()` es el ÚNICO lugar donde se aplica
+    # esa inversión -- se intercala DENTRO de `entries_for()`, así que
+    # `action()`/`base_pose()` (los únicos llamadores) siguen pidiendo
+    # "dame el contenido para el slot runtime right/left" exactamente
+    # como antes, sin ningún cambio en ellos ni duplicación de la
+    # inversión por cada animación/acción. Ver
+    # tests/test_asset_pipeline.py's FrinRuntimeDirectionInversionTest
+    # para la prueba de que esto efectivamente intercambia right<->left
+    # para las dos variantes, en base y en cada acción.
+    def _invert_runtime_direction(runtime_direction: str) -> str:
+        return "left" if runtime_direction == "right" else "right"
 
-    def action(anim_id: str, weight: float, target_state_id: str) -> dict:
+    def entries_for(anim_id: str, runtime_direction: str) -> list[dict]:
+        source_direction = _invert_runtime_direction(runtime_direction)
+        return frame_entries[f"{anim_id}_real"] if source_direction == canonical_direction else frame_entries[f"{anim_id}_derived"]
+
+    def action(anim_id: str, weight: float, target_state_id: str, *, align_endpoint_to_target_base: bool = False) -> dict:
+        """`align_endpoint_to_target_base` (pasada de pulido final -- ver
+        DEC-092 en docs/DECISION_LOG.md): default False porque para
+        `sit_to_lie`/`lie_to_sit` (target_state_id distinto del estado
+        propio) no hace ninguna diferencia -- ya se registran para
+        anclaje por último frame vía `changes_state`, sin importar este
+        flag (ver `compile_pet_pack.py`'s `add_actions()`). Se pasa
+        explícitamente True SOLO para `howl`/`tail_greet` (self-loop:
+        target_state_id == "seated", el propio estado), donde SIN el
+        flag no había ninguna registración -- la colocación se anclaba
+        solo por el frame 0 de la propia acción, dejando sin protección
+        la punta de REGRESO a la pose sentada estable (el "size snap"
+        que QA manual reportó: "seated click actions appear slightly
+        wider/larger than the seated base")."""
         return {
             "id": anim_id,
             "weight": weight,
             "target_state_id": target_state_id,
+            "align_endpoint_to_target_base": align_endpoint_to_target_base,
             "kind": "one_shot",
             "fps": fps_by_anim[anim_id],
             "returns_to_idle": True,
@@ -273,8 +329,8 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "hover_uses_ambient_actions": False,  # el owner no definió hover para Frin todavía
                 "hover_actions": [],
                 "click_actions": [
-                    action("howl", SEATED_CLICK_WEIGHTS["howl"], "seated"),
-                    action("tail_greet", SEATED_CLICK_WEIGHTS["tail_greet"], "seated"),
+                    action("howl", SEATED_CLICK_WEIGHTS["howl"], "seated", align_endpoint_to_target_base=True),
+                    action("tail_greet", SEATED_CLICK_WEIGHTS["tail_greet"], "seated", align_endpoint_to_target_base=True),
                 ],
             },
             {

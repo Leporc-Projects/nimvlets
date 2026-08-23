@@ -17,7 +17,7 @@
         "returns_to_idle": true,
         "frames": [
           {
-            "source": "animations/sit_to_lie/right/frames/frame_000.png",
+            "source": "animations/sit_to_lie/left/frames/frame_000.png",
             "duration_ms": 0
           }
         ]
@@ -31,7 +31,7 @@
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/sit_to_lie/left/frames/frame_000.png",
+              "source": "animations/sit_to_lie/right/frames/frame_000.png",
               "duration_ms": 0
             }
           ]
@@ -43,108 +43,109 @@
           "id": "sit_to_lie",
           "weight": 1.0,
           "target_state_id": "lying",
+          "align_endpoint_to_target_base": false,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/sit_to_lie/right/frames/frame_000.png",
+              "source": "animations/sit_to_lie/left/frames/frame_000.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_001.png",
+              "source": "animations/sit_to_lie/left/frames/frame_001.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_002.png",
+              "source": "animations/sit_to_lie/left/frames/frame_002.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_003.png",
+              "source": "animations/sit_to_lie/left/frames/frame_003.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_004.png",
+              "source": "animations/sit_to_lie/left/frames/frame_004.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_005.png",
+              "source": "animations/sit_to_lie/left/frames/frame_005.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_006.png",
+              "source": "animations/sit_to_lie/left/frames/frame_006.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_007.png",
+              "source": "animations/sit_to_lie/left/frames/frame_007.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_008.png",
+              "source": "animations/sit_to_lie/left/frames/frame_008.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_009.png",
+              "source": "animations/sit_to_lie/left/frames/frame_009.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_010.png",
+              "source": "animations/sit_to_lie/left/frames/frame_010.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_011.png",
+              "source": "animations/sit_to_lie/left/frames/frame_011.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_012.png",
+              "source": "animations/sit_to_lie/left/frames/frame_012.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_013.png",
+              "source": "animations/sit_to_lie/left/frames/frame_013.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_014.png",
+              "source": "animations/sit_to_lie/left/frames/frame_014.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_015.png",
+              "source": "animations/sit_to_lie/left/frames/frame_015.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_016.png",
+              "source": "animations/sit_to_lie/left/frames/frame_016.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_017.png",
+              "source": "animations/sit_to_lie/left/frames/frame_017.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_018.png",
+              "source": "animations/sit_to_lie/left/frames/frame_018.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_019.png",
+              "source": "animations/sit_to_lie/left/frames/frame_019.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_020.png",
+              "source": "animations/sit_to_lie/left/frames/frame_020.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_021.png",
+              "source": "animations/sit_to_lie/left/frames/frame_021.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_022.png",
+              "source": "animations/sit_to_lie/left/frames/frame_022.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_023.png",
+              "source": "animations/sit_to_lie/left/frames/frame_023.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/sit_to_lie/right/frames/frame_024.png",
+              "source": "animations/sit_to_lie/left/frames/frame_024.png",
               "duration_ms": 0
             }
           ],
@@ -157,103 +158,103 @@
               "returns_to_idle": true,
               "frames": [
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_000.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_000.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_001.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_001.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_002.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_002.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_003.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_003.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_004.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_004.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_005.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_005.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_006.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_006.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_007.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_007.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_008.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_008.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_009.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_009.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_010.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_010.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_011.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_011.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_012.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_012.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_013.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_013.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_014.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_014.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_015.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_015.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_016.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_016.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_017.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_017.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_018.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_018.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_019.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_019.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_020.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_020.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_021.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_021.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_022.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_022.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_023.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_023.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/sit_to_lie/left/frames/frame_024.png",
+                  "source": "animations/sit_to_lie/right/frames/frame_024.png",
                   "duration_ms": 0
                 }
               ]
@@ -268,108 +269,109 @@
           "id": "howl",
           "weight": 0.7,
           "target_state_id": "seated",
+          "align_endpoint_to_target_base": true,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/howl/right/frames/frame_000.png",
+              "source": "animations/howl/left/frames/frame_000.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_001.png",
+              "source": "animations/howl/left/frames/frame_001.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_002.png",
+              "source": "animations/howl/left/frames/frame_002.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_003.png",
+              "source": "animations/howl/left/frames/frame_003.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_004.png",
+              "source": "animations/howl/left/frames/frame_004.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_005.png",
+              "source": "animations/howl/left/frames/frame_005.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_006.png",
+              "source": "animations/howl/left/frames/frame_006.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_007.png",
+              "source": "animations/howl/left/frames/frame_007.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_008.png",
+              "source": "animations/howl/left/frames/frame_008.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_009.png",
+              "source": "animations/howl/left/frames/frame_009.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_010.png",
+              "source": "animations/howl/left/frames/frame_010.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_011.png",
+              "source": "animations/howl/left/frames/frame_011.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_012.png",
+              "source": "animations/howl/left/frames/frame_012.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_013.png",
+              "source": "animations/howl/left/frames/frame_013.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_014.png",
+              "source": "animations/howl/left/frames/frame_014.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_015.png",
+              "source": "animations/howl/left/frames/frame_015.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_016.png",
+              "source": "animations/howl/left/frames/frame_016.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_017.png",
+              "source": "animations/howl/left/frames/frame_017.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_018.png",
+              "source": "animations/howl/left/frames/frame_018.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_019.png",
+              "source": "animations/howl/left/frames/frame_019.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_020.png",
+              "source": "animations/howl/left/frames/frame_020.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_021.png",
+              "source": "animations/howl/left/frames/frame_021.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_022.png",
+              "source": "animations/howl/left/frames/frame_022.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_023.png",
+              "source": "animations/howl/left/frames/frame_023.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/howl/right/frames/frame_024.png",
+              "source": "animations/howl/left/frames/frame_024.png",
               "duration_ms": 0
             }
           ],
@@ -382,103 +384,103 @@
               "returns_to_idle": true,
               "frames": [
                 {
-                  "source": "animations/howl/left/frames/frame_000.png",
+                  "source": "animations/howl/right/frames/frame_000.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_001.png",
+                  "source": "animations/howl/right/frames/frame_001.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_002.png",
+                  "source": "animations/howl/right/frames/frame_002.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_003.png",
+                  "source": "animations/howl/right/frames/frame_003.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_004.png",
+                  "source": "animations/howl/right/frames/frame_004.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_005.png",
+                  "source": "animations/howl/right/frames/frame_005.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_006.png",
+                  "source": "animations/howl/right/frames/frame_006.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_007.png",
+                  "source": "animations/howl/right/frames/frame_007.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_008.png",
+                  "source": "animations/howl/right/frames/frame_008.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_009.png",
+                  "source": "animations/howl/right/frames/frame_009.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_010.png",
+                  "source": "animations/howl/right/frames/frame_010.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_011.png",
+                  "source": "animations/howl/right/frames/frame_011.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_012.png",
+                  "source": "animations/howl/right/frames/frame_012.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_013.png",
+                  "source": "animations/howl/right/frames/frame_013.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_014.png",
+                  "source": "animations/howl/right/frames/frame_014.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_015.png",
+                  "source": "animations/howl/right/frames/frame_015.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_016.png",
+                  "source": "animations/howl/right/frames/frame_016.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_017.png",
+                  "source": "animations/howl/right/frames/frame_017.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_018.png",
+                  "source": "animations/howl/right/frames/frame_018.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_019.png",
+                  "source": "animations/howl/right/frames/frame_019.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_020.png",
+                  "source": "animations/howl/right/frames/frame_020.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_021.png",
+                  "source": "animations/howl/right/frames/frame_021.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_022.png",
+                  "source": "animations/howl/right/frames/frame_022.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_023.png",
+                  "source": "animations/howl/right/frames/frame_023.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/howl/left/frames/frame_024.png",
+                  "source": "animations/howl/right/frames/frame_024.png",
                   "duration_ms": 0
                 }
               ]
@@ -489,108 +491,109 @@
           "id": "tail_greet",
           "weight": 0.3,
           "target_state_id": "seated",
+          "align_endpoint_to_target_base": true,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/tail_greet/right/frames/frame_000.png",
+              "source": "animations/tail_greet/left/frames/frame_000.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_001.png",
+              "source": "animations/tail_greet/left/frames/frame_001.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_002.png",
+              "source": "animations/tail_greet/left/frames/frame_002.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_003.png",
+              "source": "animations/tail_greet/left/frames/frame_003.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_004.png",
+              "source": "animations/tail_greet/left/frames/frame_004.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_005.png",
+              "source": "animations/tail_greet/left/frames/frame_005.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_006.png",
+              "source": "animations/tail_greet/left/frames/frame_006.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_007.png",
+              "source": "animations/tail_greet/left/frames/frame_007.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_008.png",
+              "source": "animations/tail_greet/left/frames/frame_008.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_009.png",
+              "source": "animations/tail_greet/left/frames/frame_009.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_010.png",
+              "source": "animations/tail_greet/left/frames/frame_010.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_011.png",
+              "source": "animations/tail_greet/left/frames/frame_011.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_012.png",
+              "source": "animations/tail_greet/left/frames/frame_012.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_013.png",
+              "source": "animations/tail_greet/left/frames/frame_013.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_014.png",
+              "source": "animations/tail_greet/left/frames/frame_014.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_015.png",
+              "source": "animations/tail_greet/left/frames/frame_015.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_016.png",
+              "source": "animations/tail_greet/left/frames/frame_016.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_017.png",
+              "source": "animations/tail_greet/left/frames/frame_017.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_018.png",
+              "source": "animations/tail_greet/left/frames/frame_018.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_019.png",
+              "source": "animations/tail_greet/left/frames/frame_019.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_020.png",
+              "source": "animations/tail_greet/left/frames/frame_020.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_021.png",
+              "source": "animations/tail_greet/left/frames/frame_021.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_022.png",
+              "source": "animations/tail_greet/left/frames/frame_022.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_023.png",
+              "source": "animations/tail_greet/left/frames/frame_023.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/tail_greet/right/frames/frame_024.png",
+              "source": "animations/tail_greet/left/frames/frame_024.png",
               "duration_ms": 0
             }
           ],
@@ -603,103 +606,103 @@
               "returns_to_idle": true,
               "frames": [
                 {
-                  "source": "animations/tail_greet/left/frames/frame_000.png",
+                  "source": "animations/tail_greet/right/frames/frame_000.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_001.png",
+                  "source": "animations/tail_greet/right/frames/frame_001.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_002.png",
+                  "source": "animations/tail_greet/right/frames/frame_002.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_003.png",
+                  "source": "animations/tail_greet/right/frames/frame_003.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_004.png",
+                  "source": "animations/tail_greet/right/frames/frame_004.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_005.png",
+                  "source": "animations/tail_greet/right/frames/frame_005.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_006.png",
+                  "source": "animations/tail_greet/right/frames/frame_006.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_007.png",
+                  "source": "animations/tail_greet/right/frames/frame_007.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_008.png",
+                  "source": "animations/tail_greet/right/frames/frame_008.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_009.png",
+                  "source": "animations/tail_greet/right/frames/frame_009.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_010.png",
+                  "source": "animations/tail_greet/right/frames/frame_010.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_011.png",
+                  "source": "animations/tail_greet/right/frames/frame_011.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_012.png",
+                  "source": "animations/tail_greet/right/frames/frame_012.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_013.png",
+                  "source": "animations/tail_greet/right/frames/frame_013.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_014.png",
+                  "source": "animations/tail_greet/right/frames/frame_014.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_015.png",
+                  "source": "animations/tail_greet/right/frames/frame_015.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_016.png",
+                  "source": "animations/tail_greet/right/frames/frame_016.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_017.png",
+                  "source": "animations/tail_greet/right/frames/frame_017.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_018.png",
+                  "source": "animations/tail_greet/right/frames/frame_018.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_019.png",
+                  "source": "animations/tail_greet/right/frames/frame_019.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_020.png",
+                  "source": "animations/tail_greet/right/frames/frame_020.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_021.png",
+                  "source": "animations/tail_greet/right/frames/frame_021.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_022.png",
+                  "source": "animations/tail_greet/right/frames/frame_022.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_023.png",
+                  "source": "animations/tail_greet/right/frames/frame_023.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/tail_greet/left/frames/frame_024.png",
+                  "source": "animations/tail_greet/right/frames/frame_024.png",
                   "duration_ms": 0
                 }
               ]
@@ -717,7 +720,7 @@
         "returns_to_idle": true,
         "frames": [
           {
-            "source": "animations/sit_to_lie/right/frames/frame_024.png",
+            "source": "animations/sit_to_lie/left/frames/frame_024.png",
             "duration_ms": 0
           }
         ]
@@ -731,7 +734,7 @@
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/sit_to_lie/left/frames/frame_024.png",
+              "source": "animations/sit_to_lie/right/frames/frame_024.png",
               "duration_ms": 0
             }
           ]
@@ -746,108 +749,109 @@
           "id": "lie_to_sit",
           "weight": 1.0,
           "target_state_id": "seated",
+          "align_endpoint_to_target_base": false,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
           "frames": [
             {
-              "source": "animations/lie_to_sit/right/frames/frame_000.png",
+              "source": "animations/lie_to_sit/left/frames/frame_000.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_001.png",
+              "source": "animations/lie_to_sit/left/frames/frame_001.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_002.png",
+              "source": "animations/lie_to_sit/left/frames/frame_002.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_003.png",
+              "source": "animations/lie_to_sit/left/frames/frame_003.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_004.png",
+              "source": "animations/lie_to_sit/left/frames/frame_004.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_005.png",
+              "source": "animations/lie_to_sit/left/frames/frame_005.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_006.png",
+              "source": "animations/lie_to_sit/left/frames/frame_006.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_007.png",
+              "source": "animations/lie_to_sit/left/frames/frame_007.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_008.png",
+              "source": "animations/lie_to_sit/left/frames/frame_008.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_009.png",
+              "source": "animations/lie_to_sit/left/frames/frame_009.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_010.png",
+              "source": "animations/lie_to_sit/left/frames/frame_010.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_011.png",
+              "source": "animations/lie_to_sit/left/frames/frame_011.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_012.png",
+              "source": "animations/lie_to_sit/left/frames/frame_012.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_013.png",
+              "source": "animations/lie_to_sit/left/frames/frame_013.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_014.png",
+              "source": "animations/lie_to_sit/left/frames/frame_014.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_015.png",
+              "source": "animations/lie_to_sit/left/frames/frame_015.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_016.png",
+              "source": "animations/lie_to_sit/left/frames/frame_016.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_017.png",
+              "source": "animations/lie_to_sit/left/frames/frame_017.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_018.png",
+              "source": "animations/lie_to_sit/left/frames/frame_018.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_019.png",
+              "source": "animations/lie_to_sit/left/frames/frame_019.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_020.png",
+              "source": "animations/lie_to_sit/left/frames/frame_020.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_021.png",
+              "source": "animations/lie_to_sit/left/frames/frame_021.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_022.png",
+              "source": "animations/lie_to_sit/left/frames/frame_022.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_023.png",
+              "source": "animations/lie_to_sit/left/frames/frame_023.png",
               "duration_ms": 0
             },
             {
-              "source": "animations/lie_to_sit/right/frames/frame_024.png",
+              "source": "animations/lie_to_sit/left/frames/frame_024.png",
               "duration_ms": 0
             }
           ],
@@ -860,103 +864,103 @@
               "returns_to_idle": true,
               "frames": [
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_000.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_000.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_001.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_001.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_002.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_002.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_003.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_003.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_004.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_004.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_005.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_005.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_006.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_006.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_007.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_007.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_008.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_008.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_009.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_009.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_010.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_010.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_011.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_011.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_012.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_012.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_013.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_013.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_014.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_014.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_015.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_015.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_016.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_016.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_017.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_017.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_018.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_018.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_019.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_019.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_020.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_020.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_021.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_021.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_022.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_022.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_023.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_023.png",
                   "duration_ms": 0
                 },
                 {
-                  "source": "animations/lie_to_sit/left/frames/frame_024.png",
+                  "source": "animations/lie_to_sit/right/frames/frame_024.png",
                   "duration_ms": 0
                 }
               ]
@@ -966,6 +970,6 @@
       ]
     }
   ],
-  "canvas_width": 146,
+  "canvas_width": 147,
   "canvas_height": 176
 }
