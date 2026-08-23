@@ -23,10 +23,19 @@ blanco/crema, un único Nimvlet lógico con dos variantes visuales —
 transición sentado/acostado, ver
 [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md)) — junto con Bunny y
 Nidir, corrige el comportamiento real de hover (ahora exige dwell
-continuo de 0.5s sobre pixeles visibles, desacoplado del timer
+continuo de 0.2s sobre pixeles visibles, desacoplado del timer
 ambient), fija el intervalo ambient de Bunny/Nidir en 12s y el
-rest-delay de Frin sentado en 10s, y agrega una escala visual por-pet
-genérica y data-driven (`content::PetDefinition::visualScale`). Esto explícitamente *no* es
+rest-delay de Frin sentado en 10s, agrega una escala visual por-pet
+genérica y data-driven (`content::PetDefinition::visualScale`), y en
+su pasada de pulido final invierte la semántica de dirección runtime
+de Frin (`Direction::kRight`/`kLeft` — pedido de producto explícito;
+las carpetas de import siguen registrando la orientación real que el
+owner exportó, nunca la semántica de runtime — ver
+[`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §9.1) y extiende el
+invariante de continuidad de punta de estado a acciones self-loop
+(`groom`/`click` de Bunny, `howl`/`tail_greet` de Frin sentado — ver
+`align_endpoint_to_target_base` en
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §13). Esto explícitamente *no* es
 todavía el producto terminado — ver
 [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está
 verificado y lo que no, y `AGENTS.md` para los contratos de
@@ -140,7 +149,7 @@ incrementar el click balance (persistido localmente — ver
 [`docs/PERSISTENCE.md`](docs/PERSISTENCE.md)) y reproducir una
 reacción de click corta; cada ~12s (Bunny y Nidir) también reproduce
 una acción ambient por su cuenta, y mantener el cursor quieto sobre el
-pet (sin click) durante 0.5s continuos dispara la misma acción, con su
+pet (sin click) durante 0.2s continuos dispara la misma acción, con su
 propio dwell desacoplado del timer ambient. Frin tiene su propio ritmo:
 tras ~10s de reposo genuino sentado se acuesta (`sit_to_lie` ->
 `lying`), y acostado no tiene timer ambient — un click lo levanta.

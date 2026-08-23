@@ -2653,3 +2653,275 @@ Semánticas de reset sin cambios: click, hover, drag y la terminación de
 cualquier acción reinician la cuenta desde ese instante. `lying` sigue
 sin `ambient_actions`, así que nunca hay timer armado ahí — nada
 despierta el loop por ese motivo mientras el lobo está acostado.
+
+---
+
+### DEC-090 — Hover dwell: 0.5s -> 0.2s
+**Status:** DECIDIDO · Block 05, pasada de pulido final
+
+Pedido de producto explícito del owner. `core::kDefaultHoverDwellSeconds`
+pasa de 0.5 (DEC-084) a **0.2** segundos -- único valor que cambia; el
+mecanismo en sí (dwell CONTINUO sobre pixel visible, reset completo al
+salir/click/drag/cambio de estado, un solo disparo por episodio, nunca
+spam) sigue exactamente igual, ver `core::HoverDwellTracker`.
+
+Efecto colateral real encontrado al tocar esto: el log de diagnóstico
+`"hover-triggered action after %.0fs dwell"` usaba CERO decimales --
+con 0.5s eso ya redondeaba a "1s" o "0s" según el caso sin que nadie lo
+notara, pero con 0.2s el resultado (`"0s"`) habría sido activamente
+engañoso (sugiere "sin dwell alguno" cuando en realidad hubo 200ms
+reales). Corregido a `%.1f` -- ver `src/app/SpikeApp.cpp`.
+
+Timing sin cambios: Bunny/Nidir ambient permanece en 12s (DEC-084),
+Frin sentado permanece en 10s (DEC-089) -- ninguno de los dos se toca
+en esta pasada.
+
+---
+
+### DEC-091 — Frin: inversión de dirección RUNTIME (right<->left), provenance de arte sin cambios
+**Status:** DECIDIDO · Block 05, pasada de pulido final
+
+Pedido de producto explícito del owner: TODO lo que hoy se ve corriendo
+con `Direction::kRight` debe verse con `Direction::kLeft`, y viceversa
+-- para las DOS variantes de Frin (macho y hembra) y para TODO
+contenido direccional (pose base sentada, pose base acostada,
+`sit_to_lie`, `lie_to_sit`, `howl`, `tail_greet`).
+
+**Lo que NO cambia, a propósito:** las carpetas de import
+(`assets/source/nimvlets/frin/{male,female}/animations/<anim>/
+{left,right}/frames/`) siguen registrando exactamente la orientación
+que el owner exportó de verdad -- PROVENANCE, nunca semántica de
+runtime. Ningún archivo se renombra ni se mueve. Esto es deliberado:
+mezclar "qué exportó Ludo" con "qué muestra el runtime hoy" en el mismo
+nombre de carpeta habría hecho que una futura re-inversión (o una
+consulta de "¿qué pasó realmente en el export original?") dependiera de
+recordar CUÁL de las dos convenciones estaba vigente en cada momento.
+
+**Implementación, centralizada en un solo lugar** (pedido explícito del
+brief: "Do this once in the Frin content-generation layer, not by
+duplicating logic for each animation"): `tools/generate_frin_pack.py`'s
+`entries_for(anim_id, runtime_direction)` -- la única función por la
+que TODO contenido direccional de Frin pasa (poses base vía
+`base_pose()`, las cuatro animaciones vía `action()`) -- ahora invierte
+`runtime_direction` con `_invert_runtime_direction()` ANTES de
+resolverla contra `canonical_direction` (real vs. derivado/espejado).
+Ni `action()` ni `base_pose()` ni `_finalize_and_compile()` cambiaron
+una sola línea -- ellos siguen pidiendo "dame el contenido para el slot
+runtime right/left" exactamente como antes; la inversión vive
+enteramente escondida detrás de esa única función.
+
+**Invariante resultante, verificado, variante-independiente:** sin
+importar `canonical_direction` (macho "left", hembra "right"), el slot
+runtime `Direction::kRight` SIEMPRE termina leyendo de la carpeta
+física `.../left/frames/`, y `Direction::kLeft` SIEMPRE de
+`.../right/frames/` -- exactamente invertido de lo que un mapeo directo
+(sin esta pasada) habría dado. Confirmado dos formas independientes:
+
+1. Estático, contra los "source" paths de los DOS manifests reales
+   (antes/después de esta pasada) -- para CADA base/acción, el slot
+   runtime-right nuevo apunta a los MISMOS archivos que el slot
+   runtime-left viejo, y viceversa. Cero mismatches, macho + hembra,
+   base + las 4 animaciones.
+2. `tests/test_asset_pipeline.py`'s `FrinRuntimeDirectionInversionTest`
+   fija esto como test permanente contra el pack real, más una tabla de
+   verdad algebraica aislada de `_invert_runtime_direction()`.
+
+Ambos packs de Frin se regeneraron. Efecto de tamaño de canvas: apenas
+perceptible (macho 546x657 -> 548x657, +2px; hembra 495x531 -> 494x531,
+-1px) -- la inversión en sí no cambia ningún contenido/escala, solo
+reordena qué frames van a qué slot, y ese reordenamiento interactúa de
+forma mínima con el redondeo del canvas de trabajo compartido (ver
+DEC-092/093 para la otra fuente de cambio de canvas de esta misma
+pasada).
+
+**Regresión verificada:** la continuidad de transición de estado de
+DEC-087 (`sit_to_lie` -> `lying` pixel-idéntico) sigue pixel-idéntica en
+AMBAS direcciones tras la inversión -- esperado, porque el mecanismo de
+containment por archivo compartido opera sobre el mismo `entries_for()`
+ya invertido, así que la relación "mismo archivo en las dos puntas" se
+preserva sin importar qué slot runtime lo muestre.
+
+---
+
+### DEC-092 — `align_endpoint_to_target_base`: extiende el anclaje-por-último-frame de DEC-087 a acciones self-loop, vía un flag de CONTENIDO opcional
+**Status:** DECIDIDO · Block 05, pasada de pulido final
+
+QA manual, dos reportes relacionados:
+> Bunny: "the character feels very slightly wider/larger while
+> animation content is active, so returning to the static base can
+> reveal a tiny apparent size snap."
+> Frin: "seated click actions appear slightly wider/larger than the
+> seated base."
+
+**Medido antes de tocar nada** (packs compilados reales, centroide
+ponderado por alpha del ÚLTIMO frame mostrado contra la base de su
+estado -- no solo el frame 0, que ya estaba cubierto y aprobado por
+`CompiledClickScaleTest`/DEC-088):
+
+| acción | delta LAST-vs-BASE (antes) |
+|---|---|
+| Bunny `groom` (izquierda) | 1.82px |
+| Bunny `click` | 0.84-0.85px |
+| Frin macho `howl` | 0.83-0.85px |
+| Frin macho `tail_greet` | 0.46-0.56px |
+| Frin hembra `howl` | 0.81px |
+| Frin hembra `tail_greet` | 0.66px |
+
+Ninguno de estos números es "corrupción" -- son todos sub-2px sobre
+frames nativos de 250-550px -- pero son reales, medibles, y consistentes
+con la queja del owner: la punta de REGRESO a la base (el instante en
+que la acción termina y `AnimationController` vuelve a mostrar
+`base_animation`) no estaba protegida para NINGUNA acción self-loop
+(`target_state_id == state_id`, el caso normal de click/ambient en
+Bunny/Frin sentado) -- solo una transición que CAMBIA de estado
+(`sit_to_lie`, `lie_to_sit`) se anclaba por su último frame contra su
+destino (DEC-087); una acción self-loop se anclaba SIEMPRE por su
+PROPIO frame 0, dejando que el personaje derivara libremente hacia
+donde sea que la animación real lo llevara para cuando terminara.
+
+**Por qué NO se generalizó el registro incondicionalmente a TODA acción
+que retorna** (lo que habría sido el cambio más simple): habría alterado
+también el pack de **Nidir** -- que nunca reportó este problema y que
+el brief marca explícitamente como "FROZEN GOLDEN CONTROL" ("do not
+modify... Nidir generated pack behavior"). Cualquier cambio de
+colocación, sin importar cuán pequeño, casi con certeza mueve al menos
+un `offset_x`/`offset_y` redondeado a entero.
+
+**Decisión:** un campo NUEVO, opcional, de CONTENIDO --
+`align_endpoint_to_target_base` (default `false`) en un
+`WeightedActionManifest` (ver `tools/compile_pet_pack.py`, mismo nivel
+que `target_state_id`/`returns_to_idle`, mismo patrón que
+`normalize_visual_scale`/`hover_uses_ambient_actions`: una propiedad de
+DATOS, nunca una rama de código por-pet). `add_actions()` en
+`compile_pet_pack.py` amplía su condición de registro de
+`changes_state` a `changes_state OR align_endpoint_to_target_base`
+(ambas gateadas, como siempre, por `returns_to_idle` -- si la acción
+nunca vuelve, no hay ninguna punta de regreso que proteger). El
+generador de CADA pet decide, por su propio contenido, si activa el
+flag:
+
+- `tools/generate_bunny_pack.py`: `groom` y `click` lo activan (y,
+  por consistencia semántica aunque sea un no-op observable,
+  `idle_breathing` también -- ver más abajo por qué es un no-op ahí).
+- `tools/generate_frin_pack.py`: `action()` gana el parámetro
+  `align_endpoint_to_target_base` (default False); solo `howl` y
+  `tail_greet` lo pasan en `True`. `sit_to_lie`/`lie_to_sit` lo dejan en
+  False -- no hace ninguna diferencia para ellas (`changes_state` ya
+  las registra sin condición alguna), así que agregarlo sería ruido
+  sin efecto.
+- `tools/generate_nidir_pack.py`: **sin tocar, en absoluto.** El flag
+  nunca aparece en su manifest -> la condición de registro se reduce
+  EXACTAMENTE a `changes_state` (que para Nidir, de un solo estado,
+  siempre es False) -> el código toma el MISMO camino que antes de esta
+  pasada, por construcción, no por casualidad de números.
+
+**Por qué `idle_breathing` de Bunny es un no-op observable con el flag
+activo:** su frame 0 ES, literalmente, el mismo archivo que la pose
+base de "default" (mismo import). El mecanismo de containment por
+archivo compartido de DEC-087 ya lo ancla EXACTO en la punta de
+ENTRADA, y ese containment tiene prioridad sobre el registro de
+transición en `place()` -- `_build_normalization_plan()`'s post-pass ya
+descarta cualquier acción que comparta un archivo real con su destino
+ANTES de que `compute_frame_normalization_plan()` la vea (la misma
+regla que ya protegía a `sit_to_lie` de un ciclo de containment
+consigo mismo). Verificado: el plan resultante para `idle_breathing`
+es byte-idéntico con el flag en `True` o en `False`.
+
+**Resultado medido, packs recompilados:**
+
+| acción | antes | después |
+|---|---|---|
+| Bunny `groom` (izquierda) | 1.82px | **0.19px** |
+| Bunny `groom` (derecha) | 0.88px | 0.88px *(sin cambio -- ver nota)* |
+| Bunny `click` (derecha) | 0.84px | **0.67px** |
+| Bunny `click` (izquierda) | 0.85px | **0.65px** |
+| Frin macho `howl` | 0.83-0.85px | **0.59-0.64px** |
+| Frin macho `tail_greet` | 0.46-0.56px | 0.56px *(sin cambio en una dirección)* |
+| Frin hembra `howl` | 0.81px | **0.32-0.81px** *(mejora en una dirección)* |
+| Frin hembra `tail_greet` | 0.66px | 0.66px *(sin cambio)* |
+
+Nota honesta: dos de los ocho casos (Bunny groom-derecha, Frin macho
+tail_greet-izquierda, Frin hembra tail_greet) no cambian en absoluto --
+el nuevo offset entero calculado coincide, por redondeo, con el
+anterior. Ninguno de los ocho casos EMPEORA. El peor caso final,
+0.88px sobre un frame nativo de ~250px, es imperceptible en pantalla.
+Ver docs/BUNNY_CONTENT.md/§17 y docs/FRIN_CONTENT.md/§9 para el detalle
+completo por-acción y el informe de este bloque para la tabla íntegra.
+
+**Regresión sobre `lie_to_sit` (ya registrada, sin cambios en SU
+condición de registro):** su NÚMERO sí cambia, porque comparte la
+MISMA rama de `place()` cuyo punto de anclaje pasó de centro-de-bbox a
+centroide-de-alpha (ver DEC-093) -- eso es harina de otro costal
+(DEC-093 lo documenta con su propia evidencia), no algo que este DEC
+introduzca.
+
+**Tests:** `tools/test_asset_pipeline.py`'s `AlignEndpointToTargetBaseTest`
+(integración real: compila un manifest+PNG de fixture con el flag en
+False/True y verifica placement/escala/no-op vía `compile_pack()` real)
+y `CompiledSelfLoopEndpointContinuityTest` (contra los packs reales que
+se envían).
+
+---
+
+### DEC-093 — El anclaje por-último-frame se registra por centroide de alpha, no por centro de bounding box
+**Status:** DECIDIDO · Block 05, pasada de pulido final
+
+Consecuencia directa de implementar DEC-092: la primera versión
+(reusar `anchor_of()`, centro de bounding box, sin cambios respecto a
+DEC-087) SÍ redujo el delta de bbox-center a casi cero para `groom` de
+Bunny -- pero el centroide de ALPHA (el "centro de masa" real de lo
+visible, la misma noción que `alpha_rms_radius()` ya usa para medir
+TAMAÑO desde DEC-088) empeoró: de 0.88-1.82px a **~4.1-4.3px**. Medido,
+no supuesto -- ver el volcado completo en el informe de este bloque.
+
+Causa: el último frame de `groom` tiene margen de contenido asimétrico
+(una pose real donde el cuerpo queda desplazado dentro de un contorno
+de ancho similar al de la base) -- alinear sus DOS PIXELES EXTREMOS
+(bbox) no alinea dónde está realmente distribuido el peso visual. Es
+el mismo fenómeno, en COLOCACIÓN, que DEC-088 ya documentó para
+TAMAÑO: una medida decidida por extremos es frágil frente a una pose
+real; una medida ponderada por TODOS los pixeles no lo es.
+
+**Corrección:** nueva `prep_dev_sprite.registration_point()` (junto con
+`alpha_weighted_centroid()`, extraído de `alpha_rms_radius()` para
+reusarlo -- refactor puro, sin cambio de comportamiento en
+`alpha_rms_radius()` en sí, verificado con los 77 tests preexistentes
+sin tocar). `place()`'s rama de anclaje-por-transición ahora registra
+por CENTROIDE DE ALPHA (de la punta que se mueve Y del destino) en vez
+de por centro de bbox -- ámbito estrictamente acotado a esa rama; la
+colocación DEFAULT de cualquier entrada sin destino registrado (la
+inmensa mayoría de entradas de TODO pet, incluido el 100% de Nidir)
+sigue usando `anchor_of()`/bbox-center, sin cambios.
+
+**Por qué el alcance acotado importa para Nidir:** Nidir nunca entra a
+esta rama (sin transiciones de estado, sin ninguna acción con
+`align_endpoint_to_target_base`) -- cambiar qué métrica usa esa rama
+tiene efecto CERO sobre Nidir, verificado por byte-identidad exacta
+(ver el informe de este bloque, sha256 fijado en
+`NidirGoldenControlTest`).
+
+**Efecto sobre `lie_to_sit` (Frin, ya registrada desde DEC-087, sin
+relación con el flag de DEC-092):** al compartir la misma rama, su
+número también se recalcula con el nuevo punto de anclaje. Resultado
+mixto y reportado con honestidad: mejora sustancialmente en DOS de los
+cuatro casos (macho-derecha 1.21px -> 0.40px, hembra-derecha 1.20px ->
+0.25px) y empeora levemente en los otros dos (macho-izquierda 0.44px
+-> 0.87px, hembra-izquierda 0.23px -> 0.86px) -- ningún caso supera
+1px, muy por debajo del umbral perceptible y muchísimo por debajo del
+~53px que existía antes de DEC-087. Se evaluó mantener DOS
+convenciones de anclaje distintas (bbox para `changes_state` legado,
+alpha-centroide para el flag nuevo de DEC-092) para evitar tocar
+`lie_to_sit` en absoluto, y se descartó: introduciría dos mecanismos
+conceptualmente idénticos con comportamiento distinto sin ninguna razón
+de PRODUCTO para diferenciarlos, puramente para preservar un número que
+ya estaba, y sigue estando, dentro de un rango perceptualmente
+irrelevante.
+
+**Tests:** los 6 tests preexistentes de `TransitionEndpointContinuityTest`
+siguen pasando sin modificar (su fixture usa rectángulos sólidos, donde
+centro-de-bbox y centroide-de-alpha coinciden exactamente por
+construcción, así que no distinguen las dos convenciones -- documentado
+como límite honesto de ESE test específico, no un hueco de cobertura:
+`CompiledFrinEndpointContinuityTest` y `CompiledSelfLoopEndpointContinuityTest`
+sí ejercitan contenido real con densidad de alpha no uniforme, contra
+los packs compilados reales).
