@@ -416,6 +416,108 @@ class ComposeOnCanvasTest(unittest.TestCase):
             prep_dev_sprite.compose_on_canvas(2, 2, pixels, 0, 8, 0, 0)
 
 
+class LerpOffsetScheduleTest(unittest.TestCase):
+    """`prep_dev_sprite.lerp_offset_schedule()` -- Block 05, pasada de
+    continuidad de frontera (ver docs/DECISION_LOG.md): la
+    interpolación LINEAL de traslación, un offset entero por frame,
+    entre `start_offset` (frame 0) y `end_offset` (último frame) --
+    NUNCA de escala, nunca por-eje independiente. Tests puros, sin
+    ningún manifest ni PNG de por medio."""
+
+    def test_first_frame_is_exactly_the_start_offset(self) -> None:
+        schedule = prep_dev_sprite.lerp_offset_schedule(10, (5, -3), (25, 17))
+        self.assertEqual(schedule[0], (5, -3))
+
+    def test_last_frame_is_exactly_the_end_offset(self) -> None:
+        schedule = prep_dev_sprite.lerp_offset_schedule(10, (5, -3), (25, 17))
+        self.assertEqual(schedule[-1], (25, 17))
+
+    def test_schedule_length_matches_frame_count(self) -> None:
+        for n in (1, 2, 3, 25):
+            self.assertEqual(len(prep_dev_sprite.lerp_offset_schedule(n, (0, 0), (10, 10))), n)
+
+    def test_single_frame_degenerates_to_the_end_offset(self) -> None:
+        # Con un solo frame no hay "entre" que interpolar -- frame 0 Y
+        # el último son EL MISMO frame, así que debe coincidir con la
+        # punta que un caso normal protege primero (el destino).
+        self.assertEqual(prep_dev_sprite.lerp_offset_schedule(1, (5, 5), (99, 99)), [(99, 99)])
+
+    def test_interpolation_is_monotonic_per_axis(self) -> None:
+        # Cobertura explícita del brief: "translation correction is
+        # smooth/monotonic across frames" -- una interpolación lineal
+        # entre dos puntos fijos nunca invierte de dirección en NINGÚN
+        # eje.
+        schedule = prep_dev_sprite.lerp_offset_schedule(25, (0, 100), (200, 0))
+        xs = [p[0] for p in schedule]
+        ys = [p[1] for p in schedule]
+        self.assertEqual(xs, sorted(xs))  # x sube monótonamente
+        self.assertEqual(ys, sorted(ys, reverse=True))  # y baja monótonamente
+
+    def test_constant_offsets_produce_a_constant_schedule(self) -> None:
+        # Si las dos puntas ya coinciden, la interpolación no debería
+        # inventar ningún movimiento -- cada frame es el mismo punto.
+        schedule = prep_dev_sprite.lerp_offset_schedule(25, (7, -2), (7, -2))
+        self.assertTrue(all(p == (7, -2) for p in schedule))
+
+    def test_result_is_deterministic(self) -> None:
+        a = prep_dev_sprite.lerp_offset_schedule(13, (1, 2), (30, -40))
+        b = prep_dev_sprite.lerp_offset_schedule(13, (1, 2), (30, -40))
+        self.assertEqual(a, b)
+
+
+class TwoEndpointFrameOffsetsTest(unittest.TestCase):
+    """`prep_dev_sprite.compute_two_endpoint_frame_offsets()` -- la
+    decisión de registro de DOS puntas en aislamiento (sin pasar por
+    `compute_frame_normalization_plan()`/un manifest completo): dado el
+    primer y último frame de una transición más las bases de origen y
+    destino YA colocadas, decide si un solo offset constante alcanza o
+    si hace falta interpolar."""
+
+    def _frame(self, w: int, h: int, rect: tuple[int, int, int, int]) -> tuple[int, int, bytes]:
+        return w, h, _solid_frame(w, h, (9, 9, 9), rect)
+
+    def test_agreeing_endpoints_collapse_to_a_single_constant_offset(self) -> None:
+        # Fabricado para que las dos puntas registren EXACTAMENTE en el
+        # mismo punto: mismo contenido, mismas bases, mismas posiciones.
+        frame = self._frame(40, 40, (15, 15, 24, 24))
+        base = self._frame(40, 40, (15, 15, 24, 24))
+        start, end, needs_interp = prep_dev_sprite.compute_two_endpoint_frame_offsets(
+            frame_count=10, scale=1.0,
+            first_frame=frame, last_frame=frame,
+            source_base_frame=base, source_base_scale=1.0, source_base_pos=(0.0, 0.0),
+            target_base_frame=base, target_base_scale=1.0, target_base_pos=(0.0, 0.0),
+        )
+        self.assertFalse(needs_interp)
+        self.assertEqual(start, end)
+
+    def test_disagreeing_endpoints_trigger_interpolation(self) -> None:
+        first = self._frame(40, 40, (2, 2, 11, 11))
+        last = self._frame(40, 40, (28, 28, 37, 37))
+        base = self._frame(40, 40, (15, 15, 24, 24))
+        start, end, needs_interp = prep_dev_sprite.compute_two_endpoint_frame_offsets(
+            frame_count=10, scale=1.0,
+            first_frame=first, last_frame=last,
+            source_base_frame=base, source_base_scale=1.0, source_base_pos=(0.0, 0.0),
+            target_base_frame=base, target_base_scale=1.0, target_base_pos=(0.0, 0.0),
+        )
+        self.assertTrue(needs_interp)
+        self.assertNotEqual(start, end)
+
+    def test_result_is_deterministic(self) -> None:
+        first = self._frame(40, 40, (2, 2, 11, 11))
+        last = self._frame(40, 40, (28, 28, 37, 37))
+        base = self._frame(40, 40, (15, 15, 24, 24))
+        kwargs = dict(
+            frame_count=10, scale=1.0, first_frame=first, last_frame=last,
+            source_base_frame=base, source_base_scale=1.0, source_base_pos=(3.0, -2.0),
+            target_base_frame=base, target_base_scale=1.0, target_base_pos=(-5.0, 8.0),
+        )
+        self.assertEqual(
+            prep_dev_sprite.compute_two_endpoint_frame_offsets(**kwargs),
+            prep_dev_sprite.compute_two_endpoint_frame_offsets(**kwargs),
+        )
+
+
 class FrameNormalizationPlanTest(unittest.TestCase):
     """`prep_dev_sprite.compute_frame_normalization_plan()` -- Block
     04.3, la política genérica de canvas de trabajo compartido/anclado
@@ -807,11 +909,157 @@ class CompiledFrinEndpointContinuityTest(unittest.TestCase):
                     self.assertLess(abs(lx - bx), 4.0, f"{variant}/{direction} horizontal")
                     self.assertLess(abs(ly - by), 4.0, f"{variant}/{direction} vertical")
 
-    def test_frin_packs_carry_the_ten_second_rest_delay(self) -> None:
+    def test_frin_packs_carry_the_twelve_second_rest_delay(self) -> None:
+        # Pasada de continuidad de frontera: revierte DEC-089's 10.0 de
+        # vuelta a 12.0 (unificado otra vez con Bunny/Nidir), pedido de
+        # producto explícito.
         for variant, rel in self.PACKS:
             pack = self._pack(rel)
-            self.assertEqual(read_pet_pack.find_state(pack, "seated")["ambient_interval_seconds"], 10.0, variant)
+            self.assertEqual(read_pet_pack.find_state(pack, "seated")["ambient_interval_seconds"], 12.0, variant)
             self.assertEqual(read_pet_pack.find_state(pack, "lying")["ambient_actions"], [], variant)
+
+
+class LieToSitTwoEndpointContinuityTest(unittest.TestCase):
+    """Pasada de continuidad de frontera (ver docs/DECISION_LOG.md):
+    QA manual, específico -- "when lying and the owner clicks to stand
+    up, the stable lying pose immediately jumps in position when the
+    FIRST lie_to_sit frame appears". DEC-087/DEC-092 ya habían anclado
+    la punta FINAL de `lie_to_sit` contra `seated_base` -- esto agrega
+    el anclaje de la punta INICIAL contra `lying_base`
+    (`align_transition_both_endpoints`, ver
+    `compute_two_endpoint_frame_offsets()`), con interpolación LINEAL
+    de traslación (nunca de escala) si un solo transform constante no
+    alcanza para las dos puntas.
+
+    Medido con centroide ponderado por alpha (la métrica que el propio
+    mecanismo optimiza -- no bbox) contra los packs COMPILADOS
+    reales."""
+
+    PACKS = CompiledFrinEndpointContinuityTest.PACKS
+    DIRECTIONS = CompiledFrinEndpointContinuityTest.DIRECTIONS
+
+    # 2.0px: el peor caso medido tras la corrección es ~1.16px (Frin
+    # hembra, arranque). Antes de esta pasada la punta de arranque no
+    # tenía NINGÚN registro -- el salto que el owner reportó.
+    MAX_ENDPOINT_DELTA_PX = 2.0
+
+    def _pack(self, rel: str) -> dict:
+        return read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+
+    def _lie_to_sit_and_bases(self, pack: dict, direction: str):
+        seated = read_pet_pack.find_state(pack, "seated")
+        lying = read_pet_pack.find_state(pack, "lying")
+        seated_base = read_pet_pack.resolve_animation(
+            seated["base_animation"], seated["base_animation_direction_overrides"], direction)["frames"][0]
+        lying_base = read_pet_pack.resolve_animation(
+            lying["base_animation"], lying["base_animation_direction_overrides"], direction)["frames"][0]
+        action = read_pet_pack.find_action(lying, "click_actions", "lie_to_sit")
+        anim = read_pet_pack.resolve_animation(action["animation"], action["direction_overrides"], direction)
+        return anim, seated_base, lying_base
+
+    def test_first_frame_registers_against_lying_base(self) -> None:
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    anim, _seated_base, lying_base = self._lie_to_sit_and_bases(pack, direction)
+                    f0 = read_pet_pack.content_alpha_centroid(anim["frames"][0])
+                    lb = read_pet_pack.content_alpha_centroid(lying_base)
+                    delta = math.hypot(f0[0] - lb[0], f0[1] - lb[1])
+                    self.assertLess(
+                        delta, self.MAX_ENDPOINT_DELTA_PX,
+                        f"{variant}/{direction}: lie_to_sit frame 0 is {delta:.2f}px away from lying_base -- "
+                        "the 'lying pose jumps when lie_to_sit starts' regression")
+
+    def test_last_frame_still_registers_against_seated_base(self) -> None:
+        # Invariante que YA existía (DEC-087/092) -- se re-verifica acá,
+        # junto al del arranque, para que las dos puntas queden
+        # protegidas por el mismo test class.
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    anim, seated_base, _lying_base = self._lie_to_sit_and_bases(pack, direction)
+                    fl = read_pet_pack.content_alpha_centroid(anim["frames"][-1])
+                    sb = read_pet_pack.content_alpha_centroid(seated_base)
+                    delta = math.hypot(fl[0] - sb[0], fl[1] - sb[1])
+                    self.assertLess(delta, self.MAX_ENDPOINT_DELTA_PX, f"{variant}/{direction}")
+
+    def test_translation_correction_never_produces_a_large_frame_to_frame_jump(self) -> None:
+        """"gradual translation correction... far preferable to an
+        instantaneous teleport" -- se verifica de forma OBSERVABLE sobre
+        los 25 frames reales: ningún par de frames CONSECUTIVOS se
+        mueve más que una fracción chica de lo que el personaje se
+        mueve en TOTAL a lo largo de toda la animación (lo que
+        descartaría un salto instantáneo escondido en medio de un
+        movimiento por lo demás suave)."""
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    anim, _seated_base, _lying_base = self._lie_to_sit_and_bases(pack, direction)
+                    centroids = [read_pet_pack.content_alpha_centroid(f) for f in anim["frames"]]
+                    step_distances = [
+                        math.hypot(centroids[i + 1][0] - centroids[i][0], centroids[i + 1][1] - centroids[i][1])
+                        for i in range(len(centroids) - 1)
+                    ]
+                    total_span = math.hypot(
+                        centroids[-1][0] - centroids[0][0], centroids[-1][1] - centroids[0][1])
+                    max_step = max(step_distances)
+                    # Ningún paso individual debería acaparar más de un
+                    # cuarto del desplazamiento neto total en 24 pasos
+                    # -- un salto instantáneo real (p. ej. el frame 0
+                    # sin ningún registro) se vería como UN paso
+                    # gigante, no como esta distribución pareja.
+                    self.assertLess(
+                        max_step, max(10.0, total_span * 0.25),
+                        f"{variant}/{direction}: largest single-frame jump ({max_step:.2f}px) looks like a "
+                        f"snap, not smooth motion (net displacement across the whole clip: {total_span:.2f}px)")
+
+    def test_no_per_frame_scale_variation(self) -> None:
+        """"Do not interpolate zoom" -- todos los frames de lie_to_sit
+        comparten UNA sola escala (verificable de forma observable: si
+        alguno tuviera una escala distinta, sus dimensiones compiladas
+        diferirían -- el compilador ya falla fuerte si eso ocurre)."""
+        for variant, rel in self.PACKS:
+            pack = self._pack(rel)
+            for direction in self.DIRECTIONS:
+                anim, _sb, _lb = self._lie_to_sit_and_bases(pack, direction)
+                dims = {(f["width"], f["height"]) for f in anim["frames"]}
+                with self.subTest(variant=variant, direction=direction):
+                    self.assertEqual(len(dims), 1, f"lie_to_sit frames do not share one uniform scale: {dims}")
+
+    def test_align_transition_both_endpoints_is_declared(self) -> None:
+        manifests = {
+            "male": "assets/source/nimvlets/frin/male/pack_manifest.json",
+            "female": "assets/source/nimvlets/frin/female/pack_manifest.json",
+        }
+        for variant, manifest_rel in manifests.items():
+            with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            lying = next(s for s in manifest["states"] if s["id"] == "lying")
+            action = next(a for a in lying["click_actions"] if a["id"] == "lie_to_sit")
+            with self.subTest(variant=variant):
+                self.assertTrue(action.get("align_transition_both_endpoints", False))
+
+    def test_sit_to_lie_is_not_flagged_for_two_endpoint_registration(self) -> None:
+        """`sit_to_lie` NO necesita esto -- sus dos puntas YA son
+        archivos compartidos con seated_base/lying_base (containment
+        las deja exactas sin ningún registro por contenido, ver
+        DEC-087) -- agregar el flag ahí sería ruido sin efecto. Se fija
+        como test para que quede documentado por qué, no solo por
+        omisión."""
+        manifests = {
+            "male": "assets/source/nimvlets/frin/male/pack_manifest.json",
+            "female": "assets/source/nimvlets/frin/female/pack_manifest.json",
+        }
+        for variant, manifest_rel in manifests.items():
+            with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            seated = next(s for s in manifest["states"] if s["id"] == "seated")
+            action = next(a for a in seated["ambient_actions"] if a["id"] == "sit_to_lie")
+            with self.subTest(variant=variant):
+                self.assertFalse(action.get("align_transition_both_endpoints", False))
 
 
 class CompiledSelfLoopEndpointContinuityTest(unittest.TestCase):
@@ -889,6 +1137,73 @@ class CompiledSelfLoopEndpointContinuityTest(unittest.TestCase):
                     action.get("align_endpoint_to_target_base", False),
                     f"{manifest_rel}: state[{state_id}].{trigger}[{action_id}] is missing "
                     "align_endpoint_to_target_base: true")
+
+
+class ReturnEndpointScaleContinuityTest(unittest.TestCase):
+    """Pasada de continuidad de frontera (ver docs/DECISION_LOG.md):
+    QA manual siguió reportando un cambio de TAMAÑO perceptible al
+    volver a la base tras `groom`/`click`/`howl`/`tail_greet`, incluso
+    después de que DEC-092 arreglara la COLOCACIÓN -- ese arreglo
+    preservaba `content_scale` a propósito ("that was not sufficient",
+    brief de esta pasada). Antes de esta pasada, la escala de CUALQUIER
+    acción (incluida una self-loop con `align_endpoint_to_target_base`)
+    se medía SIEMPRE contra su PROPIO frame 0 -- correcto para "qué tan
+    grande es la pose de arranque", no necesariamente para "qué tan
+    grande es la pose que REALMENTE toca la base al terminar".
+
+    Este test mide la ESCALA (radio RMS ponderado por alpha, invariante
+    a traslación -- DEC-088) del ÚLTIMO frame contra la base, no solo su
+    posición (que ya cubre CompiledSelfLoopEndpointContinuityTest de
+    arriba)."""
+
+    # 1% de tolerancia: el peor caso medido tras la corrección es
+    # ~0.81% (Frin macho howl). Deja margen real de regresión sin ser
+    # un snapshot pixel-perfecto.
+    MAX_RETURN_SCALE_DRIFT = 0.01
+
+    FLAGGED_ACTIONS = CompiledSelfLoopEndpointContinuityTest.FLAGGED_ACTIONS
+
+    def _rms(self, frame: dict) -> float:
+        return prep_dev_sprite.alpha_rms_radius(frame["width"], frame["height"], frame["pixels"])
+
+    def test_return_endpoint_scale_matches_base(self) -> None:
+        for rel, state_id, trigger, action_id in self.FLAGGED_ACTIONS:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            state = read_pet_pack.find_state(pack, state_id)
+            for direction in ("right", "left"):
+                with self.subTest(pack=pack["id"], action=action_id, direction=direction):
+                    base = read_pet_pack.resolve_animation(
+                        state["base_animation"], state["base_animation_direction_overrides"], direction)
+                    action = read_pet_pack.find_action(state, trigger, action_id)
+                    anim = read_pet_pack.resolve_animation(action["animation"], action["direction_overrides"], direction)
+                    base_rms = self._rms(base["frames"][0])
+                    last_rms = self._rms(anim["frames"][-1])
+                    drift = abs(last_rms / base_rms - 1.0)
+                    self.assertLess(
+                        drift, self.MAX_RETURN_SCALE_DRIFT,
+                        f"{pack['id']}/{state_id}/{action_id} ({direction}) returns at {drift * 100:+.2f}% "
+                        "scale drift from its base pose -- larger than the measured post-fix worst case")
+
+    def test_scale_is_uniform_across_every_frame_of_the_action(self) -> None:
+        """"No per-frame scaling behavior" -- pedido explícito del
+        brief. La escala de una acción se comprime a un único
+        `content_scale` en el plan (nunca varía con el índice de
+        frame); esto se comprueba de forma OBSERVABLE: si algún frame
+        recibiera una escala distinta, sus dimensiones compiladas
+        diferirían de las del resto (el compilador YA falla fuerte si
+        eso pasa -- ver `_compile_animation()` -- así que una
+        compilación exitosa es, en sí, una prueba negativa; acá se
+        vuelve a verificar explícitamente sobre el pack real, no solo
+        confiar en que el compilador no lanzó)."""
+        for rel, state_id, trigger, action_id in self.FLAGGED_ACTIONS:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            state = read_pet_pack.find_state(pack, state_id)
+            for direction in ("right", "left"):
+                action = read_pet_pack.find_action(state, trigger, action_id)
+                anim = read_pet_pack.resolve_animation(action["animation"], action["direction_overrides"], direction)
+                dims = {(f["width"], f["height"]) for f in anim["frames"]}
+                with self.subTest(pack=pack["id"], action=action_id, direction=direction):
+                    self.assertEqual(len(dims), 1, f"frames of {action_id} do not share one uniform scale: {dims}")
 
 
 class CompiledClickScaleTest(unittest.TestCase):
@@ -1079,11 +1394,13 @@ class ContentTimingPolicyTest(unittest.TestCase):
                 return state
         raise AssertionError(f"state '{state_id}' not found")
 
-    def test_frin_seated_rest_delay_is_ten_seconds(self) -> None:
+    def test_frin_seated_rest_delay_is_twelve_seconds(self) -> None:
+        # Pasada de continuidad de frontera: revierte DEC-089's 10.0 de
+        # vuelta a 12.0.
         for variant in ("male", "female"):
             manifest = self._manifest(f"assets/source/nimvlets/frin/{variant}/pack_manifest.json")
             seated = self._state(manifest, "seated")
-            self.assertEqual(seated["ambient_interval_seconds"], 10.0, variant)
+            self.assertEqual(seated["ambient_interval_seconds"], 12.0, variant)
             # Y que el timer realmente sirva para algo: el ambient de
             # seated es la transición a lying.
             self.assertEqual([a["id"] for a in seated["ambient_actions"]], ["sit_to_lie"], variant)
@@ -1100,16 +1417,17 @@ class ContentTimingPolicyTest(unittest.TestCase):
             self.assertEqual(self._state(manifest, "default")["ambient_interval_seconds"], 12.0, pet)
 
     def test_hover_dwell_pinned_in_core_matches_product_value(self) -> None:
-        """El umbral de hover (0.2s -- ver DEC-090) vive en
-        core::kDefaultHoverDwellSeconds (src/app no es testeable en
-        aislamiento), pero esta suite SÍ puede leer la fuente C++ como
-        texto y fijar que el valor no se desvíe en silencio -- mismo
-        patrón que test_click_through_still_uses_only_a_cursor_position_
-        query() usa para SpikeApp.cpp más arriba."""
+        """El umbral de hover (0.4s -- pasada de continuidad de
+        frontera) vive en core::kDefaultHoverDwellSeconds (src/app no
+        es testeable en aislamiento), pero esta suite SÍ puede leer la
+        fuente C++ como texto y fijar que el valor no se desvíe en
+        silencio -- mismo patrón que
+        test_click_through_still_uses_only_a_cursor_position_query()
+        usa para SpikeApp.cpp más arriba."""
         header = os.path.join(_REPO_ROOT, "src/core/HoverDwellTracker.h")
         with open(header, "r", encoding="utf-8") as f:
             text = f.read()
-        self.assertIn("kDefaultHoverDwellSeconds = 0.2", text)
+        self.assertIn("kDefaultHoverDwellSeconds = 0.4", text)
 
 
 class FrinRuntimeDirectionInversionTest(unittest.TestCase):

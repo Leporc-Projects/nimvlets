@@ -783,3 +783,56 @@ exactamente como siempre, y el pack compilado ya trae los frames
 correctos en el slot correcto. Un pet futuro que necesite lo mismo (o
 lo contrario) lo resuelve en SU propio generador, sin tocar
 `src/content/` ni `src/app/`.
+
+## 15. Silueta autorada vs. transform incorrecto en el borde: la distinción explícita (Block 05, pasada de continuidad de frontera)
+
+Contrato permanente que este pasaje deja explícito, no solo implícito
+en el código (ver `docs/DECISION_LOG.md` DEC-095/DEC-096 para su
+implementación concreta):
+
+- **Variación de silueta NATURAL durante el movimiento autorado**: una
+  animación real puede estirar una oreja, girar una cabeza, abrir una
+  cola, cambiar la postura del cuerpo -- eso es CONTENIDO, nunca se
+  corrige. `alpha_rms_radius()` (DEC-088) y el registro por centroide
+  de alpha (DEC-093) se eligieron precisamente porque son ROBUSTOS
+  frente a esto: miden masa/centro de masa, no los dos pixeles más
+  extremos, así que una pose autorada real no dispara una
+  "corrección" que la aplastaría.
+- **Transform de personaje ENTERO incorrecto en la FRONTERA**: cuando
+  una animación EMPIEZA o TERMINA, y ese frame de frontera está
+  destinado a representar la MISMA pose que una base estable (la
+  intención de contenido detrás de `align_endpoint_to_target_base`/
+  `align_transition_both_endpoints`), el personaje COMPLETO no debería
+  verse a otra escala ni en otra posición que esa base -- eso SÍ es un
+  defecto (de colocación, DEC-092/096; de escala, DEC-095), y sí se
+  corrige, con un ÚNICO transform uniforme (nunca por-frame, nunca
+  por-eje independiente) derivado de exactamente esa frontera.
+
+La distinción es POR QUÉ frame se mide, no una tolerancia numérica
+distinta: se mide siempre el mismo frame que el runtime realmente
+muestra en el instante de la transición (el ÚLTIMO frame antes de que
+`AnimationController` vuelva a mostrar la base, o el PRIMERO al entrar
+a una transición que cambia de estado), nunca "el frame más extremo de
+toda la secuencia" ni un promedio.
+
+## 16. Continuidad de dos puntas para transiciones cuyo export es independiente en ambos extremos (Block 05, pasada de continuidad de frontera)
+
+DEC-087 estableció el registro por-último-frame para una transición que
+cambia de estado (protege la punta donde el personaje QUEDA QUIETO).
+Esta pasada agrega el complemento -- registro TAMBIÉN por-primer-frame
+contra la base del estado de ORIGEN -- para el caso donde AMBAS puntas
+son exports independientes sin ningún archivo compartido con su base
+correspondiente (`lie_to_sit` de Frin: ver `docs/DECISION_LOG.md`
+DEC-096 para la evidencia completa y la medición real).
+
+Invariante de contenido: `align_transition_both_endpoints` en el
+manifest de una `WeightedAction` cuyo `target_state_id` cambia de
+estado. El compilador decide, por MEDICIÓN (nunca por suposición), si
+un único offset constante satisface las dos puntas; solo si divergen
+de verdad interpola la TRASLACIÓN linealmente por índice de frame
+(`prep_dev_sprite.lerp_offset_schedule()`) -- nunca la escala, que
+sigue siendo un único valor uniforme para toda la animación. Esto es
+enteramente un transform de TIEMPO DE COMPILACIÓN: el pack compilado
+ya trae cada frame en su posición final, y `src/content/PetPackLoader`
+los lee exactamente igual que cualquier otro frame -- cero cambios en
+`src/` para soportar esto.

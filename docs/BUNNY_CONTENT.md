@@ -655,3 +655,28 @@ mecanismo nuevo es 100% opt-in por-acción y Nidir nunca activa el flag.
 `tools/test_asset_pipeline.py`'s `CompiledSelfLoopEndpointContinuityTest`
 (contra el pack real, `groom`/`click`) y `AlignEndpointToTargetBaseTest`
 (el mecanismo genérico, compartido con Frin, contra un fixture propio).
+
+## 18. Pasada de continuidad de frontera (Block 05): escala del retorno también corregida
+
+§17 resolvió la COLOCACIÓN de la punta de regreso de `groom`/`click`,
+preservando deliberadamente `content_scale`. QA manual siguió
+reportando la variante de escala del mismo síntoma: "the owner can
+still perceive a small whole-character width/size change when an
+animation starts/ends" -- ver `docs/DECISION_LOG.md` DEC-095.
+
+`align_endpoint_to_target_base` (el mismo flag de §17) ahora gobierna
+TAMBIÉN la escala, derivada del ÚLTIMO frame contra la base en vez del
+primero. Medido: el contenido de Bunny ya caía dentro de la tolerancia
+de 0.5% tanto midiendo desde el frame 0 como desde el último, así que
+`content_scale` no cambió de VALOR para ninguna de las tres acciones
+self-loop -- lo que el brief pedía ("scale ratio as close to 1.000 as
+practical") ya estaba satisfecho antes de esta pasada. Se deja
+documentado, no se infla el cambio: la mejora real de esta pasada para
+Bunny fue de mecanismo/cobertura de test, no de números que cambiaran
+de forma dramática.
+
+Escala uniforme garantizada por construcción, verificada con
+`ReturnEndpointScaleContinuityTest`'s
+`test_scale_is_uniform_across_every_frame_of_the_action` -- ningún
+frame de `groom`/`click`/`idle_breathing` recibe una escala distinta
+del resto.
