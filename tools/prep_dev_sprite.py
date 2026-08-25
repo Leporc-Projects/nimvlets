@@ -521,21 +521,6 @@ def bbox_registration_point(width: int, height: int, pixels: bytes, scale: float
     return ((minx + maxx + 1) / 2.0 * scale, (miny + maxy + 1) / 2.0 * scale)
 
 
-def alpha_registration_point(width: int, height: int, pixels: bytes, scale: float) -> tuple[float, float]:
-    """Centroide ponderado por alpha de un frame, YA escalado -- el
-    punto de anclaje que `compute_frame_normalization_plan()` usa desde
-    DEC-093 para registrar una punta de transición contra su destino
-    (ver `alpha_weighted_centroid()`/DEC-093 para por qué centroide de
-    alpha y no centro de bbox). Cae a `bbox_registration_point()` si el
-    frame es completamente transparente -- mismo convenio pixel-índice
-    -> pixel-centro (+0.5) que ya documentaba la versión anidada
-    original."""
-    centroid = alpha_weighted_centroid(width, height, pixels)
-    if centroid is None:
-        return bbox_registration_point(width, height, pixels, scale)
-    cx, cy = centroid
-    return (cx + 0.5) * scale, (cy + 0.5) * scale
-
 
 def content_bbox_or_full_frame(width: int, height: int, pixels: bytes) -> tuple[int, int, int, int]:
     """Bounding box de contenido (`compute_content_bbox()`), o el frame
@@ -577,11 +562,7 @@ def compute_frame_normalization_plan(
     state_of_group: dict[str, str],
     base_group_of_state: dict[str, str],
     entry_frame_paths: dict[str, list[str]] | None = None,
-    last_frames: dict[str, tuple[int, int, bytes]] | None = None,
-    transition_target_entry: dict[str, str] | None = None,
-    start_anchor_entry: dict[str, str] | None = None,
-    scale_from_last_frame_entries: "set[str] | None" = None,
-    strict_scale_entries: "set[str] | None" = None,
+    start_base_entry: dict[str, str] | None = None,
     scale_tolerance: float = 0.005,
 ) -> dict[str, tuple[float, int, int, int, int]]:
     """Política genérica de "canvas de trabajo compartido, anclado por
@@ -685,77 +666,70 @@ def compute_frame_normalization_plan(
       sin recortar) dentro de ese canvas de trabajo compartido, para
       que su ancla de contenido caiga exactamente en el centro.
 
-    `transition_target_entry`/`last_frames` (opcionales, Block 05 --
-    ver DEC-087 y, para su extensión a self-loop + el cambio de punto
-    de anclaje, DEC-093): cuando una entrada tiene un destino
-    registrado (una transición que cambia de estado, o una acción
-    self-loop con `align_endpoint_to_target_base` en el manifest --
-    ver tools/compile_pet_pack.py), su colocación se ancla por su
-    ÚLTIMO frame contra la pose base de destino en vez de por su propio
-    frame 0 -- salvo que ya esté vinculada por archivo compartido
-    (containment, que es exacto por construcción y tiene prioridad).
-    Ese anclaje usa el CENTROIDE PONDERADO POR ALPHA de cada punta
-    (`registration_point()`, no `anchor_of()`) -- medido en este bloque
-    que anclar por centro de bounding box puede alinear los pixeles
-    EXTREMOS perfectamente mientras el centro de MASA real queda peor
-    que sin ningún anclaje, para una pose con margen asimétrico. Fuera
-    de esta rama (colocación DEFAULT de cualquier entrada sin destino
-    registrado, y la posición del propio destino) sigue siendo
-    exclusivamente centro-de-bbox, sin cambios.
+    **Identidad semántica de pose (pasada de simplificación
+    geométrica -- ver docs/DECISION_LOG.md DEC-099).** Todo el conjunto
+    de mecanismos de compensación que vivió acá entre DEC-087 y DEC-098
+    (`transition_target_entry`/`last_frames`, `start_anchor_entry`,
+    `scale_from_last_frame_entries`, `strict_scale_entries`, y el punto
+    de registro por centroide de alpha que los acompañaba) fue
+    ELIMINADO, no reemplazado por otra corrección. Todos existían para
+    el mismo objetivo: hacer que la punta de una animación "casi"
+    coincidiera con una pose base estable, midiendo qué tan cerca
+    quedaba y ajustando escala/colocación para achicar esa diferencia.
 
-    `scale_from_last_frame_entries` (opcional, pasada de continuidad de
-    frontera -- ver `align_endpoint_to_target_base` en
-    tools/compile_pet_pack.py y docs/DECISION_LOG.md): conjunto de
-    entry_keys de acciones SELF-LOOP (`target_state_id == state_id`,
-    nunca una transición que cambia de estado -- ver más abajo por
-    qué) cuya ESCALA (no solo su colocación) debe derivarse del último
-    frame (el que REALMENTE toca la base cuando la acción termina) en
-    vez del primero. Sin esto, `group_content_size()` mide SIEMPRE el
-    primer frame -- válido para "¿qué tan grande es la pose de
-    ARRANQUE de esta acción?", pero no necesariamente para "¿qué tan
-    grande es la pose de REGRESO?", que es la que un `content_scale`
-    uniforme deja tocando (o no) la base sin ningún salto de tamaño
-    perceptible. Solo aplica a self-loop porque ahí frame 0 Y el
-    último frame comparten la MISMA postura que la base (sentado todo
-    el tiempo, o "default" todo el tiempo) -- para una transición que
-    SÍ cambia de postura (`lie_to_sit`: empieza acostado, termina
-    sentado) comparar el ÚLTIMO frame (postura sentada) contra la base
-    de ORIGEN (postura acostada) sería la misma comparación
-    entre-posturas inválida que DEC-075 ya prohibió -- ahí la escala
-    sigue derivándose del primer frame contra la base de origen, sin
-    cambios (ver `start_anchor_entry` más abajo para la COLOCACIÓN de
-    esa misma transición, que es un problema aparte).
+    Ese objetivo ahora se cumple por CONSTRUCCIÓN y en otra capa: si el
+    contenido declara que su primer/último frame ES la pose base de un
+    estado, `tools/compile_pet_pack.py` compila esa punta a partir del
+    ARCHIVO de esa base, con la transforma de esa base -- así que el
+    frame compilado es idéntico byte a byte, no "cercano dentro de una
+    tolerancia". Ninguna métrica, ningún residual, ninguna tolerancia
+    en la frontera. Ver `first_frame_is_state_base`/
+    `last_frame_is_state_base` allá.
 
-    `strict_scale_entries` (opcional, pasada de resolución de
-    root-motion -- ver DEC-098): conjunto de entry_keys cuya escala se
-    resuelve SIN aplicar `scale_tolerance`. Es exactamente el mismo
-    conjunto que `scale_from_last_frame_entries` en la práctica (una
-    acción que declara `align_endpoint_to_target_base` quiere las dos
-    cosas: medir desde el último frame Y registrar ese tamaño exacto),
-    pero se pasa por separado para que las dos políticas sigan siendo
-    independientes en el nivel de la función. La tolerancia normal
-    existe para no resamplear cuando la diferencia es imperceptible EN
-    AISLAMIENTO; en la frontera de retorno, donde el owner ve dos
-    imágenes consecutivas del MISMO personaje, un 0.1-0.25% sí se
-    percibe (QA manual real). Ver el comentario en el bucle de escala.
+    Lo que queda acá es solo lo que sigue siendo genuinamente necesario
+    para meter exports de distinto tamaño de canvas nativo en un único
+    sistema de coordenadas por pet: UNA escala uniforme por grupo, UNA
+    colocación por grupo, un canvas de trabajo compartido, y el
+    union-find/containment por archivo real compartido (que es exacto
+    por construcción, no una estimación). Esta es exactamente la
+    política que Nidir -- el control dorado, aprobado por QA -- usó
+    siempre: Nidir nunca declaró ninguno de los flags eliminados.
 
-    `start_anchor_entry` (opcional, pasada de resolución de
-    root-motion -- ver DEC-097): entry_key -> entry_key de la base del
-    estado de ORIGEN. Ancla la entrada por su PRIMER frame contra esa
-    base, con UNA transforma rígida constante para todo el clip, y
-    REEMPLAZA (nunca complementa) el anclaje por-último-frame de
-    `transition_target_entry`. Existe porque un salto instantáneo en el
-    PRIMER frame -- el instante exacto en que el owner hace click -- es
-    mucho más notorio que un residual al final, cuando el personaje ya
-    viene en movimiento.
+    `start_base_entry` (opcional): entry_key -> entry_key de la pose
+    base del estado en el que ese clip ARRANCA. Coloca el clip
+    registrando su frame 0 contra esa base, con UNA traslación
+    constante para todo el clip.
 
-    Deliberadamente NO existe un modo "anclar las dos puntas a la vez":
-    cuando el export no cierra geométricamente, satisfacer las dos
-    exigiría mover el sprite durante el clip, y eso se probó y se
-    RECHAZÓ en QA (se percibe como root-motion artificial, no como
-    continuidad -- ver DEC-097). Si las dos puntas no cierran con una
-    sola transforma rígida, el residual se MIDE y se reporta como deuda
-    de CONTENIDO; el compilador no lo disimula.
+    Esto NO es una capa de compensación como las que DEC-099 eliminó, y
+    la diferencia importa: no mide "qué tan lejos quedó una punta" ni
+    corrige nada. Define cuál es el SISTEMA DE COORDENADAS del clip.
+    La colocación por default -- centrar el contenido del frame 0 en el
+    ancla compartida -- asume que la pose de arranque del clip vive en
+    esa ancla, lo cual es cierto para todo pet de un solo estado (su
+    base ES la referencia). Para un clip que arranca en OTRO estado
+    (`lie_to_sit` arranca acostado, y la pose acostada no vive en el
+    ancla: hereda la colocación de `sit_to_lie` por containment), esa
+    suposición es simplemente falsa.
+
+    Se DERIVA de la misma declaración de contenido que gobierna la
+    sustitución exacta de punta (`first_frame_is_state_base`), no de un
+    flag propio: si el contenido ya dice "mi primer frame ES la pose
+    base de tal estado", entonces dónde vive esa base es exactamente
+    dónde tiene que arrancar el clip. Una sola declaración, dos
+    consecuencias coherentes.
+
+    Medido sin esto (pasada de simplificación, antes de derivarlo): el
+    frame 0 sustituido y el frame 1 autorado quedaban a 66.3px (macho)
+    y 61.8px (hembra) de distancia, y el canvas de trabajo compartido
+    se inflaba de 657 a 767px de alto -- encogiendo a Frin ~14% en
+    pantalla. Ver el informe de este bloque.
+
+    NO existe, y no debe reintroducirse, ningún modo que mueva o
+    reescale el sprite GRADUALMENTE a lo largo de un clip para
+    reconciliar dos puntas que el export no cierra: se implementó, se
+    probó en QA y se rechazó (se percibe como root-motion artificial --
+    ver DEC-097). Si las dos puntas no cierran con una sola transforma
+    rígida, el residual se MIDE y se reporta como deuda de CONTENIDO.
 
     Nunca recorta contenido -- solo agrega margen transparente
     (compose_on_canvas() nunca resamplea). Sin ninguna rama específica
@@ -775,25 +749,9 @@ def compute_frame_normalization_plan(
     for entry_key, group_key in groups.items():
         canonical_of_group.setdefault(group_key, entry_key)
 
-    scale_from_last = scale_from_last_frame_entries or set()
-    strict_scale = strict_scale_entries or set()
-    last_frame_pixels_for_scale = last_frames or {}
 
     def group_content_size(group_key: str) -> float:
-        entry_key = canonical_of_group[group_key]
-        # Self-loop con escala derivada del RETORNO (ver el docstring
-        # de `scale_from_last_frame_entries` más arriba): mide el
-        # ÚLTIMO frame, no el primero, cuando el contenido lo pide
-        # explícitamente. `last_frame_pixels_for_scale.get(entry_key)`
-        # puede faltar si esta entrada terminó excluida de
-        # `last_frames` por compartir archivo con su destino
-        # (containment ya la deja exacta) -- en ese caso cae al frame 0
-        # como siempre, correcto porque containment ya garantiza
-        # escala 1.0 por construcción.
-        if entry_key in scale_from_last and entry_key in last_frame_pixels_for_scale:
-            w, h, pixels = last_frame_pixels_for_scale[entry_key]
-        else:
-            w, h, pixels = entries[entry_key]
+        w, h, pixels = entries[canonical_of_group[group_key]]
         return alpha_rms_radius(w, h, pixels)
 
     # --- Union-Find de grupos vinculados por archivo REAL compartido
@@ -865,33 +823,7 @@ def compute_frame_normalization_plan(
         this_size = group_content_size(group_key)
         base_size = group_content_size(base_group)
         raw_scale = base_size / this_size if this_size > 0 else 1.0
-        # Contrato ESTRICTO de retorno-a-base (pasada de resolución de
-        # root-motion -- ver docs/DECISION_LOG.md DEC-098): para una
-        # acción que el CONTENIDO marca explícitamente como
-        # "mi último frame representa la pose base del estado destino"
-        # (`align_endpoint_to_target_base`), la tolerancia normal de
-        # `scale_tolerance` NO aplica -- se usa `raw_scale` tal cual.
-        #
-        # Por qué: esa tolerancia existe para evitar un resample
-        # innecesario cuando la diferencia es imperceptible EN GENERAL,
-        # y es la política correcta para cualquier animación normal.
-        # Pero en la FRONTERA de retorno el owner compara dos imágenes
-        # consecutivas del MISMO personaje, una al lado de la otra en
-        # el tiempo -- ahí una diferencia de 0.1-0.25% que sería
-        # invisible en aislamiento se percibe como "el personaje se
-        # achicó al terminar la animación" (QA manual real). Medido:
-        # sin esta rama, `idle_breathing` de Bunny (1.00112 requerido)
-        # y `howl` de Frin hembra (0.99779 requerido) quedaban ambos
-        # ajustados a 1.0 exacto por la tolerancia.
-        #
-        # El costo es un resample que de otro modo no ocurriría -- se
-        # acepta deliberadamente acá y SOLO acá: es opt-in por-acción
-        # desde el contenido, nunca global, así que ninguna animación
-        # que no declare este contrato paga nada.
-        if canonical_of_group.get(group_key) in strict_scale:
-            local_scale = raw_scale
-        else:
-            local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+        local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
         scale_by_group[group_key] = state_scale * local_scale
 
     # --- Colocación (offset) ------------------------------------------
@@ -906,50 +838,12 @@ def compute_frame_normalization_plan(
     # aritmética anterior (pos = -anchor), solo reescrita: cada entrada
     # pone el centro de contenido de su primer frame en el mismo punto.
     entry_paths = entry_frame_paths or {}
-    start_anchors = start_anchor_entry or {}
-    last_frame_pixels = last_frames or {}
-    transition_targets = transition_target_entry or {}
+    start_bases = start_base_entry or {}
 
     def anchor_of(entry_key: str, frame: tuple[int, int, bytes]) -> tuple[float, float]:
         w, h, pixels = frame
         return bbox_registration_point(w, h, pixels, scale_by_group[groups[entry_key]])
 
-    def registration_point(entry_key: str, frame: tuple[int, int, bytes]) -> tuple[float, float]:
-        """Punto de anclaje para REGISTRAR una transición contra su
-        destino (usado únicamente dentro de la rama de `place()` de más
-        abajo) -- el centroide ponderado por alpha ("centro de masa" de
-        lo visible), NO el centro geométrico del bounding box que usa
-        `anchor_of()`/`first_anchor` para la colocación DEFAULT de cada
-        entrada.
-
-        Por qué un punto de registro distinto (Block 05, pasada de
-        pulido final -- ver docs/DECISION_LOG.md DEC-093, evidencia
-        medida, no supuesta): al extender el mecanismo de anclaje por
-        último-frame de DEC-087 a acciones self-loop (howl/tail_greet
-        de Frin, groom/click de Bunny -- ver `align_endpoint_to_target_
-        base`), registrar por CENTRO DE BBOX produjo resultados
-        object­ivamente peores en el centroide de alpha real: medido en
-        `groom` de Bunny, el centro de bbox del último frame quedó a
-        <1px del de la base (excelente por ESA métrica), pero su
-        centroide de masa REAL se disparó a ~4px de distancia (peor que
-        antes de la corrección) -- el bbox de ese frame concreto tiene
-        margen asimétrico (una pose con la postura del cuerpo
-        desplazada dentro de un contorno de ancho similar), así que
-        alinear sus DOS PIXELES EXTREMOS no alinea dónde está realmente
-        el peso visual del personaje. `alpha_rms_radius()` (DEC-088) ya
-        había establecido que la MEDIDA correcta de "tamaño" es
-        ponderada por alpha, no por bbox -- esto aplica la misma lógica
-        a la COLOCACIÓN: si el peso es lo que define el tamaño
-        percibido, el centro de masa es lo que define la posición
-        percibida.
-
-        Cae a `anchor_of()` (bbox-center) solo si el frame es
-        completamente transparente (`alpha_weighted_centroid()`
-        devuelve None) -- un caso degenerado que nunca debería
-        alcanzar contenido real, conservado por robustez, no porque se
-        espere ejercitarlo."""
-        w, h, pixels = frame
-        return alpha_registration_point(w, h, pixels, scale_by_group[groups[entry_key]])
 
     first_anchor: dict[str, tuple[float, float]] = {}
     scaled_size: dict[str, tuple[float, float]] = {}
@@ -1004,42 +898,15 @@ def compute_frame_normalization_plan(
             pos[entry_key] = place(root)
             return pos[entry_key]
 
-        # Anclaje por PRIMER frame contra la base del estado de ORIGEN
-        # (pasada de resolución de root-motion -- ver DEC-097). UNA
-        # transforma rígida constante para todo el clip, igual que la
-        # rama de anclaje-por-último-frame de más abajo: la única
-        # diferencia es CUÁL de las dos puntas se registra exacto. Se
-        # chequea primero porque, cuando el contenido lo pide, REEMPLAZA
-        # al anclaje por destino (nunca se combinan: combinarlos es
-        # justamente lo que exigiría interpolar, que es lo que QA
-        # rechazó).
-        source_entry = start_anchors.get(entry_key)
+        # Clip que arranca en la pose base de OTRO estado: su sistema
+        # de coordenadas es el de esa base, no el ancla compartida (ver
+        # `start_base_entry` en el docstring).
+        source_entry = start_bases.get(entry_key)
         if source_entry is not None and source_entry in entries:
             sx, sy = place(source_entry)
-            source_w, source_h, source_px = entries[source_entry]
-            sax, say = registration_point(source_entry, (source_w, source_h, source_px))
-            fax, fay = registration_point(entry_key, entries[entry_key])
+            sax, say = anchor_of(source_entry, entries[source_entry])
+            fax, fay = first_anchor[entry_key]
             pos[entry_key] = (sx + sax - fax, sy + say - fay)
-            return pos[entry_key]
-
-        target_entry = transition_targets.get(entry_key)
-        last = last_frame_pixels.get(entry_key)
-        if target_entry is not None and last is not None and target_entry in entries:
-            # Transición que CAMBIA de estado y cuyo frame final NO es
-            # el mismo archivo que la pose base del estado destino (el
-            # `lie_to_sit` de Frin: un export inverso genuinamente
-            # distinto). No hay containment que la ate, así que se ancla
-            # por su ÚLTIMO frame contra donde la pose base del estado
-            # destino realmente aterriza -- el instante en que el
-            # personaje QUEDA QUIETO es donde un salto se ve; el
-            # arranque de la transición ya está en movimiento y lo
-            # disimula. Ver DEC-087 y docs/FRIN_CONTENT.md para la
-            # medición de ambas puntas.
-            tx, ty = place(target_entry)
-            target_first_w, target_first_h, target_first_px = entries[target_entry]
-            tax, tay = registration_point(target_entry, (target_first_w, target_first_h, target_first_px))
-            lax, lay = registration_point(entry_key, last)
-            pos[entry_key] = (tx + tax - lax, ty + tay - lay)
             return pos[entry_key]
 
         ax, ay = first_anchor[entry_key]

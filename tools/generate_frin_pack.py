@@ -260,50 +260,35 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         weight: float,
         target_state_id: str,
         *,
-        align_endpoint_to_target_base: bool = False,
-        anchor_start_to_source_base: bool = False,
+        first_frame_is_state_base: str | None = None,
+        last_frame_is_state_base: str | None = None,
     ) -> dict:
-        """`align_endpoint_to_target_base` (DEC-092): default False
-        porque para `sit_to_lie`/`lie_to_sit` (target_state_id distinto
-        del estado propio) no hace ninguna diferencia en su REGISTRO --
-        ya se registran para anclaje por último frame vía
-        `changes_state`, sin importar este flag (ver
-        `compile_pet_pack.py`'s `add_actions()`). Se pasa explícitamente
-        True SOLO para `howl`/`tail_greet` (self-loop: target_state_id
-        == "seated", el propio estado), donde SIN el flag no había
-        ninguna registración -- la colocación (y, desde la pasada de
-        continuidad de frontera, TAMBIÉN la escala -- ver
-        `scale_from_last_frame_entries`) se anclaba solo por el frame 0
-        de la propia acción, dejando sin protección la punta de REGRESO
-        a la pose sentada estable.
+        """IDENTIDAD SEMÁNTICA DE POSE (DEC-099). Cada acción declara
+        qué pose ESTABLE representa cada una de sus dos puntas, y el
+        compilador compila esa punta desde el ARCHIVO de esa base (ver
+        `first_frame_is_state_base` en tools/compile_pet_pack.py). No es
+        una medición ni una corrección: es una afirmación de contenido,
+        y el frame compilado sale idéntico byte a byte al de la base.
 
-        `anchor_start_to_source_base` (pasada de resolución de
-        root-motion -- ver docs/DECISION_LOG.md DEC-097): SOLO tiene
-        efecto cuando `target_state_id` SÍ cambia de estado. Ancla el
-        clip por su PRIMER frame contra la base del estado de ORIGEN,
-        con UNA transforma rígida constante, y REEMPLAZA el anclaje
-        por-último-frame que `changes_state` activaría solo.
+        REEMPLAZA los dos mecanismos anteriores, ya eliminados:
+        `align_endpoint_to_target_base` (DEC-092/095/098, que anclaba y
+        escalaba por el último frame) y `anchor_start_to_source_base`
+        (DEC-097, que anclaba por el primero). Los dos intentaban que
+        una punta "casi" coincidiera con una base; ninguno podía llegar
+        a exacto, porque el resampleo entero deja su propio residual.
 
-        `sit_to_lie` no lo usa: sus dos puntas YA son archivos
-        compartidos con seated_base/lying_base, así que containment las
-        deja exactas sin ningún registro por contenido -- y su
-        comportamiento está aprobado por QA, congelado.
-
-        `lie_to_sit` SÍ lo usa: es un export independiente en ambos
-        extremos y su geometría no cierra contra las dos bases con una
-        sola transforma rígida (residual medido -- ver el informe de
-        este bloque). Anclar el ARRANQUE es la elección menos
-        artificial: el salto instantáneo al hacer click es mucho más
-        notorio que un residual al final, cuando el lobo ya viene en
-        movimiento. El residual restante queda VISIBLE y medido a
-        propósito, como deuda de CONTENIDO -- no se disimula moviendo
-        el sprite durante el clip (eso se probó y QA lo rechazó)."""
-        return {
+        Para `lie_to_sit` esto además cierra la saga de sus dos puntas:
+        ya no hay que ELEGIR cuál anclar (DEC-097 eligió el arranque y
+        dejó ~26px de residual al final). Ahora las DOS son exactas, y
+        lo que el export no cierra queda absorbido DENTRO del clip,
+        donde el lobo ya está en movimiento, en vez de en el instante
+        en que queda quieto. El residual sigue siendo deuda de
+        CONTENIDO y se mide en el informe -- no se disimula moviendo el
+        sprite durante el clip (eso se probó y QA lo rechazó)."""
+        manifest_action = {
             "id": anim_id,
             "weight": weight,
             "target_state_id": target_state_id,
-            "align_endpoint_to_target_base": align_endpoint_to_target_base,
-            "anchor_start_to_source_base": anchor_start_to_source_base,
             "kind": "one_shot",
             "fps": fps_by_anim[anim_id],
             "returns_to_idle": True,
@@ -319,6 +304,13 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 }
             ],
         }
+        # Solo se emiten las claves realmente declaradas -- una acción
+        # sin puntas estables no lleva el campo en el manifest.
+        if first_frame_is_state_base is not None:
+            manifest_action["first_frame_is_state_base"] = first_frame_is_state_base
+        if last_frame_is_state_base is not None:
+            manifest_action["last_frame_is_state_base"] = last_frame_is_state_base
+        return manifest_action
 
     # Poses base: referencian frames YA importados de sit_to_lie (frame
     # 0 = sentado, frame final = acostado) -- nunca se duplica ni se
@@ -355,12 +347,17 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                     {"direction": "left", **base_pose("left", seated_frame_index, "seated_base_left")}
                 ],
                 "ambient_interval_seconds": REST_DELAY_SECONDS,
-                "ambient_actions": [action("sit_to_lie", 1.0, "lying")],
+                "ambient_actions": [
+                    action("sit_to_lie", 1.0, "lying",
+                           first_frame_is_state_base="seated", last_frame_is_state_base="lying")
+                ],
                 "hover_uses_ambient_actions": False,  # el owner no definió hover para Frin todavía
                 "hover_actions": [],
                 "click_actions": [
-                    action("howl", SEATED_CLICK_WEIGHTS["howl"], "seated", align_endpoint_to_target_base=True),
-                    action("tail_greet", SEATED_CLICK_WEIGHTS["tail_greet"], "seated", align_endpoint_to_target_base=True),
+                    action("howl", SEATED_CLICK_WEIGHTS["howl"], "seated",
+                           first_frame_is_state_base="seated", last_frame_is_state_base="seated"),
+                    action("tail_greet", SEATED_CLICK_WEIGHTS["tail_greet"], "seated",
+                           first_frame_is_state_base="seated", last_frame_is_state_base="seated"),
                 ],
             },
             {
@@ -373,7 +370,8 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "ambient_actions": [],  # "No random howl/tail-greet while lying"
                 "hover_uses_ambient_actions": False,
                 "hover_actions": [],
-                "click_actions": [action("lie_to_sit", 1.0, "seated", anchor_start_to_source_base=True)],
+                "click_actions": [action("lie_to_sit", 1.0, "seated",
+                           first_frame_is_state_base="lying", last_frame_is_state_base="seated")],
             },
         ],
     }
@@ -384,8 +382,9 @@ def _finalize_and_compile(variant: str, manifest: dict, canonical_direction: str
     variant_root = os.path.join(FRIN_ROOT, variant)
     manifest_path = os.path.join(variant_root, "pack_manifest.json")
 
-    normalization_plan = compile_pet_pack._build_normalization_plan(manifest, variant_root)
-    _, working_width, working_height, _, _ = normalization_plan[f"state[{manifest['states'][0]['id']}].base_animation"]
+    content_plan = compile_pet_pack._build_content_plan(manifest, variant_root)
+    _, working_width, working_height, _, _ = content_plan.normalization[
+        f"state[{manifest['states'][0]['id']}].base_animation"]
     canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
     manifest["canvas_width"] = canvas_width
     manifest["canvas_height"] = canvas_height
