@@ -43,8 +43,6 @@
           "id": "sit_to_lie",
           "weight": 1.0,
           "target_state_id": "lying",
-          "align_endpoint_to_target_base": false,
-          "anchor_start_to_source_base": false,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
@@ -260,7 +258,9 @@
                 }
               ]
             }
-          ]
+          ],
+          "first_frame_is_state_base": "seated",
+          "last_frame_is_state_base": "lying"
         }
       ],
       "hover_uses_ambient_actions": false,
@@ -270,8 +270,6 @@
           "id": "howl",
           "weight": 0.7,
           "target_state_id": "seated",
-          "align_endpoint_to_target_base": true,
-          "anchor_start_to_source_base": false,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
@@ -487,14 +485,14 @@
                 }
               ]
             }
-          ]
+          ],
+          "first_frame_is_state_base": "seated",
+          "last_frame_is_state_base": "seated"
         },
         {
           "id": "tail_greet",
           "weight": 0.3,
           "target_state_id": "seated",
-          "align_endpoint_to_target_base": true,
-          "anchor_start_to_source_base": false,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
@@ -710,7 +708,9 @@
                 }
               ]
             }
-          ]
+          ],
+          "first_frame_is_state_base": "seated",
+          "last_frame_is_state_base": "seated"
         }
       ]
     },
@@ -752,8 +752,6 @@
           "id": "lie_to_sit",
           "weight": 1.0,
           "target_state_id": "seated",
-          "align_endpoint_to_target_base": false,
-          "anchor_start_to_source_base": true,
           "kind": "one_shot",
           "fps": 8.333333333333334,
           "returns_to_idle": true,
@@ -969,7 +967,9 @@
                 }
               ]
             }
-          ]
+          ],
+          "first_frame_is_state_base": "lying",
+          "last_frame_is_state_base": "seated"
         }
       ]
     }
