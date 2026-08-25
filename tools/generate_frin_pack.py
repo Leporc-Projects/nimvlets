@@ -261,7 +261,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         target_state_id: str,
         *,
         align_endpoint_to_target_base: bool = False,
-        align_transition_both_endpoints: bool = False,
+        anchor_start_to_source_base: bool = False,
     ) -> dict:
         """`align_endpoint_to_target_base` (DEC-092): default False
         porque para `sit_to_lie`/`lie_to_sit` (target_state_id distinto
@@ -277,23 +277,33 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         de la propia acción, dejando sin protección la punta de REGRESO
         a la pose sentada estable.
 
-        `align_transition_both_endpoints` (pasada de continuidad de
-        frontera -- ver docs/DECISION_LOG.md): SOLO tiene efecto cuando
-        `target_state_id` SÍ cambia de estado (`sit_to_lie`/
-        `lie_to_sit`) -- registra TAMBIÉN el PRIMER frame contra la
-        base del estado de ORIGEN, además del anclaje por-último-frame
-        que `changes_state` ya activa incondicionalmente. `sit_to_lie`
-        no lo necesita (sus dos puntas YA son archivos compartidos con
-        seated_base/lying_base -- containment las deja exactas sin
-        ningún registro por contenido); `lie_to_sit` sí, porque es un
-        export independiente en ambos extremos -- ver el informe de
-        este bloque para la medición real."""
+        `anchor_start_to_source_base` (pasada de resolución de
+        root-motion -- ver docs/DECISION_LOG.md DEC-097): SOLO tiene
+        efecto cuando `target_state_id` SÍ cambia de estado. Ancla el
+        clip por su PRIMER frame contra la base del estado de ORIGEN,
+        con UNA transforma rígida constante, y REEMPLAZA el anclaje
+        por-último-frame que `changes_state` activaría solo.
+
+        `sit_to_lie` no lo usa: sus dos puntas YA son archivos
+        compartidos con seated_base/lying_base, así que containment las
+        deja exactas sin ningún registro por contenido -- y su
+        comportamiento está aprobado por QA, congelado.
+
+        `lie_to_sit` SÍ lo usa: es un export independiente en ambos
+        extremos y su geometría no cierra contra las dos bases con una
+        sola transforma rígida (residual medido -- ver el informe de
+        este bloque). Anclar el ARRANQUE es la elección menos
+        artificial: el salto instantáneo al hacer click es mucho más
+        notorio que un residual al final, cuando el lobo ya viene en
+        movimiento. El residual restante queda VISIBLE y medido a
+        propósito, como deuda de CONTENIDO -- no se disimula moviendo
+        el sprite durante el clip (eso se probó y QA lo rechazó)."""
         return {
             "id": anim_id,
             "weight": weight,
             "target_state_id": target_state_id,
             "align_endpoint_to_target_base": align_endpoint_to_target_base,
-            "align_transition_both_endpoints": align_transition_both_endpoints,
+            "anchor_start_to_source_base": anchor_start_to_source_base,
             "kind": "one_shot",
             "fps": fps_by_anim[anim_id],
             "returns_to_idle": True,
@@ -363,7 +373,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "ambient_actions": [],  # "No random howl/tail-greet while lying"
                 "hover_uses_ambient_actions": False,
                 "hover_actions": [],
-                "click_actions": [action("lie_to_sit", 1.0, "seated", align_transition_both_endpoints=True)],
+                "click_actions": [action("lie_to_sit", 1.0, "seated", anchor_start_to_source_base=True)],
             },
         ],
     }

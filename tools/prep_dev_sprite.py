@@ -551,116 +551,22 @@ def content_bbox_or_full_frame(width: int, height: int, pixels: bytes) -> tuple[
     return 0, 0, width - 1, height - 1
 
 
-def compute_two_endpoint_frame_offsets(
-    frame_count: int,
-    scale: float,
-    first_frame: tuple[int, int, bytes],
-    last_frame: tuple[int, int, bytes],
-    source_base_frame: tuple[int, int, bytes],
-    source_base_scale: float,
-    source_base_pos: tuple[float, float],
-    target_base_frame: tuple[int, int, bytes],
-    target_base_scale: float,
-    target_base_pos: tuple[float, float],
-    tolerance_px: float = 1.0,
-) -> tuple[tuple[int, int], tuple[int, int], bool]:
-    """Registro de DOS puntas para una transición de estado cuyo export
-    es independiente en AMBOS extremos (Block 05, pasada de continuidad
-    de frontera -- ver docs/DECISION_LOG.md DEC-09x, `lie_to_sit` de
-    Frin: entra desde `lying` y termina en `seated`, sin ningún archivo
-    compartido con ninguna de las dos bases).
-
-    El mecanismo de una sola punta (DEC-087/092/093,
-    `transition_target_entry`/`last_frames` dentro de esta misma
-    función más abajo) ya resuelve el caso donde SOLO el final de la
-    transición necesita registrarse contra su destino -- eso deja
-    protegida la punta donde el personaje QUEDA QUIETO, pero no dice
-    nada sobre dónde aterriza el FRAME 0 relativo a la base de la que
-    viene. Si esa base de origen también es un archivo independiente
-    (sin containment), frame 0 puede aterrizar lejos de ella -- el
-    salto de posición que QA manual reportó al empezar `lie_to_sit`.
-
-    Esta función calcula, con el MISMO centroide ponderado por alpha
-    que `registration_point()`/`alpha_registration_point()` (nunca
-    centro de bbox -- DEC-093 ya demostró que bbox puede alinear el
-    contorno mientras el centro de masa real queda peor), DOS offsets
-    candidatos:
-      - `start_offset`: dónde debería caer esta entrada para que su
-        PRIMER frame registre contra la base del estado de ORIGEN.
-      - `end_offset`: dónde debería caer para que su ÚLTIMO frame
-        registre contra la base del estado DESTINO (misma fórmula que
-        ya usa `place()` para el caso de una sola punta).
-
-    Si ambos coinciden dentro de `tolerance_px` (redondeo, nunca ruido
-    real) devuelve el mismo offset para las dos puntas y
-    `needs_interpolation=False` -- el llamador debe usar ESE offset
-    constante para toda la animación, sin interpolar nada (preferencia
-    explícita: "If measurement proves a single constant transform can
-    satisfy both endpoints, use the simpler constant transform
-    instead"). Si divergen de verdad -- evidencia real de que el export
-    no reconcilia sus dos puntas con una sola traslación -- devuelve
-    los dos offsets distintos y `needs_interpolation=True`; el
-    llamador interpola LINEALMENTE la traslación por índice de frame
-    (nunca la escala, nunca por-eje independiente -- ver
-    `lerp_offset_schedule()`).
-
-    `scale` es la ÚNICA escala de esta entrada (ya resuelta en otro
-    lado, uniforme para los `frame_count` frames -- esta función NUNCA
-    decide ni toca escala, solo traslación). `source_base_pos`/
-    `target_base_pos` son las posiciones YA resueltas (en el espacio
-    del canvas de trabajo compartido) de las entradas base
-    correspondientes -- vienen de `place()`, calculadas exactamente
-    igual que siempre (containment o `first_anchor`, sin ningún cambio
-    acá)."""
-    start_reg = alpha_registration_point(first_frame[0], first_frame[1], first_frame[2], scale)
-    end_reg = alpha_registration_point(last_frame[0], last_frame[1], last_frame[2], scale)
-    source_reg = alpha_registration_point(
-        source_base_frame[0], source_base_frame[1], source_base_frame[2], source_base_scale)
-    target_reg = alpha_registration_point(
-        target_base_frame[0], target_base_frame[1], target_base_frame[2], target_base_scale)
-
-    start_x = source_base_pos[0] + source_reg[0] - start_reg[0]
-    start_y = source_base_pos[1] + source_reg[1] - start_reg[1]
-    end_x = target_base_pos[0] + target_reg[0] - end_reg[0]
-    end_y = target_base_pos[1] + target_reg[1] - end_reg[1]
-
-    start_offset = (round(start_x), round(start_y))
-    end_offset = (round(end_x), round(end_y))
-
-    needs_interpolation = abs(start_x - end_x) > tolerance_px or abs(start_y - end_y) > tolerance_px
-    if not needs_interpolation:
-        # Colapsa a UN solo offset constante -- se usa el de la punta
-        # final (el mismo criterio que ya regía antes de esta pasada
-        # para cualquier transición de una sola punta: el instante en
-        # que el personaje queda quieto es el más sensible a un salto).
-        return end_offset, end_offset, False
-    return start_offset, end_offset, True
-
-
-def lerp_offset_schedule(
-    frame_count: int, start_offset: tuple[int, int], end_offset: tuple[int, int]
-) -> list[tuple[int, int]]:
-    """Interpolación LINEAL de traslación (nunca de escala, nunca
-    por-eje independiente, nunca por-frame de forma no monótona) entre
-    `start_offset` (frame 0) y `end_offset` (último frame), un offset
-    entero por frame -- `offset(i) = lerp(start, end, i/(frame_count-1))`.
-
-    Monótona por construcción (una interpolación lineal entre dos
-    puntos fijos nunca invierte de dirección), así que un test puede
-    verificar "nunca retrocede" simplemente comparando frames
-    consecutivos. `frame_count == 1` devuelve `[end_offset]` (no hay
-    "entre" que interpolar con un solo frame -- caso degenerado,
-    documentado, no ejercitado por ningún contenido real de este
-    bloque)."""
-    if frame_count <= 1:
-        return [end_offset]
-    schedule: list[tuple[int, int]] = []
-    for i in range(frame_count):
-        t = i / (frame_count - 1)
-        x = start_offset[0] + (end_offset[0] - start_offset[0]) * t
-        y = start_offset[1] + (end_offset[1] - start_offset[1]) * t
-        schedule.append((round(x), round(y)))
-    return schedule
+# NOTA (pasada de resolución de root-motion): acá vivían
+# `compute_two_endpoint_frame_offsets()` y `lerp_offset_schedule()` --
+# el mecanismo de registro de DOS PUNTAS con interpolación LINEAL de
+# traslación por índice de frame que la pasada anterior introdujo para
+# el `lie_to_sit` de Frin. **QA manual del owner lo RECHAZÓ**: mover la
+# colocación del sprite gradualmente a lo largo del clip no se percibe
+# como "continuidad", se percibe como el personaje ENTERO derivando por
+# la ventana mientras se levanta -- root-motion artificial que el arte
+# nunca autoró. Ver docs/DECISION_LOG.md DEC-097.
+#
+# Se eliminaron enteros en vez de dejarlos "por si acaso": el
+# contrato ahora es que el compilador NUNCA inventa movimiento aparente
+# del personaje completo. Una transición recibe UNA sola transforma
+# rígida (una escala uniforme + una traslación constante) para todo el
+# clip, y punto. Si las dos puntas no cierran con eso, el residual se
+# MIDE y se reporta -- no se disimula con movimiento falso.
 
 
 def compute_frame_normalization_plan(
@@ -673,9 +579,9 @@ def compute_frame_normalization_plan(
     entry_frame_paths: dict[str, list[str]] | None = None,
     last_frames: dict[str, tuple[int, int, bytes]] | None = None,
     transition_target_entry: dict[str, str] | None = None,
-    source_target_entry: dict[str, str] | None = None,
+    start_anchor_entry: dict[str, str] | None = None,
     scale_from_last_frame_entries: "set[str] | None" = None,
-    per_frame_offsets_out: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
+    strict_scale_entries: "set[str] | None" = None,
     scale_tolerance: float = 0.005,
 ) -> dict[str, tuple[float, int, int, int, int]]:
     """Política genérica de "canvas de trabajo compartido, anclado por
@@ -817,46 +723,39 @@ def compute_frame_normalization_plan(
     de ORIGEN (postura acostada) sería la misma comparación
     entre-posturas inválida que DEC-075 ya prohibió -- ahí la escala
     sigue derivándose del primer frame contra la base de origen, sin
-    cambios (ver `source_target_entry` más abajo para la traslación de
+    cambios (ver `start_anchor_entry` más abajo para la COLOCACIÓN de
     esa misma transición, que es un problema aparte).
 
-    `source_target_entry` (opcional, pasada de continuidad de
-    frontera): entry_key -> entry_key de la base del estado de ORIGEN
-    de una transición -- el complemento de `transition_target_entry`
-    (que apunta al DESTINO). Habilita el registro de DOS PUNTAS para
-    una transición cuyo export es independiente en AMBOS extremos
-    (`lie_to_sit`: sin archivo compartido con `lying_base` NI con
-    `seated_base`). Para cada entrada presente acá, además del anclaje
-    por-último-frame ya existente (contra `transition_target_entry`),
-    se calcula un anclaje por-PRIMER-frame contra esta base de origen
-    (misma fórmula, mismo `registration_point()` por centroide de
-    alpha). Si ambos anclajes coinciden dentro de una tolerancia de
-    redondeo, no pasa nada más -- la entrada sigue con UN offset
-    constante, exactamente como antes. Si divergen de verdad, la
-    entrada se agrega a `per_frame_offsets_out` (ver abajo) en vez de
-    forzar un único offset que solo satisfaría una de las dos puntas --
-    ver `compute_two_endpoint_frame_offsets()`/`lerp_offset_schedule()`
-    para el mecanismo completo. El canvas de trabajo se agranda lo
-    necesario para contener el frame en AMBAS posiciones (arranque y
-    destino), no solo en la de destino.
+    `strict_scale_entries` (opcional, pasada de resolución de
+    root-motion -- ver DEC-098): conjunto de entry_keys cuya escala se
+    resuelve SIN aplicar `scale_tolerance`. Es exactamente el mismo
+    conjunto que `scale_from_last_frame_entries` en la práctica (una
+    acción que declara `align_endpoint_to_target_base` quiere las dos
+    cosas: medir desde el último frame Y registrar ese tamaño exacto),
+    pero se pasa por separado para que las dos políticas sigan siendo
+    independientes en el nivel de la función. La tolerancia normal
+    existe para no resamplear cuando la diferencia es imperceptible EN
+    AISLAMIENTO; en la frontera de retorno, donde el owner ve dos
+    imágenes consecutivas del MISMO personaje, un 0.1-0.25% sí se
+    percibe (QA manual real). Ver el comentario en el bucle de escala.
 
-    `per_frame_offsets_out` (opcional, mutable, RELLENADO como efecto
-    lateral -- no es parte del `dict` que esta función retorna, a
-    propósito: cambiar el tipo de retorno habría roto los ~6 call
-    sites existentes, todos los cuales destructuran un 5-tuple; este
-    parámetro de salida es aditivo y invisible para cualquier llamador
-    que no lo pase). Si se pasa un `dict` vacío, esta función lo llena
-    con `entry_key -> (start_offset, end_offset)` para cada entrada de
-    `source_target_entry` cuyos dos anclajes NO coincidieron -- el
-    llamador (que sí conoce la cantidad real de frames de cada
-    animación, algo que esta función nunca decodifica por completo) es
-    quien expande eso a un offset por-frame vía
-    `lerp_offset_schedule()`. El valor que esta función SIGUE
-    devolviendo en el `dict` principal para esa entrada es el offset de
-    DESTINO (el mismo criterio de siempre: la punta donde el personaje
-    queda quieto es la más sensible, así que sigue siendo la
-    representativa para cualquier consumidor que no sepa nada de
-    interpolación por-frame).
+    `start_anchor_entry` (opcional, pasada de resolución de
+    root-motion -- ver DEC-097): entry_key -> entry_key de la base del
+    estado de ORIGEN. Ancla la entrada por su PRIMER frame contra esa
+    base, con UNA transforma rígida constante para todo el clip, y
+    REEMPLAZA (nunca complementa) el anclaje por-último-frame de
+    `transition_target_entry`. Existe porque un salto instantáneo en el
+    PRIMER frame -- el instante exacto en que el owner hace click -- es
+    mucho más notorio que un residual al final, cuando el personaje ya
+    viene en movimiento.
+
+    Deliberadamente NO existe un modo "anclar las dos puntas a la vez":
+    cuando el export no cierra geométricamente, satisfacer las dos
+    exigiría mover el sprite durante el clip, y eso se probó y se
+    RECHAZÓ en QA (se percibe como root-motion artificial, no como
+    continuidad -- ver DEC-097). Si las dos puntas no cierran con una
+    sola transforma rígida, el residual se MIDE y se reporta como deuda
+    de CONTENIDO; el compilador no lo disimula.
 
     Nunca recorta contenido -- solo agrega margen transparente
     (compose_on_canvas() nunca resamplea). Sin ninguna rama específica
@@ -877,6 +776,7 @@ def compute_frame_normalization_plan(
         canonical_of_group.setdefault(group_key, entry_key)
 
     scale_from_last = scale_from_last_frame_entries or set()
+    strict_scale = strict_scale_entries or set()
     last_frame_pixels_for_scale = last_frames or {}
 
     def group_content_size(group_key: str) -> float:
@@ -965,7 +865,33 @@ def compute_frame_normalization_plan(
         this_size = group_content_size(group_key)
         base_size = group_content_size(base_group)
         raw_scale = base_size / this_size if this_size > 0 else 1.0
-        local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
+        # Contrato ESTRICTO de retorno-a-base (pasada de resolución de
+        # root-motion -- ver docs/DECISION_LOG.md DEC-098): para una
+        # acción que el CONTENIDO marca explícitamente como
+        # "mi último frame representa la pose base del estado destino"
+        # (`align_endpoint_to_target_base`), la tolerancia normal de
+        # `scale_tolerance` NO aplica -- se usa `raw_scale` tal cual.
+        #
+        # Por qué: esa tolerancia existe para evitar un resample
+        # innecesario cuando la diferencia es imperceptible EN GENERAL,
+        # y es la política correcta para cualquier animación normal.
+        # Pero en la FRONTERA de retorno el owner compara dos imágenes
+        # consecutivas del MISMO personaje, una al lado de la otra en
+        # el tiempo -- ahí una diferencia de 0.1-0.25% que sería
+        # invisible en aislamiento se percibe como "el personaje se
+        # achicó al terminar la animación" (QA manual real). Medido:
+        # sin esta rama, `idle_breathing` de Bunny (1.00112 requerido)
+        # y `howl` de Frin hembra (0.99779 requerido) quedaban ambos
+        # ajustados a 1.0 exacto por la tolerancia.
+        #
+        # El costo es un resample que de otro modo no ocurriría -- se
+        # acepta deliberadamente acá y SOLO acá: es opt-in por-acción
+        # desde el contenido, nunca global, así que ninguna animación
+        # que no declare este contrato paga nada.
+        if canonical_of_group.get(group_key) in strict_scale:
+            local_scale = raw_scale
+        else:
+            local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
         scale_by_group[group_key] = state_scale * local_scale
 
     # --- Colocación (offset) ------------------------------------------
@@ -980,6 +906,7 @@ def compute_frame_normalization_plan(
     # aritmética anterior (pos = -anchor), solo reescrita: cada entrada
     # pone el centro de contenido de su primer frame en el mismo punto.
     entry_paths = entry_frame_paths or {}
+    start_anchors = start_anchor_entry or {}
     last_frame_pixels = last_frames or {}
     transition_targets = transition_target_entry or {}
 
@@ -1077,6 +1004,24 @@ def compute_frame_normalization_plan(
             pos[entry_key] = place(root)
             return pos[entry_key]
 
+        # Anclaje por PRIMER frame contra la base del estado de ORIGEN
+        # (pasada de resolución de root-motion -- ver DEC-097). UNA
+        # transforma rígida constante para todo el clip, igual que la
+        # rama de anclaje-por-último-frame de más abajo: la única
+        # diferencia es CUÁL de las dos puntas se registra exacto. Se
+        # chequea primero porque, cuando el contenido lo pide, REEMPLAZA
+        # al anclaje por destino (nunca se combinan: combinarlos es
+        # justamente lo que exigiría interpolar, que es lo que QA
+        # rechazó).
+        source_entry = start_anchors.get(entry_key)
+        if source_entry is not None and source_entry in entries:
+            sx, sy = place(source_entry)
+            source_w, source_h, source_px = entries[source_entry]
+            sax, say = registration_point(source_entry, (source_w, source_h, source_px))
+            fax, fay = registration_point(entry_key, entries[entry_key])
+            pos[entry_key] = (sx + sax - fax, sy + say - fay)
+            return pos[entry_key]
+
         target_entry = transition_targets.get(entry_key)
         last = last_frame_pixels.get(entry_key)
         if target_entry is not None and last is not None and target_entry in entries:
@@ -1104,58 +1049,10 @@ def compute_frame_normalization_plan(
     for entry_key in entries:
         place(entry_key)
 
-    # --- Registro de DOS PUNTAS (opcional -- ver el docstring de
-    # `source_target_entry` más arriba) ---------------------------------
-    #
-    # `pos[entry_key]` en este punto ya es el anclaje END (por-último-
-    # frame contra el destino), calculado arriba sin ningún cambio. Acá
-    # se calcula, SOLO para las entradas listadas en
-    # `source_target_entry`, un candidato START (por-primer-frame contra
-    # el ORIGEN) y se compara contra ese END ya resuelto. Si coinciden
-    # dentro de tolerancia, no se hace nada más -- la entrada sigue con
-    # el offset constante de siempre. Si divergen, se registra el par en
-    # `two_endpoint_start`/`two_endpoint_end` (traducido a coordenadas
-    # finales recién al final, junto con todo lo demás) y se extiende el
-    # footprint que el canvas debe contener.
-    two_endpoint_start: dict[str, tuple[float, float]] = {}
-    two_endpoint_end: dict[str, tuple[float, float]] = {}
-    if source_target_entry:
-        # Tolerancia de registro: 1px en el espacio del canvas de
-        # trabajo NATIVO (antes del downscale de runtime) -- lo bastante
-        # chica para no perderse una divergencia real (medida en el
-        # `lie_to_sit` real de Frin: decenas de pixeles), lo bastante
-        # grande para no interpolar por puro ruido de redondeo de
-        # punto flotante.
-        endpoint_tolerance_px = 1.0
-        for entry_key, source_entry in source_target_entry.items():
-            if entry_key not in pos or source_entry not in entries or source_entry not in pos:
-                continue
-            end_x, end_y = pos[entry_key]
-            start_reg = registration_point(entry_key, entries[entry_key])
-            source_tx, source_ty = pos[source_entry]
-            source_reg = registration_point(source_entry, entries[source_entry])
-            start_x = source_tx + source_reg[0] - start_reg[0]
-            start_y = source_ty + source_reg[1] - start_reg[1]
-            if abs(start_x - end_x) <= endpoint_tolerance_px and abs(start_y - end_y) <= endpoint_tolerance_px:
-                # Un solo transform constante alcanza para las dos
-                # puntas -- preferencia explícita del contenido: nunca
-                # interpolar cuando no hace falta. `pos[entry_key]`
-                # (el END) queda como estaba, sin registrar nada en los
-                # diccionarios de dos-puntas.
-                continue
-            two_endpoint_start[entry_key] = (start_x, start_y)
-            two_endpoint_end[entry_key] = (end_x, end_y)
-
-    left = min([p[0] for p in pos.values()] + [p[0] for p in two_endpoint_start.values()])
-    top = min([p[1] for p in pos.values()] + [p[1] for p in two_endpoint_start.values()])
-    right = max(
-        [pos[k][0] + scaled_size[k][0] for k in entries]
-        + [two_endpoint_start[k][0] + scaled_size[k][0] for k in two_endpoint_start]
-    )
-    bottom = max(
-        [pos[k][1] + scaled_size[k][1] for k in entries]
-        + [two_endpoint_start[k][1] + scaled_size[k][1] for k in two_endpoint_start]
-    )
+    left = min(p[0] for p in pos.values())
+    top = min(p[1] for p in pos.values())
+    right = max(pos[k][0] + scaled_size[k][0] for k in entries)
+    bottom = max(pos[k][1] + scaled_size[k][1] for k in entries)
 
     working_width = max(1, round(right - left))
     working_height = max(1, round(bottom - top))
@@ -1170,15 +1067,6 @@ def compute_frame_normalization_plan(
             round(px - left),
             round(py - top),
         )
-
-    if per_frame_offsets_out is not None:
-        for entry_key in two_endpoint_start:
-            sx, sy = two_endpoint_start[entry_key]
-            ex, ey = two_endpoint_end[entry_key]
-            per_frame_offsets_out[entry_key] = (
-                (round(sx - left), round(sy - top)),
-                (round(ex - left), round(ey - top)),
-            )
 
     return plan
 

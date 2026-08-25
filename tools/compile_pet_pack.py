@@ -67,19 +67,35 @@ WeightedActionManifest:
                                      # (the normal case for a single-state pet's click/ambient)
       "align_endpoint_to_target_base": false,  # optional, default false, BUILD-TIME ONLY (never
                                      # reaches the compiled .nvpack -- see normalize_visual_scale
-                                     # below). When true AND returns_to_idle is true, this action's
-                                     # placement (never its content_scale) is anchored by its LAST
-                                     # frame against target_state_id's base_animation instead of by
-                                     # its own frame 0 -- same mechanism a state-CHANGING action
-                                     # already gets unconditionally (see compute_frame_
-                                     # normalization_plan()'s transition_target_entry), extended
-                                     # here to a self-loop action (target_state_id == the state it's
-                                     # authored under) whose content is meant to visually return to
-                                     # that exact base pose. Only meaningful with
-                                     # normalize_visual_scale: true. No-op (and therefore no change
-                                     # to the compiled bytes) unless a pet's own generator script
-                                     # sets it explicitly, per-action -- see docs/DECISION_LOG.md
-                                     # DEC-092.
+                                     # below). The RETURN-TO-BASE CONTRACT: content asserting "my
+                                     # LAST frame represents target_state_id's base pose". When true
+                                     # AND returns_to_idle is true it governs three things, all
+                                     # derived from that last frame and all applied as ONE uniform
+                                     # value for the whole action:
+                                     #   1. placement anchored by the LAST frame against the target
+                                     #      base (DEC-092), not by the action's own frame 0;
+                                     #   2. content_scale measured from the LAST frame (DEC-095);
+                                     #   3. that scale applied STRICTLY -- the ordinary
+                                     #      `scale_tolerance` "close enough, skip the resample"
+                                     #      rule does NOT apply (DEC-098), because at a return
+                                     #      boundary the owner sees two consecutive images of the
+                                     #      same character and a sub-percent difference reads as
+                                     #      "it shrank when the animation ended".
+                                     # Only meaningful with normalize_visual_scale: true. No-op (and
+                                     # therefore no change to the compiled bytes) unless a pet's own
+                                     # generator sets it explicitly, per-action.
+      "anchor_start_to_source_base": false,  # optional, default false, BUILD-TIME ONLY. Only has an
+                                     # effect on a STATE-CHANGING action (target_state_id != the
+                                     # state it is authored under). Anchors the clip by its FIRST
+                                     # frame against the SOURCE state's base, with ONE rigid
+                                     # constant transform, and REPLACES the last-frame-against-target
+                                     # anchoring such an action would otherwise get. Use when an
+                                     # instant jump at the moment the action STARTS (e.g. right when
+                                     # the owner clicks) is more objectionable than a residual at the
+                                     # end. Never both anchors at once: reconciling both ends of an
+                                     # export that does not close geometrically would require moving
+                                     # the sprite DURING the clip, which was implemented, QA-tested
+                                     # and rejected as artificial root motion -- see DEC-097.
       ...AnimationManifest...,
       "direction_overrides": [ {"direction": "left", ...AnimationManifest...}, ... ]  # optional
     }
@@ -266,7 +282,6 @@ def _compile_animation(
     context: str,
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
-    per_frame_offsets: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
 ) -> bytes:
     anim_id = _require(anim_manifest, "id", context)
     full_context = f"{context} ('{anim_id}')"
@@ -285,30 +300,15 @@ def _compile_animation(
 
     normalization = normalization_plan.get(context) if normalization_plan is not None else None
 
-    # Continuidad de DOS puntas (opcional -- ver `align_transition_both_
-    # endpoints` en _build_normalization_plan()/docs/DECISION_LOG.md):
-    # si esta entrada tiene un (start_offset, end_offset) registrado
-    # porque un solo transform constante no alcanzaba para las dos
-    # puntas, se reemplaza el offset UNIFORME del plan por un offset
-    # POR-FRAME interpolado linealmente -- nunca la escala ni el
-    # working_width/height, que siguen siendo el ÚNICO valor uniforme
-    # de `normalization` para TODOS los frames de esta animación.
-    two_endpoint_schedule = per_frame_offsets.get(context) if per_frame_offsets is not None else None
-    frame_offset_schedule: list[tuple[int, int]] | None = None
-    if two_endpoint_schedule is not None and normalization is not None:
-        start_offset, end_offset = two_endpoint_schedule
-        frame_offset_schedule = prep_dev_sprite.lerp_offset_schedule(len(frame_manifests), start_offset, end_offset)
-
+    # UNA sola `normalization` (escala + canvas + offset) para TODOS los
+    # frames de esta animación -- nunca por-frame. Ver DEC-097: la
+    # variante por-frame que existió brevemente acá se retiró porque
+    # producía root-motion artificial visible.
     frame_blobs: list[bytes] = []
     first_dims: tuple[int, int] | None = None
     for i, fm in enumerate(frame_manifests):
-        frame_normalization = normalization
-        if frame_offset_schedule is not None:
-            content_scale, working_width, working_height, _offset_x, _offset_y = normalization
-            offset_x, offset_y = frame_offset_schedule[i]
-            frame_normalization = (content_scale, working_width, working_height, offset_x, offset_y)
         w, h, blob = _compile_frame(
-            fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension, frame_normalization)
+            fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension, normalization)
         if first_dims is None:
             first_dims = (w, h)
         elif (w, h) != first_dims:
@@ -336,7 +336,6 @@ def _compile_direction_overrides(
     context: str,
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
-    per_frame_offsets: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
 ) -> bytes:
     out = bytearray()
     out += struct.pack("<I", len(override_manifests))
@@ -346,8 +345,7 @@ def _compile_direction_overrides(
         if direction_str not in _DIRECTION_TO_BYTE:
             raise PackCompileError(f"{override_context}: invalid direction '{direction_str}' (expected right/left)")
         out += struct.pack("<B", _DIRECTION_TO_BYTE[direction_str])
-        out += _compile_animation(
-            om, manifest_dir, override_context, runtime_max_frame_dimension, normalization_plan, per_frame_offsets)
+        out += _compile_animation(om, manifest_dir, override_context, runtime_max_frame_dimension, normalization_plan)
     return bytes(out)
 
 
@@ -390,7 +388,6 @@ def _compile_weighted_action(
     context: str,
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
-    per_frame_offsets: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
 ) -> bytes:
     """`context` ya es la clave COMPLETA y correcta de esta acción (ver
     `_weighted_action_context()`) -- este helper no le agrega nada."""
@@ -402,11 +399,10 @@ def _compile_weighted_action(
     out += _pack_string(action_id)
     out += struct.pack("<d", weight)
     out += _pack_string(target_state_id)
-    out += _compile_animation(
-        action_manifest, manifest_dir, context, runtime_max_frame_dimension, normalization_plan, per_frame_offsets)
+    out += _compile_animation(action_manifest, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
     out += _compile_direction_overrides(
         action_manifest.get("direction_overrides", []), manifest_dir, context, runtime_max_frame_dimension,
-        normalization_plan, per_frame_offsets
+        normalization_plan
     )
     return bytes(out)
 
@@ -418,15 +414,13 @@ def _compile_weighted_actions(
     trigger_name: str,
     runtime_max_frame_dimension: int | None,
     normalization_plan: dict[str, tuple[float, int, int, int, int]] | None,
-    per_frame_offsets: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
 ) -> bytes:
     out = bytearray()
     out += struct.pack("<I", len(action_manifests))
     for am in action_manifests:
         action_id = am.get("id", "?")
         context = _weighted_action_context(state_id, trigger_name, action_id)
-        out += _compile_weighted_action(
-            am, manifest_dir, context, runtime_max_frame_dimension, normalization_plan, per_frame_offsets)
+        out += _compile_weighted_action(am, manifest_dir, context, runtime_max_frame_dimension, normalization_plan)
     return bytes(out)
 
 
@@ -546,11 +540,7 @@ def _grow_working_canvas_for_runtime_rounding(
     }
 
 
-def _build_normalization_plan(
-    manifest: dict,
-    manifest_dir: str,
-    per_frame_offsets_out: "dict[str, tuple[tuple[int, int], tuple[int, int]]] | None" = None,
-) -> dict[str, tuple[float, int, int, int, int]]:
+def _build_normalization_plan(manifest: dict, manifest_dir: str) -> dict[str, tuple[float, int, int, int, int]]:
     """Pre-pass del feature opcional `normalize_visual_scale` (ver el
     docstring del módulo): recorre TODA la estructura del grafo de
     comportamiento (cada state.base_animation + sus direction_overrides,
@@ -576,14 +566,9 @@ def _build_normalization_plan(
     además evita que el personaje "salte" de tamaño/posición al
     transicionar entre estados.
 
-    `per_frame_offsets_out` (opcional, mutable -- pasada de continuidad
-    de frontera, ver docs/DECISION_LOG.md): si se pasa un `dict` vacío,
-    se rellena con `entry_key -> (start_offset, end_offset)` para cada
-    transición con `align_transition_both_endpoints` cuyas dos puntas
-    NO se pudieron satisfacer con un único transform constante -- ver
-    `compute_frame_normalization_plan()`'s propio parámetro homónimo,
-    al que esto simplemente reenvía. Ausente o `None`: sin cambio de
-    comportamiento."""
+    Cada entrada recibe UNA sola transforma (escala + offset) para
+    todos sus frames -- nunca una por frame. Ver DEC-097 para el
+    mecanismo por-frame que existió brevemente y se retiró."""
     entries: dict[str, tuple[int, int, bytes]] = {}
     groups: dict[str, str] = {}
     group_frame_paths: dict[str, list[str]] = {}
@@ -605,11 +590,12 @@ def _build_normalization_plan(
     # frontera, ver docs/DECISION_LOG.md).
     self_loop_align_entries: set[str] = set()
     # entry_key -> (state_id ORIGEN, direction) de una transición con
-    # `align_transition_both_endpoints` -- se resuelve a entry_key
-    # concreto (la base del estado de origen) más abajo, igual que
+    # `anchor_start_to_source_base` -- se resuelve a entry_key concreto
+    # (la base del estado de origen) más abajo, igual que
     # `pending_transitions`/`base_entry_of_state_direction` ya hacen
-    # para el DESTINO.
-    both_endpoints_source: dict[str, tuple[str, str | None]] = {}
+    # para el DESTINO. Ancla por PRIMER frame con UNA transforma rígida
+    # constante, y REEMPLAZA el anclaje por destino (ver DEC-097).
+    start_anchor_source: dict[str, tuple[str, str | None]] = {}
 
     states = _require(manifest, "states", "manifest")
     if not states:
@@ -669,52 +655,64 @@ def _build_normalization_plan(
             # siempre), no hay ningún instante de "entrar a la base" que
             # proteger, así que el flag no tiene efecto ahí.
             align_to_target = bool(am.get("align_endpoint_to_target_base", False))
-            # `align_transition_both_endpoints` (opcional, default False,
+            # `anchor_start_to_source_base` (opcional, default False,
             # SOLO tiene efecto si `changes_state` es True -- pasada de
-            # continuidad de frontera, ver docs/DECISION_LOG.md):
-            # registra TAMBIÉN el PRIMER frame de esta transición contra
+            # resolución de root-motion, ver docs/DECISION_LOG.md
+            # DEC-097): ancla esta transición por su PRIMER frame contra
             # la base del estado de ORIGEN (`state_id`, el propio estado
-            # bajo el que esta acción está autorada), además del anclaje
-            # por-último-frame que `changes_state` ya activa
-            # incondicionalmente. Ver `source_target_entry` en
-            # `compute_frame_normalization_plan()` para el mecanismo de
-            # traslación resultante (constante si un solo transform
-            # alcanza para las dos puntas, interpolado linealmente si
-            # no).
-            align_both_endpoints = bool(am.get("align_transition_both_endpoints", False))
+            # bajo el que la acción está autorada), con UNA transforma
+            # rígida constante para todo el clip -- y REEMPLAZA el
+            # anclaje por-último-frame que `changes_state` activaría en
+            # su lugar. Nunca los dos a la vez: satisfacer las dos
+            # puntas de un export que no cierra geométricamente exigiría
+            # mover el sprite DURANTE el clip, y eso se probó y QA lo
+            # rechazó (se percibe como root-motion artificial). Ver
+            # `start_anchor_entry` en compute_frame_normalization_plan().
+            anchor_start = bool(am.get("anchor_start_to_source_base", False))
             returns_to_idle = bool(am.get("returns_to_idle", True))
-            register = target_state_id is not None and returns_to_idle and (changes_state or align_to_target)
+            anchor_start_active = changes_state and anchor_start
+            register = (
+                target_state_id is not None
+                and returns_to_idle
+                and (changes_state or align_to_target)
+                and not anchor_start_active
+            )
             if register:
                 pending_transitions[context] = (target_state_id, None)
                 transition_manifest[context] = (am, context)
                 if not changes_state and align_to_target:
                     self_loop_align_entries.add(context)
-                if changes_state and align_both_endpoints:
-                    both_endpoints_source[context] = (state_id, None)
+            if anchor_start_active:
+                start_anchor_source[context] = (state_id, None)
             for i, om in enumerate(am.get("direction_overrides", [])):
                 override_context = f"{context}_direction_overrides[{i}]"
                 add_animation(om, override_context, group, state_id)  # right/left share content_scale
-                # `align_endpoint_to_target_base`/`align_transition_both_
-                # endpoints` son propiedades de la ACCIÓN (misma familia
-                # que `target_state_id`, que tampoco se re-lee
-                # por-dirección -- ver _compile_weighted_action()), no de
-                # cada dirección por separado: si el contenido declara
-                # que esta acción vuelve a su base (o que registra sus
-                # dos puntas), eso vale igual para su espejo derivado.
+                # `align_endpoint_to_target_base`/`anchor_start_to_source_base`
+                # son propiedades de la ACCIÓN (misma familia que
+                # `target_state_id`, que tampoco se re-lee por-dirección
+                # -- ver _compile_weighted_action()), no de cada
+                # dirección por separado: si el contenido declara que
+                # esta acción vuelve a su base (o que se ancla por su
+                # arranque), eso vale igual para su espejo derivado.
                 # `returns_to_idle`, en cambio, SÍ es un campo propio de
                 # cada AnimationManifest (canónico Y override pueden
                 # declararlo distinto -- igual que _compile_animation()
                 # lo lee de cada uno por separado), así que se relee de
                 # `om`.
                 om_returns_to_idle = bool(om.get("returns_to_idle", True))
-                om_register = target_state_id is not None and om_returns_to_idle and (changes_state or align_to_target)
+                om_register = (
+                    target_state_id is not None
+                    and om_returns_to_idle
+                    and (changes_state or align_to_target)
+                    and not anchor_start_active
+                )
                 if om_register:
                     pending_transitions[override_context] = (target_state_id, om.get("direction"))
                     transition_manifest[override_context] = (om, override_context)
                     if not changes_state and align_to_target:
                         self_loop_align_entries.add(override_context)
-                    if changes_state and align_both_endpoints:
-                        both_endpoints_source[override_context] = (state_id, om.get("direction"))
+                if anchor_start_active:
+                    start_anchor_source[override_context] = (state_id, om.get("direction"))
 
     for state in states:
         state_id = state["id"]
@@ -757,14 +755,13 @@ def _build_normalization_plan(
         transition_target_entry[entry_key] = target_entry
 
     # Resuelve el ORIGEN de cada transición con
-    # `align_transition_both_endpoints` -- mismo patrón exacto que la
+    # `anchor_start_to_source_base` -- mismo patrón exacto que la
     # resolución de DESTINO de arriba, pero contra `state_id` (el
     # estado bajo el que la acción está autorada) en vez de
     # `target_state_id`. Se omite si comparte archivo con esa base
-    # (containment ya la deja exacta) -- independiente de si el
-    # DESTINO también quedó o no registrado arriba.
-    source_target_entry: dict[str, str] = {}
-    for entry_key, (source_state_id, direction) in both_endpoints_source.items():
+    # (containment ya la deja exacta, sin necesitar ningún registro).
+    start_anchor_entry: dict[str, str] = {}
+    for entry_key, (source_state_id, direction) in start_anchor_source.items():
         source_entry = base_entry_of_state_direction.get((source_state_id, direction))
         if source_entry is None:
             source_entry = base_entry_of_state_direction.get((source_state_id, None))
@@ -772,9 +769,8 @@ def _build_normalization_plan(
             continue
         if set(entry_frame_paths.get(entry_key, ())) & set(entry_frame_paths.get(source_entry, ())):
             continue
-        source_target_entry[entry_key] = source_entry
+        start_anchor_entry[entry_key] = source_entry
 
-    per_frame_offsets: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {}
     plan = prep_dev_sprite.compute_frame_normalization_plan(
         entries,
         groups,
@@ -785,9 +781,9 @@ def _build_normalization_plan(
         entry_frame_paths=entry_frame_paths,
         last_frames=last_frames,
         transition_target_entry=transition_target_entry,
-        source_target_entry=source_target_entry,
+        start_anchor_entry=start_anchor_entry,
         scale_from_last_frame_entries=self_loop_align_entries,
-        per_frame_offsets_out=per_frame_offsets,
+        strict_scale_entries=self_loop_align_entries,
     )
 
     runtime_max_frame_dimension = manifest.get("runtime_max_frame_dimension")
@@ -795,8 +791,6 @@ def _build_normalization_plan(
         plan = _grow_working_canvas_for_runtime_rounding(
             plan, {key: (w, h) for key, (w, h, _px) in entries.items()}, int(runtime_max_frame_dimension)
         )
-    if per_frame_offsets_out is not None:
-        per_frame_offsets_out.update(per_frame_offsets)
     return plan
 
 
@@ -834,12 +828,7 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
         raise PackCompileError("manifest: 'states' must have at least one entry")
     _validate_target_state_ids(states)
 
-    per_frame_offsets: "dict[str, tuple[tuple[int, int], tuple[int, int]]]" = {}
-    normalization_plan = (
-        _build_normalization_plan(manifest, manifest_dir, per_frame_offsets_out=per_frame_offsets)
-        if bool(manifest.get("normalize_visual_scale", False))
-        else None
-    )
+    normalization_plan = _build_normalization_plan(manifest, manifest_dir) if bool(manifest.get("normalize_visual_scale", False)) else None
 
     out = bytearray()
     out += b"NVPACK2\0"
@@ -858,17 +847,16 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
 
         base_context = f"state[{state_id}].base_animation"
         base_manifest = _require(state, "base_animation", f"state '{state_id}'")
-        out += _compile_animation(
-            base_manifest, manifest_dir, base_context, runtime_max_frame_dimension, normalization_plan, per_frame_offsets)
+        out += _compile_animation(base_manifest, manifest_dir, base_context, runtime_max_frame_dimension, normalization_plan)
         out += _compile_direction_overrides(
             state.get("base_animation_direction_overrides", []), manifest_dir, base_context, runtime_max_frame_dimension,
-            normalization_plan, per_frame_offsets
+            normalization_plan
         )
 
         out += struct.pack("<d", float(state.get("ambient_interval_seconds", 300.0)))
         out += _compile_weighted_actions(
             state.get("ambient_actions", []), manifest_dir, state_id, "ambient_actions", runtime_max_frame_dimension,
-            normalization_plan, per_frame_offsets
+            normalization_plan
         )
 
         hover_uses_ambient_actions = bool(state.get("hover_uses_ambient_actions", True))
@@ -880,13 +868,12 @@ def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:
             )
         out += struct.pack("<B", 1 if hover_uses_ambient_actions else 0)
         out += _compile_weighted_actions(
-            hover_actions, manifest_dir, state_id, "hover_actions", runtime_max_frame_dimension, normalization_plan,
-            per_frame_offsets
+            hover_actions, manifest_dir, state_id, "hover_actions", runtime_max_frame_dimension, normalization_plan
         )
 
         out += _compile_weighted_actions(
             state.get("click_actions", []), manifest_dir, state_id, "click_actions", runtime_max_frame_dimension,
-            normalization_plan, per_frame_offsets
+            normalization_plan
         )
 
     with open(output_path, "wb") as f:
