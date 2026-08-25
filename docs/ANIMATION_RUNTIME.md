@@ -802,7 +802,7 @@ implementación concreta):
   una animación EMPIEZA o TERMINA, y ese frame de frontera está
   destinado a representar la MISMA pose que una base estable (la
   intención de contenido detrás de `align_endpoint_to_target_base`/
-  `align_transition_both_endpoints`), el personaje COMPLETO no debería
+  `anchor_start_to_source_base`), el personaje COMPLETO no debería
   verse a otra escala ni en otra posición que esa base -- eso SÍ es un
   defecto (de colocación, DEC-092/096; de escala, DEC-095), y sí se
   corrige, con un ÚNICO transform uniforme (nunca por-frame, nunca
@@ -815,7 +815,14 @@ muestra en el instante de la transición (el ÚLTIMO frame antes de que
 a una transición que cambia de estado), nunca "el frame más extremo de
 toda la secuencia" ni un promedio.
 
-## 16. Continuidad de dos puntas para transiciones cuyo export es independiente en ambos extremos (Block 05, pasada de continuidad de frontera)
+## 16. Continuidad de dos puntas para transiciones cuyo export es independiente en ambos extremos (Block 05, pasada de continuidad de frontera) — **SUPERSEDED por §17**
+
+> **Esta sección describe un mecanismo RETIRADO.** La interpolación de
+> traslación por frame que se describe abajo se implementó, se envió, y
+> QA manual del owner la rechazó por producir root-motion artificial
+> visible. Se conserva como registro de por qué NO se hace esto. El
+> comportamiento actual está en §17 (`anchor_start_to_source_base`, una
+> sola transforma rígida) y en `docs/DECISION_LOG.md` DEC-097.
 
 DEC-087 estableció el registro por-último-frame para una transición que
 cambia de estado (protege la punta donde el personaje QUEDA QUIETO).
@@ -836,3 +843,58 @@ enteramente un transform de TIEMPO DE COMPILACIÓN: el pack compilado
 ya trae cada frame en su posición final, y `src/content/PetPackLoader`
 los lee exactamente igual que cualquier otro frame -- cero cambios en
 `src/` para soportar esto.
+
+## 17. El compilador no inventa root-motion (Block 05, pasada de resolución de root-motion)
+
+Regla permanente, derivada de un rechazo real de QA (ver
+`docs/DECISION_LOG.md` DEC-097):
+
+> Una animación recibe **UNA** transforma del compilador: una escala
+> uniforme (X e Y idénticas) y una traslación constante, aplicadas por
+> igual a todos sus frames. El compilador **nunca** introduce
+> movimiento aparente del personaje completo.
+
+§16 describía un mecanismo de dos puntas que interpolaba la traslación
+por índice de frame para cerrar las dos puntas de `lie_to_sit`.
+**Está retirado.** Sus métricas de punta eran buenas (~1px en ambos
+extremos) pero medían lo que no importaba: comparado contra el arte
+autorado, el clip compilado recorría **+26% de más en el macho** y
+**+12% en la hembra** -- movimiento que ponía el compilador, no el
+arte, y que el owner vio como el sprite derivando por la ventana.
+
+Cuando una transición no cierra geométricamente contra sus dos bases
+con una sola transforma rígida, la política es:
+
+1. anclar **una** punta -- por defecto la de DESTINO (último frame);
+   con `anchor_start_to_source_base` en el manifest, la de ORIGEN
+   (primer frame), que es lo correcto cuando un salto justo al
+   disparar la acción es más objetable que un residual al final;
+2. **medir** el residual de la otra punta y dejarlo VISIBLE;
+3. reportarlo como **deuda de CONTENIDO** (el export hay que
+   regenerarlo) -- nunca repararlo deformando, desplazando o
+   re-temporizando el personaje.
+
+## 18. Contrato estricto de retorno-a-base (Block 05, pasada de resolución de root-motion)
+
+`align_endpoint_to_target_base` (ver §13) es la afirmación de contenido
+"mi último frame ES la pose base del estado destino". Desde DEC-098
+gobierna tres cosas, todas derivadas de ese último frame y todas
+aplicadas como UN valor uniforme para la acción entera:
+
+1. **colocación** anclada por el último frame contra la base (DEC-092);
+2. **escala** medida desde el último frame, no desde el frame 0
+   (DEC-095);
+3. **escala aplicada EXACTA** -- la tolerancia normal de
+   `scale_tolerance` ("suficientemente cerca, evitá el resample") NO
+   aplica (DEC-098).
+
+El punto (3) existe porque la tolerancia razona sobre una imagen en
+AISLAMIENTO, y una frontera de retorno no es eso: son dos imágenes
+consecutivas del mismo personaje, donde una diferencia sub-percentual
+se percibe como "se achicó al terminar".
+
+**Lo que este contrato deliberadamente NO toca:** la variación de
+tamaño DENTRO del clip. Un aullido puede ensanchar legítimamente la
+silueta (la cabeza sube, la cola se abre) -- eso es motion autorado, y
+§15 ya establece la distinción. El contrato protege la FRONTERA, no el
+interior.

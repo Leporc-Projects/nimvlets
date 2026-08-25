@@ -551,7 +551,12 @@ contra la base, no del primero.
 
 Todos los casos quedan bajo el 1% de tolerancia del test de regresión.
 
-### 10.3 `lie_to_sit`: registro de dos puntas (DEC-096)
+### 10.3 `lie_to_sit`: registro de dos puntas (DEC-096) — **SUPERSEDED por §11**
+
+> **Lo que esta sub-sección describe ya no se envía.** La interpolación
+> de traslación por frame fue rechazada por QA (root-motion artificial
+> visible). Se conserva como registro; el comportamiento actual está en
+> §11.
 
 QA manual, el hallazgo central de esta pasada: "when lying and the
 owner clicks to stand up, the stable lying pose immediately jumps in
@@ -603,3 +608,74 @@ justificar re-derivarla.
 (mecanismo puro de §10.3) y `LieToSitTwoEndpointContinuityTest`
 (contra los packs reales, incluyendo el chequeo de movimiento suave y
 de que `sit_to_lie` NO recibió el flag).
+
+## 11. Pasada de resolución de root-motion (Block 05): se retira la interpolación, `lie_to_sit` se ancla por su arranque
+
+§10.3 había resuelto la continuidad de `lie_to_sit` interpolando la
+traslación por frame. **QA manual del owner lo rechazó**: "mientras
+Frin se levanta, el sprite entero parece desplazarse por la ventana".
+
+Medido, y es exactamente lo que el owner vio -- comparando el recorrido
+del centroide en el pack compilado contra el del arte nativo:
+
+| variante | recorrido CON interpolación | recorrido con transforma rígida (= autorado) | inventado por el compilador |
+|---|---|---|---|
+| macho | 78.1 px | 62.1 px | **+16.0 px (+26%)** |
+| hembra | 72.2 px | 64.7 px | **+7.5 px (+12%)** |
+
+Las métricas de punta de §10.3 eran correctas (~1px en los dos
+extremos); lo que faltaba medir era el RECORRIDO. Ver
+`docs/DECISION_LOG.md` DEC-097.
+
+### 11.1 Qué se envía ahora
+
+`lie_to_sit` usa `anchor_start_to_source_base: true`: **una** transforma
+rígida (una escala uniforme + una traslación constante) que registra su
+PRIMER frame contra `lying_base`. El arranque -- el instante exacto del
+click, con el lobo todavía quieto -- queda continuo; el residual del
+export queda visible al final.
+
+| medición | resultado |
+|---|---|
+| arranque vs `lying_base` | **0.80-1.13 px** (anclado) |
+| final vs `seated_base`, macho | **26.58 / 25.72 px** = ~15 pt en pantalla |
+| final vs `seated_base`, hembra | **6.75 / 6.70 px** = ~3.9 pt en pantalla |
+
+### 11.2 Por qué eso es deuda de CONTENIDO, no del compilador
+
+El root-motion del export de `lie_to_sit` no es el inverso del de
+`sit_to_lie`. Medido sobre los PNG nativos del macho: `sit_to_lie`
+mueve al lobo (-23, +158) px, `lie_to_sit` lo mueve (-23, -118) px. Si
+fueran reversas exactas la suma sería (0,0); es **(-46, +40)**. Ninguna
+transforma rígida reconcilia eso, y ninguna debería intentarlo
+deformando al personaje.
+
+Medido con las dos prioridades de anclaje, el residual es el MISMO
+vector -- solo cambia en qué punta cae: 54.08 px nativos (macho),
+9.67 px nativos (hembra), en las dos direcciones.
+
+**Recomendación:** regenerar el export de `lie_to_sit` en Ludo,
+prioritariamente el del **macho** (~15 pt de salto al asentarse, ~8%
+del alto del pet). El de la hembra (~3.9 pt) es tolerable si hace
+falta. Fijado como techo en
+`CompiledFrinEndpointContinuityTest.test_lie_to_sit_end_residual_is_known_content_debt`
+para que no pueda empeorar en silencio.
+
+### 11.3 Escala estricta en el retorno de `howl`/`tail_greet`
+
+`align_endpoint_to_target_base` ahora aplica la escala EXACTA, sin la
+tolerancia de 0.5% (DEC-098). Radio RMS del último frame contra la base
+sentada, antes -> después:
+
+| acción | antes | después |
+|---|---|---|
+| hembra `howl` | 1.003907 | **0.999985** |
+| hembra `tail_greet` | 1.000298 | **0.998843** |
+| macho `howl` | 1.000016 | sin cambio (ya exacto) |
+| macho `tail_greet` | 1.000529 | sin cambio (ya exacto) |
+
+### 11.4 Sin cambios
+
+`sit_to_lie` congelado (aprobado por QA, sus dos puntas siguen siendo
+pixel-idénticas contra `seated_base`/`lying_base`). Inversión de
+dirección runtime (§9.1) intacta. Timings: rest 12s, hover 0.4s.

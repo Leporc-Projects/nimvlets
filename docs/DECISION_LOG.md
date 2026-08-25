@@ -3038,7 +3038,17 @@ solo la colocación).
 ---
 
 ### DEC-096 — Registro de DOS PUNTAS para `lie_to_sit`, con interpolación lineal de traslación cuando un transform constante no alcanza
-**Status:** DECIDIDO · Block 05, pasada de continuidad de frontera
+**Status:** **SUPERSEDED por DEC-097** (Block 05, pasada de resolución
+de root-motion) · fue DECIDIDO · Block 05, pasada de continuidad de
+frontera. El MECANISMO descrito abajo se implementó, se envió, y QA
+manual del owner lo RECHAZÓ: mover la colocación del sprite
+gradualmente a lo largo del clip no se percibe como continuidad, se
+percibe como el personaje entero derivando por la ventana. La medición
+que lo respaldaba (las dos puntas cerraban a ~1px) era correcta y sigue
+siendo correcta -- lo que estaba mal era asumir que dos puntas
+numéricamente buenas implican un clip visualmente bueno. El texto
+original se conserva sin reescribir; ver DEC-097 para qué lo reemplaza
+y para el número que la métrica de dos-puntas no capturaba
 
 QA manual, específico: "when lying and the owner clicks to stand up,
 the stable lying pose immediately jumps in position when the FIRST
@@ -3144,3 +3154,157 @@ cambios) del primer frame contra la base de origen.
 (mecanismo puro, sin manifest), `LieToSitTwoEndpointContinuityTest`
 (contra los packs reales que se envían, las 4 combinaciones
 variante×dirección).
+
+---
+
+### DEC-097 — La interpolación de traslación por frame se retira: el compilador no inventa root-motion. `lie_to_sit` pasa a anclarse por su ARRANQUE
+**Status:** DECIDIDO · Block 05, pasada de resolución de root-motion
+
+**Qué rechazó QA.** DEC-096 hacía que `lie_to_sit` satisficiera sus DOS
+puntas interpolando linealmente la traslación por índice de frame
+(`offset(i) = lerp(start, end, i/(n-1))`). Métricamente era un éxito:
+arranque a 0.80-1.16px de `lying_base`, final a 0.54-0.87px de
+`seated_base`. Visualmente fue un fracaso -- el owner reportó que
+"mientras Frin se levanta, el sprite entero parece desplazarse por la
+ventana".
+
+**Por qué la métrica no lo vio, medido.** Las dos puntas eran lo único
+que se estaba midiendo. Lo que faltaba mirar era cuánto RECORRIDO total
+hace el personaje durante el clip, comparado con cuánto recorre el arte
+autorado:
+
+| variante | recorrido compilado CON interpolación | recorrido con transforma rígida (= autorado) | movimiento INVENTADO |
+|---|---|---|---|
+| macho | 78.1 px | 62.1 px | **+16.0 px (+26%)** |
+| hembra | 72.2 px | 64.7 px | **+7.5 px (+12%)** |
+
+O sea: hasta un cuarto del movimiento aparente del lobo lo estaba
+poniendo el compilador, no el arte. Eso es root-motion artificial, y es
+exactamente lo que el owner percibió.
+
+**Regla permanente que sale de acá.** El compilador aplica UNA
+transforma por animación -- una escala uniforme y una traslación
+constante -- y NUNCA introduce movimiento aparente del personaje
+completo. Si el arte no cierra geométricamente, el residual se MIDE y
+se REPORTA como deuda de contenido; no se disimula. Se retiraron
+enteras `compute_two_endpoint_frame_offsets()` y
+`lerp_offset_schedule()` de `tools/prep_dev_sprite.py`, junto con todo
+el threading de `per_frame_offsets` por `tools/compile_pet_pack.py`
+(`_compile_animation()` vuelve a recibir UNA sola `normalization` para
+todos sus frames) -- no se dejaron "por si acaso": un mecanismo
+rechazado que sigue disponible es un mecanismo que vuelve.
+
+**Qué lo reemplaza:** `anchor_start_to_source_base` (campo de contenido
+opcional, solo con efecto en una acción que CAMBIA de estado). Ancla el
+clip por su PRIMER frame contra la base del estado de ORIGEN, con una
+transforma rígida constante, y REEMPLAZA el anclaje por-último-frame
+que esa acción recibiría si no. Deliberadamente no existe un modo "las
+dos puntas": es justamente lo que exigiría mover el sprite durante el
+clip.
+
+**Por qué el ARRANQUE y no el final.** Con una transforma rígida se
+puede satisfacer una punta o la otra, nunca las dos (medido abajo). Un
+salto instantáneo en el PRIMER frame ocurre en el instante exacto en
+que el owner hace click -- con la atención puesta ahí y el personaje
+todavía quieto. Un residual al final ocurre cuando el lobo ya viene en
+movimiento. Se eligió proteger el arranque.
+
+**El residual, medido, con las dos prioridades de anclaje** (una
+transforma rígida: UNA escala uniforme + UNA traslación constante; el
+residual es el mismo vector, solo cambia en qué punta cae):
+
+| variante | dirección | A: anclado al ARRANQUE -> residual al FINAL | B: anclado al FINAL -> residual al ARRANQUE |
+|---|---|---|---|
+| macho | right | 54.08 px nativos = 26.34 px compilados | idéntico |
+| macho | left | 54.08 px nativos = 26.34 px compilados | idéntico |
+| hembra | right | 9.67 px nativos = 5.83 px compilados | idéntico |
+| hembra | left | 9.67 px nativos = 5.83 px compilados | idéntico |
+
+Verificado luego sobre los packs recompilados: arranque a 0.80-1.13px
+(anclado), final a 26.58/25.72px (macho) y 6.75/6.70px (hembra). En
+pantalla, con `visual_scale` incluido: **~15pt el macho, ~3.9pt la
+hembra**, sobre un pet de 185pt de alto.
+
+**Causa raíz, y por qué NO es un bug del compilador.** El root-motion
+interno del export de `lie_to_sit` no es el inverso del de
+`sit_to_lie`: medido sobre los PNG NATIVOS, `sit_to_lie` mueve al lobo
+macho (-23, +158) px y `lie_to_sit` lo mueve (-23, -118) px. Si fueran
+reversas exactas la suma sería (0,0); es (-46, +40). Ninguna transforma
+rígida puede reconciliar eso, y ninguna debería intentarlo deformando
+o desplazando el personaje.
+
+**Recomendación de CONTENIDO (deuda, no falla de runtime):**
+regenerar/reexportar `lie_to_sit` -- sobre todo el del MACHO -- para que
+su root-motion cierre contra `sit_to_lie`. El residual de la hembra
+(~3.9pt) es mucho menor y podría tolerarse; el del macho (~15pt, ~8% del
+alto del pet) es claramente visible. Hasta entonces el residual queda
+VISIBLE al final del clip, a propósito, fijado como techo en
+`CompiledFrinEndpointContinuityTest.test_lie_to_sit_end_residual_is_known_content_debt`
+para que no pueda EMPEORAR sin que un test falle.
+
+`sit_to_lie` no se tocó y queda congelado: sus dos puntas ya son
+archivos compartidos con `seated_base`/`lying_base`, containment las
+deja exactas, y su comportamiento está aprobado por QA.
+
+---
+
+### DEC-098 — Contrato ESTRICTO de retorno-a-base: sin tolerancia de escala en la frontera
+**Status:** DECIDIDO · Block 05, pasada de resolución de root-motion
+
+QA manual: "durante la animación Bunny/Frin se ven un poco más
+gordos/grandes; al terminar y volver a la base estática se vuelven un
+poco más finos/chicos".
+
+`scale_tolerance` (0.5%) existe para no resamplear cuando la diferencia
+es imperceptible EN AISLAMIENTO -- política correcta para una animación
+cualquiera. Pero en la frontera de RETORNO el owner ve dos imágenes
+CONSECUTIVAS del mismo personaje, y ahí una diferencia sub-percentual
+se lee como "se achicó al terminar".
+
+**Corrección:** para una acción que el CONTENIDO marca con
+`align_endpoint_to_target_base` (el contrato "mi último frame ES la
+pose base del destino"), la escala se aplica EXACTA -- `raw_scale` tal
+cual, sin pasar por la tolerancia. Ese mismo flag ya gobernaba
+colocación (DEC-092) y de-dónde-medir (DEC-095); ahora gobierna también
+con-cuánta-precisión-aplicar. Sigue siendo UNA escala uniforme por
+acción, X e Y idénticas, nunca por frame.
+
+**Efecto real, medido** (radio RMS del último frame compilado contra la
+base, antes -> después):
+
+| pet / acción | antes | después |
+|---|---|---|
+| Frin hembra `howl` | 1.003907 | **0.999985** |
+| Frin hembra `tail_greet` | 1.000298 | **0.998843** |
+| Frin macho `howl` / `tail_greet` | 1.000016 / 1.000529 | sin cambio (ya exactos) |
+| Bunny `idle_breathing` / `groom` / `click` | 0.998861 / 1.002571 / 1.000481 | **sin cambio** |
+
+**Por qué Bunny no cambió, honestamente.** Sus tres acciones ya recibían
+su escala exacta antes de esta pasada: `groom` (0.862113) y `click`
+(0.953602) están muy fuera de la tolerancia, así que nunca la tocó; e
+`idle_breathing` resuelve a 1.0 por CONSTRUCCIÓN, no por la tolerancia
+-- su frame 0 ES literalmente el archivo de la pose base (containment,
+DEC-087), así que la escala exacta ES 1.0. Derivarla del último frame
+en su lugar (1.00112) haría que el frame 0 -- el archivo compartido --
+dejara de calzar: se movería el desajuste del final al arranque, peor.
+El residual de Bunny que queda (máximo 0.257% en `groom`) es precisión
+de resampleo/redondeo entero, no tolerancia: en pantalla son ~0.34pt
+sobre un canvas de 134pt.
+
+**Lo que esta pasada NO corrige, a propósito** (ver §5 del brief y
+`docs/ANIMATION_RUNTIME.md` §15): la variación de tamaño DURANTE la
+animación. Perfilando el radio RMS requerido frame a frame contra la
+base, el arte real varía así:
+
+| acción | escala requerida, rango sobre 25 frames | vs. la escala del endpoint aplicada |
+|---|---|---|
+| Bunny `groom` | 0.8609 - 0.8665 | medio del clip ~0.3% más grande |
+| Bunny `click` | 0.9244 - 0.9611 | hasta ~3.2% más grande a mitad de clip |
+| Frin macho `howl` | 1.1351 - 1.1620 | medio del clip ~1.4% más grande |
+| Frin hembra `tail_greet` | 1.0093 - 1.0702 | medio del clip ~5% más chico |
+
+Eso es SILUETA AUTORADA -- la cabeza sube, la cola se abre, el cuerpo
+se estira -- no un desajuste de transforma. Aplastarlo para que el bbox
+coincida con la base deformaría poses reales, que es exactamente lo que
+el brief prohíbe. Se documenta con números para que quede claro qué se
+corrigió (la frontera) y qué no (el interior del clip).

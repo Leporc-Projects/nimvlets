@@ -33,13 +33,17 @@ orientación real que el owner exportó, nunca la semántica de runtime —
 ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §9.1), y extiende el
 invariante de continuidad de punta de estado a acciones self-loop
 (`groom`/`click` de Bunny, `howl`/`tail_greet` de Frin sentado —
-colocación Y escala derivadas del retorno, ver
-`align_endpoint_to_target_base` en
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §13) y a
-transiciones de dos puntas (`lie_to_sit` de Frin, con interpolación
-lineal de traslación cuando un transform constante no alcanza — ver
-`align_transition_both_endpoints` en
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §16). Esto explícitamente *no* es
+colocación Y escala derivadas del retorno, con la escala aplicada
+EXACTA en esa frontera, ver `align_endpoint_to_target_base` en
+[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §13/§18). El
+compilador aplica **una sola transforma rígida por animación** (una
+escala uniforme + una traslación constante) y nunca inventa movimiento
+aparente del personaje completo — un mecanismo previo que interpolaba
+la traslación por frame se retiró tras QA
+([§17](docs/ANIMATION_RUNTIME.md)); cuando un export no cierra
+geométricamente contra sus dos bases, el residual se mide y se reporta
+como deuda de contenido en vez de disimularse (`lie_to_sit` de Frin —
+ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §11). Esto explícitamente *no* es
 todavía el producto terminado — ver
 [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está
 verificado y lo que no, y `AGENTS.md` para los contratos de
