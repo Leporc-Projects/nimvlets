@@ -680,3 +680,61 @@ Escala uniforme garantizada por construcción, verificada con
 `test_scale_is_uniform_across_every_frame_of_the_action` -- ningún
 frame de `groom`/`click`/`idle_breathing` recibe una escala distinta
 del resto.
+
+## 19. Pasada de simplificación geométrica (Block 05): las tres puntas de Bunny son ahora el frame base exacto
+
+QA del owner, tras la pasada anterior: el problema de pixeles perdidos
+está resuelto, el render y el click-through son correctos y las
+animaciones en sí son buenas -- pero Bunny **todavía se ve un poco más
+gordo/más grande mientras anima que quieto**, y al volver a la base
+parece adelgazar otra vez.
+
+### 19.1 Lo que se corrigió: la frontera, y ahora es exacta
+
+Las tres acciones de Bunny (`idle_breathing`, `groom`, `click`)
+arrancan y terminan en la única pose estable de Bunny. Eso ahora se
+DECLARA en el manifest (`first_frame_is_state_base` /
+`last_frame_is_state_base`, ver DEC-099) en vez de aproximarse:
+
+```
+decoded compiled frame 0     == decoded compiled Bunny base
+decoded compiled último frame == decoded compiled Bunny base
+```
+
+Igualdad RGBA pixel por pixel, sin tolerancia, en las dos direcciones
+-- seis puntas en total, verificadas sobre el pack COMPILADO que se
+envía, no sobre los PNG fuente.
+
+Antes de esto la mejor precisión alcanzable en esa frontera era 0.26%
+(`groom`), y no por falta de esfuerzo de medición: es el residual del
+resampleo entero, irreducible mientras la punta sea un archivo distinto
+que hay que reescalar. Ahora es el MISMO archivo, así que el residual
+es cero por construcción.
+
+Los PNG fuente no se modificaron. La sustitución ocurre en la
+compilación, así que la provenance del export de Ludo queda intacta.
+
+### 19.2 Lo que NO se corrigió, y por qué
+
+La causa del "más gordo mientras anima" está en el export, medida:
+
+| par | ratio W | ratio H | anisotropía | error con la mejor escala uniforme |
+|---|---|---|---|---|
+| idle -> `groom` | 0.8548 | 0.8642 | 1.08% | +0.55% / -0.54% |
+| idle -> `click` | 0.9359 | 0.9550 | 2.00% | +1.01% / -1.00% |
+
+Los exports de Bunny traen al personaje a escalas de mundo distintas
+(el bounding box de contenido nativo es 365x509 en idle, 390x533 en
+click, 427x589 en groom) y las dos proporciones no coinciden. Con una
+escala uniforme -- obligatoria: escala no uniforme deformaría poses
+reales -- `click` se muestra ~1% más ancho y ~1% más bajo que la base
+durante todo el clip.
+
+Contraste con Nidir, el control aprobado: sus tres exports coinciden
+dentro del 0.23-0.83%, y por eso todos sus grupos se compilan a
+`content_scale` exactamente 1.0. Bunny está entre 1 y 2 puntos
+porcentuales peor que eso.
+
+**Esto no se declara resuelto.** Es deuda de export, y la única forma de
+quitarla es re-exportar el arte a una escala de mundo consistente. La
+QA visual del owner es la puerta de aceptación, no esta medición.

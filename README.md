@@ -30,20 +30,28 @@ agrega una escala visual por-pet genérica y data-driven
 dirección runtime de Frin (`Direction::kRight`/`kLeft` — pedido de
 producto explícito; las carpetas de import siguen registrando la
 orientación real que el owner exportó, nunca la semántica de runtime —
-ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §9.1), y extiende el
-invariante de continuidad de punta de estado a acciones self-loop
-(`groom`/`click` de Bunny, `howl`/`tail_greet` de Frin sentado —
-colocación Y escala derivadas del retorno, con la escala aplicada
-EXACTA en esa frontera, ver `align_endpoint_to_target_base` en
-[`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §13/§18). El
-compilador aplica **una sola transforma rígida por animación** (una
-escala uniforme + una traslación constante) y nunca inventa movimiento
-aparente del personaje completo — un mecanismo previo que interpolaba
-la traslación por frame se retiró tras QA
-([§17](docs/ANIMATION_RUNTIME.md)); cuando un export no cierra
-geométricamente contra sus dos bases, el residual se mide y se reporta
-como deuda de contenido en vez de disimularse (`lie_to_sit` de Frin —
-ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §11). Esto explícitamente *no* es
+ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §9.1), y establece
+la **identidad semántica de pose**: si el contenido declara que la
+punta de una animación *es* la pose base estable de un estado, el pack
+compilado usa el **frame canónico exacto** de esa base — igualdad RGBA
+pixel por pixel, sin tolerancias ni métricas de "suficientemente
+parecido" (`first_frame_is_state_base` / `last_frame_is_state_base`,
+ver [`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md) §19). Eso
+reemplazó — y permitió borrar — seis capas sucesivas de compensación
+geométrica que intentaban aproximar esas puntas midiéndolas; los PNG
+fuente nunca se tocan, la sustitución es una referencia de tiempo de
+compilación. El compilador aplica **una sola transforma rígida por
+animación** (una escala uniforme + una traslación constante), nunca
+cambia el sistema de coordenadas visual de un pet solo porque se activó
+otra animación, y **nunca inventa movimiento aparente** del personaje
+completo — un mecanismo previo que interpolaba la traslación por frame
+se retiró tras QA ([§17](docs/ANIMATION_RUNTIME.md)). La variación de
+silueta autorada (una cola que se abre, una cabeza que se levanta) es
+arte y no se corrige. Cuando un export no cierra geométricamente, el
+residual se mide y se reporta como deuda de contenido en vez de
+disimularse (`lie_to_sit` de Frin, y la anisotropía de export de
+`howl` — ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §12).
+Esto explícitamente *no* es
 todavía el producto terminado — ver
 [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está
 verificado y lo que no, y `AGENTS.md` para los contratos de

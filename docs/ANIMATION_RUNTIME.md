@@ -724,7 +724,7 @@ sobre los PNG nativos.
 decodificados con `tools/read_pet_pack.py`, ambas variantes × ambas
 direcciones).
 
-## 13. Extensión a acciones self-loop: `align_endpoint_to_target_base` (Block 05, pasada de pulido final)
+## 13. Extensión a acciones self-loop: `align_endpoint_to_target_base` (Block 05, pasada de pulido final) — **SUPERSEDED por §19**
 
 §12 arriba resolvió la continuidad de una transición que CAMBIA de
 estado. QA manual encontró el mismo síntoma (un salto pequeño, no de
@@ -874,7 +874,7 @@ con una sola transforma rígida, la política es:
    regenerarlo) -- nunca repararlo deformando, desplazando o
    re-temporizando el personaje.
 
-## 18. Contrato estricto de retorno-a-base (Block 05, pasada de resolución de root-motion)
+## 18. Contrato estricto de retorno-a-base (Block 05, pasada de resolución de root-motion) — **SUPERSEDED por §19**
 
 `align_endpoint_to_target_base` (ver §13) es la afirmación de contenido
 "mi último frame ES la pose base del estado destino". Desde DEC-098
@@ -898,3 +898,92 @@ tamaño DENTRO del clip. Un aullido puede ensanchar legítimamente la
 silueta (la cabeza sube, la cola se abre) -- eso es motion autorado, y
 §15 ya establece la distinción. El contrato protege la FRONTERA, no el
 interior.
+
+
+## 19. Identidad semántica de pose (Block 05, pasada de simplificación geométrica)
+
+Las §12, §13, §15, §17 y §18 describen cinco pasadas consecutivas que
+atacaron el mismo problema desde el mismo ángulo: medir qué tan cerca
+quedaba la punta de una animación de la pose base estable, y corregir
+escala/colocación para achicar esa diferencia. Ninguna llegó a cero,
+porque no podía: el resampleo entero deja su propio residual (medido:
+hasta 0.26% en Bunny, irreducible con más precisión de medición).
+
+**El contrato que las reemplaza invierte la pregunta.** Si el contenido
+dice que una punta ES la pose base estable de un estado, entonces esa
+punta no se aproxima: se COMPILA desde el archivo de esa base, con la
+transforma de esa base. El frame compilado sale idéntico byte a byte al
+que el runtime muestra con el pet quieto en ese estado.
+
+```jsonc
+{
+  "id": "lie_to_sit",
+  "target_state_id": "seated",
+  "first_frame_is_state_base": "lying",    // mi frame 0 ES la pose acostada
+  "last_frame_is_state_base": "seated"     // mi frame final ES la pose sentada
+}
+```
+
+La verdad semántica manda sobre la inferencia geométrica. "Dentro del
+0.5%", "mismo radio RMS", "mismo centroide", "IoU alto" son todas
+respuestas a una pregunta que ya no hace falta hacer.
+
+Tres consecuencias que importan:
+
+1. **Los PNG fuente no se tocan.** La sustitución es una referencia de
+   tiempo de compilación, así que la provenance del arte queda intacta
+   -- nunca se reescribe un export para que dos imágenes coincidan.
+
+2. **Una declaración, dos consecuencias coherentes.** El mismo
+   `first_frame_is_state_base` que elige los pixeles define también el
+   SISTEMA DE COORDENADAS del clip: si el frame 0 es la pose base del
+   estado X, el clip arranca donde vive esa base. Sin esto, la
+   colocación por default (centrar el frame 0 en el ancla compartida)
+   asume que la pose de arranque vive en el ancla -- cierto para
+   cualquier pet de un solo estado, falso para un clip que arranca en
+   otro estado. Para un pet de un solo estado es un no-op exacto, y se
+   verifica: Bunny recompila byte-idéntico con y sin el mecanismo.
+
+3. **El desajuste de export no desaparece: se reubica.** Para un clip
+   como `lie_to_sit`, cuyo export no cierra geométricamente contra las
+   dos bases, tener las dos puntas exactas significa que la diferencia
+   se absorbe DENTRO del clip, donde el personaje ya está en
+   movimiento, en vez de en el instante en que queda quieto. Eso se
+   mide y se fija en un test; no se disimula.
+
+### 19.1 Geometría canónica del pet
+
+Una animación puede cambiar la silueta autorada todo lo que el arte
+pida -- un lobo levanta la cabeza, una cola se abre, un conejo se
+estira. Lo que NO puede pasar es que activar una animación meta al
+personaje entero en otro sistema de escala.
+
+Por animación: UNA escala uniforme, UNA colocación, para todos sus
+frames. Nunca escala por-frame, nunca escala solo-X o solo-Y, nunca
+squash/stretch, nunca una transforma que cambie progresivamente.
+
+### 19.2 El compilador no inventa root-motion
+
+Permanente, y no lo supersede nada de esta sección: el compilador nunca
+mueve ni reescala el sprite gradualmente a lo largo de un clip para
+reconciliar dos puntas que el export no cierra. Se implementó, QA lo
+rechazó (se percibe como el personaje derivando por la ventana) y se
+retiró -- ver §17 y DEC-097. Si las dos puntas no cierran con una sola
+transforma rígida, el residual se MIDE y se reporta como deuda de
+CONTENIDO.
+
+### 19.3 Límite honesto: anisotropía de export
+
+Cuando dos exports del mismo personaje vienen a escalas de mundo
+distintas Y con las proporciones en desacuerdo entre ejes, ninguna
+escala uniforme puede satisfacer los dos. Medido en el arte real:
+Nidir 0.23-0.83% de anisotropía (imperceptible, y la razón de que sea
+el control estable), Bunny 1.08-2.00%, Frin hembra 1.75%, Frin macho
+`howl` **3.58%** -- que con la mejor escala uniforme se muestra ~1.8%
+más ancho y ~1.8% más bajo que la base durante todo el clip.
+
+Eso es lo que queda del "se ve más gordo mientras anima", y no se
+puede quitar sin escala no uniforme, que deformaría poses reales. Las
+opciones honestas son convivir con ello o re-exportar el arte. Ver
+DEC-099 para las mediciones completas y los dos métodos independientes
+con que se confirmaron.

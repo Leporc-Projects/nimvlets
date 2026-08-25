@@ -679,3 +679,84 @@ sentada, antes -> después:
 `sit_to_lie` congelado (aprobado por QA, sus dos puntas siguen siendo
 pixel-idénticas contra `seated_base`/`lying_base`). Inversión de
 dirección runtime (§9.1) intacta. Timings: rest 12s, hover 0.4s.
+
+## 12. Pasada de simplificación geométrica (Block 05): las cuatro animaciones aterrizan en poses exactas, y la saga de `lie_to_sit` termina
+
+### 12.1 El contrato
+
+Cada acción de Frin declara ahora qué pose ESTABLE representa cada una
+de sus dos puntas (ver DEC-099 y `docs/ANIMATION_RUNTIME.md` §19):
+
+| acción | primer frame | último frame |
+|---|---|---|
+| `sit_to_lie` | `seated` | `lying` |
+| `lie_to_sit` | `lying` | `seated` |
+| `howl` | `seated` | `seated` |
+| `tail_greet` | `seated` | `seated` |
+
+El compilador toma esas puntas del ARCHIVO de la base correspondiente,
+así que salen idénticas byte a byte al frame que el runtime muestra con
+el lobo quieto en ese estado. Verificado sobre los packs compilados
+para macho y hembra, en las dos direcciones de runtime: 16 puntas,
+igualdad RGBA pixel por pixel, sin tolerancia.
+
+### 12.2 `lie_to_sit`: por qué esto cierra la saga
+
+Historial de este clip: se ancló por su ÚLTIMO frame (saltaba al
+arrancar); se interpoló la traslación por frame para cerrar las dos
+puntas (QA lo rechazó: el lobo entero derivaba por la ventana,
+DEC-096/097); se ancló por su PRIMER frame con una transforma rígida
+(el residual se mudó al final, ~26px ≈ 15pt).
+
+El problema estructural era que UNA transforma rígida sólo puede
+registrar UNA punta, y este export -- independiente en los dos
+extremos -- no cierra contra las dos bases. La salida no fue una
+transforma mejor: fue dejar de derivar las puntas de una transforma.
+Ahora las dos son exactas, y el desajuste real del export se absorbe
+DENTRO del clip, donde el lobo ya está en movimiento, en vez de en el
+instante en que queda quieto.
+
+Ese residual interno se mide y se fija en un test
+(`LieToSitInternalResidualTest`), con `sit_to_lie` -- cuyas puntas
+comparten archivo real y por tanto es exacto por construcción -- como
+control de cuánto salto es normal en contenido bueno.
+
+El owner decidió explícitamente NO regenerar animaciones de Ludo, así
+que esto queda como deuda de contenido conocida y aceptada, medida en
+vez de disimulada.
+
+### 12.3 Un matiz: la colocación de arranque no era una capa de compensación
+
+La primera versión de esta pasada eliminó también el anclaje de
+arranque, por considerarlo parte de la complejidad acumulada. Medido,
+resultó ser una simplificación de más: el frame 0 sustituido y el frame
+1 autorado quedaban a 66.3px (macho) / 61.8px (hembra), y el canvas de
+trabajo compartido se inflaba de 657 a 767px de alto, encogiendo a Frin
+~14% en pantalla.
+
+La causa es real y no es una tolerancia: la colocación por default
+centra el contenido del frame 0 en el ancla compartida, lo que asume
+que la pose de arranque del clip vive ahí. Cierto para cualquier pet de
+un solo estado; falso para un clip que arranca acostado, porque la pose
+acostada hereda la colocación de `sit_to_lie`.
+
+La corrección no fue devolver el flag eliminado, sino DERIVAR la
+colocación de la declaración que ya existe: si el frame 0 ES la pose
+base del estado X, el clip arranca donde vive esa base.
+
+### 12.4 Límite honesto: `howl` del macho
+
+`howl` es el peor caso de anisotropía de export del proyecto: su
+bounding box de contenido nativo es 353x511 contra 395x593 de la pose
+sentada, o sea ratios de 1.1190 (W) y 1.1605 (H) -- **3.58% de
+desacuerdo entre ejes**. Confirmado por un segundo método independiente
+(ajuste de IoU con ejes libres sobre frames compilados: 3.96%, y el IoU
+sube de 0.9656 a 0.9851 al soltar los ejes, que es la firma de una
+diferencia real de escala por eje y no de pose).
+
+Con la mejor escala uniforme posible, `howl` se muestra ~1.8% más ancho
+y ~1.8% más bajo que la pose sentada durante todo el clip. Eso es lo que
+queda del "se ve más gordo mientras anima". No se puede quitar sin
+escala no uniforme, que deformaría la pose real del aullido. Convivir
+con ello o re-exportar son las dos opciones honestas; el owner eligió
+no re-exportar.

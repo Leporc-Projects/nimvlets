@@ -2523,7 +2523,13 @@ intervalo de muestreo.
 ---
 
 ### DEC-087 — Continuidad de punta en transiciones de estado: la colocación se hereda por archivo compartido, no se recalcula
-**Status:** DECIDIDO · Block 05, pasada de estabilización
+**Status:** **SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- el anclaje por último frame se eliminó; la
+continuidad de punta ahora es exacta por sustitución de frame canónico.
+El containment por archivo compartido que esta entrada introdujo SÍ se
+conserva. El texto original se preserva abajo sin reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de estabilización
 
 QA manual: "sit_to_lie termina visualmente y, al entrar a la base de
 lying, el lobo salta un poco hacia arriba" (y el simétrico al entrar a
@@ -2744,7 +2750,12 @@ preserva sin importar qué slot runtime lo muestre.
 ---
 
 ### DEC-092 — `align_endpoint_to_target_base`: extiende el anclaje-por-último-frame de DEC-087 a acciones self-loop, vía un flag de CONTENIDO opcional
-**Status:** DECIDIDO · Block 05, pasada de pulido final
+**Status:** **SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- el flag `align_endpoint_to_target_base` se
+eliminó por completo. El texto original se preserva abajo sin
+reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de pulido final
 
 QA manual, dos reportes relacionados:
 > Bunny: "the character feels very slightly wider/larger while
@@ -2864,7 +2875,12 @@ se envían).
 ---
 
 ### DEC-093 — El anclaje por-último-frame se registra por centroide de alpha, no por centro de bounding box
-**Status:** DECIDIDO · Block 05, pasada de pulido final
+**Status:** **SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- `alpha_registration_point()` se eliminó
+junto con las ramas de anclaje que lo usaban. El texto original se
+preserva abajo sin reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de pulido final
 
 Consecuencia directa de implementar DEC-092: la primera versión
 (reusar `anchor_of()`, centro de bounding box, sin cambios respecto a
@@ -2955,7 +2971,12 @@ Semánticas de reset sin cambios en ninguno de los dos casos.
 ---
 
 ### DEC-095 — Escala de una acción self-loop derivada del RETORNO, no del arranque
-**Status:** DECIDIDO · Block 05, pasada de continuidad de frontera
+**Status:** **SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- derivar la escala del último frame se
+eliminó; la escala vuelve a medirse siempre desde el frame 0. El texto
+original se preserva abajo sin reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de continuidad de frontera
 
 DEC-092 (pasada anterior) resolvió la COLOCACIÓN de la punta de regreso
 de una acción self-loop (`groom`/`click` de Bunny, `howl`/`tail_greet`
@@ -3158,7 +3179,14 @@ variante×dirección).
 ---
 
 ### DEC-097 — La interpolación de traslación por frame se retira: el compilador no inventa root-motion. `lie_to_sit` pasa a anclarse por su ARRANQUE
-**Status:** DECIDIDO · Block 05, pasada de resolución de root-motion
+**Status:** **PARCIALMENTE SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- el RECHAZO de la interpolación por-frame
+sigue vigente y es permanente. Lo superseded es solo
+`anchor_start_to_source_base`: la colocación de arranque ya no es un
+flag propio, se deriva de `first_frame_is_state_base`. El texto original
+se preserva abajo sin reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de resolución de root-motion
 
 **Qué rechazó QA.** DEC-096 hacía que `lie_to_sit` satisficiera sus DOS
 puntas interpolando linealmente la traslación por índice de frame
@@ -3249,7 +3277,12 @@ deja exactas, y su comportamiento está aprobado por QA.
 ---
 
 ### DEC-098 — Contrato ESTRICTO de retorno-a-base: sin tolerancia de escala en la frontera
-**Status:** DECIDIDO · Block 05, pasada de resolución de root-motion
+**Status:** **SUPERSEDED por DEC-099** (Block 05, pasada de
+simplificación geométrica) -- `strict_scale_entries` se eliminó; en la
+frontera ya no hay ninguna escala que ajustar, porque la punta ES el
+frame de la base. El texto original se preserva abajo sin reescribir.
+
+_Status original:_ DECIDIDO · Block 05, pasada de resolución de root-motion
 
 QA manual: "durante la animación Bunny/Frin se ven un poco más
 gordos/grandes; al terminar y volver a la base estática se vuelven un
@@ -3308,3 +3341,131 @@ se estira -- no un desajuste de transforma. Aplastarlo para que el bbox
 coincida con la base deformaría poses reales, que es exactamente lo que
 el brief prohíbe. Se documenta con números para que quede claro qué se
 corrigió (la frontera) y qué no (el interior del clip).
+
+### DEC-099 — Identidad semántica de pose: una punta que ES la pose base se COMPILA desde la base, no se aproxima a ella
+**Status:** DECIDIDO · Block 05, pasada de simplificación geométrica y
+contratos de pose exactos.
+
+**Contexto.** QA manual del owner, tras seis pasadas consecutivas de
+corrección de geometría: Nidir PERFECTO (tamaño estable, animaciones
+estables, sin pérdida de pixeles); Bunny y Frin con el defecto residual
+de siempre -- "cuando corre una animación se ve un poco más gordo/más
+grande que quieto, y al volver a la base se ve más flaco otra vez". Y,
+para `lie_to_sit`, tres intentos acumulados y ningún resultado
+aceptado: primero saltaba, después la interpolación lo hacía derivar
+por la ventana (DEC-096, rechazado), después el anclaje rígido movió la
+discontinuidad al final (DEC-097). El owner rechazó explícitamente esa
+complejidad acumulada y pidió SIMPLIFICAR: preferir borrar antes que
+agregar otra capa matemática.
+
+**Diagnóstico: por qué Nidir era estable y Bunny/Frin no.** Medido, no
+supuesto. Los tres exports de Nidir traen al personaje al MISMO tamaño
+de mundo -- sus bounding boxes de contenido nativo son 436x500 (idle),
+437x500 (click_reaction) y 437x497 (wing_stretch), pese a vivir en
+canvas nativos muy distintos (513x525, 624x612, 624x519). La diferencia
+entre ellos es del 0.2%, dentro de `scale_tolerance`, así que TODOS los
+grupos de Nidir se compilan con `content_scale` exactamente 1.0: Nidir
+tiene, de hecho, UN SOLO sistema de coordenadas y ningún reescalado
+por-animación.
+
+Bunny y Frin no. Sus exports vienen a escalas de mundo distintas Y con
+las dos proporciones en desacuerdo:
+
+| par (base -> acción) | ratio W | ratio H | anisotropía | error con la mejor escala uniforme |
+|---|---|---|---|---|
+| nidir idle -> click | 0.9977 | 1.0000 | 0.23% | +0.11% / -0.11% |
+| nidir idle -> wing_stretch | 0.9977 | 1.0060 | 0.83% | +0.42% / -0.41% |
+| bunny idle -> groom | 0.8548 | 0.8642 | 1.08% | +0.55% / -0.54% |
+| bunny idle -> click | 0.9359 | 0.9550 | 2.00% | +1.01% / -1.00% |
+| frin macho base -> howl | 1.1190 | 1.1605 | **3.58%** | **+1.84% / -1.80%** |
+| frin hembra base -> howl | 0.9825 | 1.0000 | 1.75% | +0.89% / -0.88% |
+
+Confirmado por un segundo método independiente (ajuste de IoU con ejes
+X/Y libres sobre los frames COMPILADOS): Nidir da anisotropía 0.00%,
+mientras Frin macho `howl` da 3.96% y Bunny `click` 2.97% -- y en los
+dos casos el IoU MEJORA al soltar los ejes (0.9656 -> 0.9851 para
+`howl`), que es la firma de una diferencia real de escala por eje, no
+de una diferencia de pose.
+
+Ninguna transforma uniforme puede satisfacer los dos ejes a la vez, y
+§7 del brief prohíbe escala no uniforme (nada de squash/stretch: eso
+deformaría poses reales). Ese residual -- hasta ±1.8% en el peor caso,
+`howl` del macho, contra ±0.42% del peor caso de Nidir -- es DEUDA DE
+EXPORT y se reporta como tal. **No se declara resuelto por ser
+pequeño**: la QA visual del owner es la única puerta de aceptación.
+
+**Decisión.** Dejar de preguntar "¿qué tan cerca quedó esta punta de la
+pose base?" y empezar a declarar "esta punta ES la pose base".
+
+Dos campos nuevos, opcionales, por acción, solo de tiempo de build:
+`first_frame_is_state_base` y `last_frame_is_state_base`, cada uno con
+el id del estado cuya pose estable representa esa punta. Cuando están,
+el compilador toma esa punta del ARCHIVO de esa base y con la
+transforma de esa base -- el frame compilado sale idéntico byte a byte
+al que el runtime muestra con el pet quieto. Sin métrica, sin residual,
+sin tolerancia en la frontera. Los PNG fuente NO se tocan: la
+sustitución es una referencia de tiempo de compilación, así que la
+provenance del arte se preserva intacta.
+
+**Lo que se ELIMINÓ** (no reemplazado por otra corrección: borrado):
+
+| mecanismo | qué hacía | DEC |
+|---|---|---|
+| `transition_target_entry`/`last_frames` | anclar por último frame contra la base destino | DEC-087 |
+| `align_endpoint_to_target_base` | extender ese anclaje a self-loops | DEC-092 |
+| `alpha_registration_point` | punto de registro por centroide de alpha | DEC-093 |
+| `scale_from_last_frame_entries` | derivar la escala del último frame | DEC-095 |
+| `strict_scale_entries` | saltear `scale_tolerance` en la frontera | DEC-098 |
+| `anchor_start_to_source_base` | anclar por primer frame contra la base de origen | DEC-097 |
+
+Los seis existían para el mismo fin -- aproximar una punta a una pose
+base -- y ninguno podía llegar a exacto: el resampleo entero deja su
+propio residual (medido: hasta 0.26% en Bunny, irreducible por más
+precisión de medición que se le ponga).
+
+**La prueba de que el diagnóstico era correcto:** quitar los seis
+mecanismos NO movió un solo byte del pack de Nidir (sha256
+`594da545…` sin cambios). Nidir nunca los usó. Eran, literalmente, la
+diferencia entre el pet estable y los inestables.
+
+**Lo que se CONSERVÓ, y por qué.** El union-find de escala por archivo
+compartido, el containment de colocación, el canvas de trabajo
+compartido y la escala uniforme por grupo siguen siendo necesarios para
+meter exports de distinto canvas nativo en un solo sistema de
+coordenadas -- eso es infraestructura, no compensación.
+
+**Un matiz que la primera versión de esta pasada se llevó por delante.**
+Eliminar TAMBIÉN el anclaje de arranque resultó ser una simplificación
+de más, y se midió: el frame 0 sustituido y el frame 1 autorado de
+`lie_to_sit` quedaron a 66.3px (macho) / 61.8px (hembra), y el canvas
+de trabajo compartido se infló de 657 a 767px de alto, encogiendo a
+Frin ~14% en pantalla. La causa es real y no es una tolerancia: la
+colocación por default centra el contenido del frame 0 en el ancla
+compartida, lo que asume que la pose de arranque del clip VIVE en esa
+ancla. Es cierto para todo pet de un solo estado; es falso para un clip
+que arranca en otro estado (la pose acostada hereda la colocación de
+`sit_to_lie`, no vive en el ancla).
+
+La corrección NO fue devolver `anchor_start_to_source_base`, sino
+DERIVAR la colocación de la declaración que ya existe: si el contenido
+dice "mi frame 0 ES la pose base del estado X", entonces dónde vive esa
+base es dónde tiene que arrancar el clip. Una sola declaración de
+contenido, dos consecuencias coherentes (qué pixeles y qué sistema de
+coordenadas), cero flags nuevos. Para un pet de un solo estado es un
+no-op exacto -- su base ya está en el ancla compartida --, y eso se
+verifica: Bunny recompila byte-idéntico con y sin el mecanismo.
+
+**Resultado en `lie_to_sit`.** Las DOS puntas son ahora exactas, cosa
+que ninguna transforma rígida podía lograr. El desajuste real del
+export no desapareció -- se absorbió DENTRO del clip, donde el lobo ya
+está en movimiento, en vez de en el instante en que queda quieto. Ese
+residual interno se mide y se fija en un test; el owner decidió
+explícitamente NO regenerar ninguna animación de Ludo, así que queda
+como deuda conocida y aceptada.
+
+**Lo que esta pasada NO corrige, a propósito.** La anisotropía de
+export de la tabla de arriba. Con escala uniforme obligatoria, `howl`
+del macho se muestra ~1.8% más ancho y ~1.8% más bajo que la base
+durante todo el clip. Eso es lo que queda del "se ve más gordo", y no
+se puede quitar sin deformar el arte. Las opciones honestas son
+convivir con ello o re-exportar; el owner eligió no re-exportar.
