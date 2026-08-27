@@ -966,13 +966,22 @@
                   "source": "animations/lie_to_sit/right/frames/frame_024.png",
                   "duration_ms": 0
                 }
-              ]
+              ],
+              "terminal_rigid_translation": {
+                "start_frame": 21,
+                "dx": 1.503223680930546,
+                "dy": -5.095938161702634
+              }
             }
           ],
           "first_frame_is_state_base": "lying",
           "last_frame_is_state_base": "seated",
           "match_aspect_to_stable_poses": true,
-          "stable_pose_tail_frames": 4
+          "terminal_rigid_translation": {
+            "start_frame": 21,
+            "dx": -1.7148204938495581,
+            "dy": -5.111141094585719
+          }
         }
       ]
     }
