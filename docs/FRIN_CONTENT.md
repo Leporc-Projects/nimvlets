@@ -854,3 +854,59 @@ conserva a propósito.
 Sin cambios: su interior autorado no se toca, sus dos puntas siguen
 compartiendo archivo real con `seated_base`/`lying_base`, su escala
 sigue siendo (1.0, 1.0) y no declara ninguna corrección.
+
+## 14. Pasada de pulido final (Block 05): tamaño del macho +5%, y por qué el corte terminal de `lie_to_sit` ya no puede mejorar más sin re-exportar
+
+### 14.1 Escala visual por-variante
+
+`VISUAL_SCALE` (común a las dos variantes desde DEC-087) se extiende a
+un multiplicador por-variante: `VARIANT_VISUAL_SCALE_MULTIPLIER =
+{"male": 1.05, "female": 1.0}` (ver DEC-103). Puramente runtime; el
+canvas lógico del macho sigue siendo 153x176, idéntico a antes.
+Tamaño en pantalla: macho 161x185pt -> **169x194pt** (+5.0% exacto);
+hembra sin cambio, 168x185pt.
+
+### 14.2 `lie_to_sit`: re-derivación rigurosa, y un hallazgo honesto
+
+QA tras DEC-101: el salto terminal seguía siendo visible en las dos
+variantes, y el criterio de selección anterior ("primer frame ya
+detenido") quedó explícitamente invalidado como insuficiente.
+
+Se re-derivó con una búsqueda EXHAUSTIVA sobre los 25 candidatos
+posibles, minimizando distancia de centroide a la base sentada sujeto
+a que el frame elegido siga en movimiento visible (paso de entrada
+>0.5px) -- evita reproducir el patrón "quieto en el lugar equivocado,
+después salta" que esta familia de correcciones existe para eliminar.
+Implementada dos veces (a mano y como test automatizado que recompila
+y reproduce la búsqueda), con resultado idéntico las dos veces.
+
+**El macho no mejora: 3b4fa66 (8 frames de cola) ya era el óptimo.**
+Ningún frame de los 25 del clip queda genuinamente más cerca de 24.46px
+de la base sentada -- confirmado visualmente con una superposición
+alpha (rojo=frame autorado, verde=base sentada): el lobo está
+desplazado ~24px hacia un lado de forma consistente en TODA la meseta
+final del clip, sin diferencia de escala significativa. Es un PISO
+GEOMÉTRICO real de este export: su root-motion no cierra contra
+`sit_to_lie` lo suficiente como para que NINGUNA elección de frontera
+lo reduzca, dentro de las reglas (sin síntesis, sin interpolación, sin
+re-export).
+
+**La hembra sí mejoró: 5 frames -> 4, salto 5.59px -> 5.32px (~4.8%)**,
+preservando un frame autorado más.
+
+Se investigó (y se descartó deliberadamente) invertir el anclaje del
+clip -- del inicio (`lying_base`) al final (`seated_base`) -- lo que
+desplazaría el MISMO residual desde el final del clip hacia el
+instante justo después del click. Como el frame 0 ya es exacto bajo
+cualquier anclaje (DEC-099), hoy el INICIO de `lie_to_sit` es
+perfectamente continuo; cambiar de anclaje introduciría un defecto
+nuevo justo ahí, a cambio de resolver uno que el owner no reportó en
+ese punto. Mover el defecto no es eliminarlo -- ver DEC-104 para los
+números completos de esta opción, documentados por si se prefiere a
+futuro.
+
+**Conclusión honesta:** para eliminar (no solo minimizar) el defecto
+del macho hace falta un re-export de `lie_to_sit` en Ludo cuyo
+root-motion cierre contra `sit_to_lie` -- la recomendación de DEC-101
+sigue en pie. La hembra queda con una mejora real; su residual
+(~3.2pt en un pet de 185pt) es probablemente ya imperceptible.

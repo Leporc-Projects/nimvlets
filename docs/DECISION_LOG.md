@@ -3650,3 +3650,121 @@ pixeles de la base.
 resto es sombreado AUTORADO (el lobo gira, la cola tapa luz) y se
 conserva a propósito -- aplanarlo sería auto-exposición, que es
 justamente lo prohibido.
+
+### DEC-103 — Frin macho: escala visual por-variante, +5% sobre la escala común
+**Status:** DECIDIDO · Block 05, pasada de pulido final.
+
+**Contexto.** Pedido de producto explícito: "increase ONLY Frin male's
+final on-screen size by exactly +5%... female stays exactly the current
+size." `VISUAL_SCALE` (ver DEC-076/087) era hasta acá un único valor
+por-pet compartido por las dos variantes de Frin.
+
+**Decisión.** Se generaliza a un multiplicador por-variante,
+`VARIANT_VISUAL_SCALE_MULTIPLIER = {"male": 1.05, "female": 1.0}`,
+aplicado sobre el `VISUAL_SCALE` común existente (1.05) en el momento
+de armar el manifest: `visual_scale = VISUAL_SCALE *
+VARIANT_VISUAL_SCALE_MULTIPLIER[variant]`. Resultado: macho 1.1025,
+hembra 1.05 sin cambio.
+
+Puramente de runtime -- ningún PNG fuente, ningún `content_scale`,
+ningún canvas lógico se toca (verificado: canvas lógico del macho sigue
+siendo 153x176, idéntico a 3b4fa66). `visual_scale` es, por diseño
+desde DEC-076, el único lugar donde una diferencia de tamaño
+puramente de PRODUCTO entre variantes debe vivir (se aplica solo en
+`SpikeApp::EffectiveCanvasWidth()/Height()`) -- exactamente el
+mecanismo genérico ya existente, generalizado de un escalar a un
+diccionario por-variante, sin ninguna rama `if pet.id == "..."` en
+runtime C++.
+
+Tamaño en pantalla resultante: macho 161x185pt (3b4fa66) -> **169x194pt**
+(+5.0% exacto en los dos ejes, verificado 161*1.05=169.05,
+185*1.05=194.25); hembra sin cambio, 168x185pt.
+
+### DEC-104 — `lie_to_sit`: re-derivación rigurosa del corte terminal, y el piso geométrico del macho confirmado
+**Status:** DECIDIDO · Block 05, pasada de pulido final.
+
+**Contexto.** QA del owner sobre DEC-101 (Block 05, pasada anterior):
+el salto terminal de `lie_to_sit` sigue siendo visible en las dos
+variantes. Explícito: "'move the jump earlier while the wolf is
+moving' is NOT sufficient. We need the terminal portion itself to LOOK
+continuous" -- y el criterio de selección de DEC-101 ("primer frame ya
+detenido") queda invalidado por el propio brief como insuficiente.
+
+**Metodología, rigurosa y verificada dos veces.** Búsqueda EXHAUSTIVA
+sobre los 25 candidatos posibles de frontera, sobre el pack COMPILADO
+con la corrección de aspecto ya aplicada (no sobre PNG nativos
+sueltos, para medir exactamente lo que el runtime muestra). Para cada
+candidato: distancia de centroide del último frame autorado a la base
+sentada, Y el paso propio de entrada a ese frame (cuánto se movió
+llegando a él). Un candidato SOLO califica si ese paso es > 0.5px --
+cortar sobre un frame ya inmóvil reproduce el patrón "quieto en el
+lugar equivocado, después salta" que toda esta familia de
+correcciones (DEC-101 en adelante) existe para eliminar. Entre los que
+califican, se elige el de menor distancia. La búsqueda se implementó
+DOS VECES independientemente (una vez a mano durante el diagnóstico,
+otra vez como test automatizado que recompila el manifest con
+`stable_pose_tail_frames=1` y reproduce la búsqueda completa) y ambas
+coinciden exactamente -- ver
+`LieToSitTerminalBoundaryRederivationTest` en
+tools/test_asset_pipeline.py.
+
+**Un hallazgo honesto, no cosmético: el MACHO no mejora.**
+
+| first_tail | último autorado | distancia a S | paso propio | ¿califica? |
+|---|---|---|---|---|
+| 16 | 15 | 26.85px | 0.67px | sí |
+| **17** | **16** | **24.46px** | **2.90px** | **sí — mínimo entre los que califican** |
+| 18 | 17 | 24.28px | 0.44px | no (casi inmóvil) |
+| 19-24 | 18-23 | 24.56-25.37px | 0.07-0.55px | no |
+
+El candidato de 18 (24.28px) es marginalmente más cercano en distancia
+pura, pero corta sobre un frame que apenas se movió (0.44px) -- lo
+descarta el criterio de "seguir en movimiento visible". Ningún frame
+de las 25 posiciones del clip queda genuinamente más cerca de la base
+sentada que 24.46px. **3b4fa66 (8 frames de cola) YA ERA el óptimo.**
+Esto es un PISO GEOMÉTRICO real de este export (medido, no supuesto):
+el root-motion de `lie_to_sit` del macho simplemente no converge más
+cerca de la pose sentada real, y ninguna elección de frontera dentro
+de las reglas (sin síntesis, sin interpolación, sin re-export) lo
+reduce. Se confirmó visualmente: comparando los frames 16/17
+(autorados) contra S con una superposición alpha roja/verde, el lobo
+está desplazado ~24px hacia la izquierda de forma consistente, sin
+diferencia de escala significativa (bounding box dentro del 5%).
+
+**La HEMBRA sí tenía margen real.**
+
+| first_tail | último autorado | distancia a S | paso propio | ¿califica? |
+|---|---|---|---|---|
+| 19 | 18 | 8.16px | 0.05px | no |
+| **20** | **19** | **5.59px** | **2.58px** | **sí (3b4fa66)** |
+| **21** | **20** | **5.32px** | **1.02px** | **sí — mínimo, nuevo valor** |
+| 22-24 | 21-23 | 5.35-5.39px | 0.09-0.33px | no |
+
+Nuevo valor: 4 frames de cola (antes 5). Reducción real: 5.59px ->
+5.32px (~4.8%), y se preserva UN frame autorado más (idx19, antes
+sustituido, ahora visible).
+
+**Una opción explícitamente considerada y NO implementada.** El
+mecanismo de colocación de `lie_to_sit` ancla el clip por su PRIMER
+frame contra `lying_base` (DEC-099, vía `first_frame_is_state_base`).
+Anclar por el ÚLTIMO frame en su lugar (contra `seated_base`)
+desplazaría el residual completo -- misma magnitud, ~24-26px -- desde
+el FINAL del clip hacia el INICIO (la transición frame0->frame1, justo
+al hacer click). Se investigó y se descartó deliberadamente: el frame
+0 ya es exacto bajo CUALQUIER anclaje (sustitución de frame canónico,
+DEC-099, independiente de la colocación del resto del clip), así que
+hoy el inicio de `lie_to_sit` es perfectamente continuo; cambiar de
+anclaje introduciría un defecto NUEVO exactamente donde hoy no hay
+ninguno, a cambio de resolver uno que el owner no reportó ahí. Mover
+el defecto no es lo mismo que eliminarlo -- exactamente lo que este
+mismo brief advierte explícitamente que no alcanza ("move the jump
+earlier... is NOT sufficient"). Documentado acá para que quede
+disponible si el owner prefiriera esa opción a futuro, con los números
+exactos arriba.
+
+**Conclusión honesta para el informe de este bloque:** el macho
+requiere, para eliminar (no solo minimizar) su defecto terminal, un
+re-export de `lie_to_sit` en Ludo cuyo root-motion cierre contra
+`sit_to_lie` -- la recomendación que DEC-101 ya hacía y que sigue en
+pie. La hembra queda con una mejora real y medible, y su residual
+(5.32px, ~3.2pt en un pet de 185pt) es probablemente ya imperceptible.
