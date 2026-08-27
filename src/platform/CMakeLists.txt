@@ -14,7 +14,15 @@ add_library(nimvlets_platform_policy STATIC
   LinuxBackendPolicy.cpp
   RendererPolicy.h
   RendererPolicy.cpp
+  SystemShellTypes.h
+  QuickMenuModel.h
+  QuickMenuModel.cpp
 )
 
 target_include_directories(nimvlets_platform_policy PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(nimvlets_platform_policy PRIVATE nimvlets_warnings)
+
+# nimvlets_core: QuickMenuModel reutiliza core::DisplayControls (política
+# pura de tamaño/opacidad) como única fuente de verdad. core no arrastra
+# SDL, así que esta librería sigue siendo compilable/testeable en
+# cualquier host.
+target_link_libraries(nimvlets_platform_policy PUBLIC nimvlets_core PRIVATE nimvlets_warnings)

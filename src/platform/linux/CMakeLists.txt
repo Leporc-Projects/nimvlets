@@ -1,6 +1,7 @@
 add_library(nimvlets_platform_linux STATIC
   TransparentWindowSupport.cpp
   TextRasterizer.cpp
+  SystemShell.cpp
 )
 
 target_include_directories(nimvlets_platform_linux PUBLIC ${CMAKE_SOURCE_DIR}/src)

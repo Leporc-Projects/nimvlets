@@ -59,6 +59,8 @@ add_executable(nimvlets_tests
   FormatTest.cpp
   DisplayControlsTest.h
   DisplayControlsTest.cpp
+  QuickMenuModelTest.h
+  QuickMenuModelTest.cpp
   DirectionTest.h
   DirectionTest.cpp
   main.cpp

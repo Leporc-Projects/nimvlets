@@ -11,6 +11,7 @@
 #include "DisplayControlsTest.h"
 #include "FocusListTest.h"
 #include "FormatTest.h"
+#include "QuickMenuModelTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
 #include "HoverDwellTrackerTest.h"
@@ -48,6 +49,7 @@ int main() {
     nimvlets::tests::RegisterCollectionLayoutTests(runner);
     nimvlets::tests::RegisterFocusListTests(runner);
     nimvlets::tests::RegisterFormatTests(runner);
+    nimvlets::tests::RegisterQuickMenuModelTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
     nimvlets::tests::RegisterRendererPolicyTests(runner);
