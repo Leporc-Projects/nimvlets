@@ -185,9 +185,12 @@ bool RasterizeText(const TextRasterRequest& request, RasterizedText& out) {
 
         CGContextSetShouldAntialias(ctx, true);
         CGContextSetShouldSmoothFonts(ctx, false);
-        // Sin flip de CTM: el origen de Core Graphics es abajo-izquierda,
-        // el texto se dibuja "derecho", y la fila 0 EN MEMORIA queda
-        // siendo la de ABAJO -> se copia invirtiendo filas más abajo.
+        // Medido en esta plataforma: el buffer de un CGBitmapContext
+        // creado sobre memoria propia ya queda top-first (fila 0 EN
+        // MEMORIA = borde superior de la imagen), así que NO se voltea al
+        // copiar. Sin flip de CTM y con la baseline a `descent` del
+        // borde inferior (= `ascent` del superior), los glyphs salen
+        // derechos y en el orden correcto.
         CGContextSetTextPosition(ctx, 1.0, static_cast<CGFloat>(descent));
         CTLineDraw(line, ctx);
         CGContextFlush(ctx);
@@ -197,9 +200,9 @@ bool RasterizeText(const TextRasterRequest& request, RasterizedText& out) {
         out.baseline = baseline;
         out.pixels.assign(byteCount, 0);
 
-        // Un-premultiplica y voltea verticalmente en una sola pasada.
+        // Un-premultiplica, fila por fila, sin voltear.
         for (int y = 0; y < height; ++y) {
-            const std::uint8_t* src = premul.data() + static_cast<size_t>(height - 1 - y) * bytesPerRow;
+            const std::uint8_t* src = premul.data() + static_cast<size_t>(y) * bytesPerRow;
             std::uint8_t* dst = out.pixels.data() + static_cast<size_t>(y) * bytesPerRow;
             for (int x = 0; x < width; ++x) {
                 const size_t p = static_cast<size_t>(x) * 4;

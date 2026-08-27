@@ -1,6 +1,7 @@
 #pragma once
 
 #include "catalog/ActivePetResolution.h"
+#include "catalog/CollectionModel.h"
 #include "catalog/PetCatalog.h"
 #include "catalog/PetIdentity.h"
 #include "content/AnimationController.h"
@@ -14,9 +15,13 @@
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
+#include "platform/SystemShell.h"
+#include "productui/ProductWindow.h"
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
@@ -163,6 +168,45 @@ private:
     // Escribe appState_ vía appStateStore_ si — y solo si —
     // persistenceScheduler_ está dirty en ese momento.
     void FlushPersistedState();
+
+    // --- Block 06: Product UI + System Shell --------------------------
+
+    // Abre (o enfoca, si ya está abierta) la ventana de Collection y le
+    // empuja el modelo/preview/balance actuales. NO abre nada al
+    // arranque — solo desde el menú rápido (ShellAction::kOpenCollection).
+    void OpenProductWindow();
+
+    // Reconstruye catalog::CollectionModel a partir del estado actual
+    // (catálogo + ownedPetIds + identidad activa) y lo empuja a la
+    // ventana de producto si está abierta.
+    void PushCollectionModelToProductWindow();
+
+    // Empuja el estado visible del menú rápido (nombre del pet,
+    // hidden/lock/size/opacity) al System Shell.
+    void PushShellState();
+
+    // Aplica ShellAction (llegado como SDL_EVENT_USER). `running` se
+    // pone en false para kQuit.
+    void HandleShellAction(int shellActionCode, bool& running);
+
+    // Resultado de que el owner haya pedido activar un pet desde la
+    // Collection: valida propiedad vía el modelo y delega en
+    // TrySwitchActivePet(). No-op silencioso si el pet no se puede
+    // activar (locked / desconocido).
+    void HandleActivateRequest(const productui::ActivateRequest& request);
+
+    // Copia del frame de reposo canónico del pet activo (states[0],
+    // pose base, Direction::kRight) para la preview de la Collection —
+    // el pack ya está en memoria, no se recarga.
+    content::FrameDefinition CurrentRestFrame() const;
+
+    catalog::CollectionModel BuildCurrentCollectionModel() const;
+
+    // (Re)aplica tamaño de ventana + presentación lógica del pet a
+    // EffectiveCanvasWidth()/Height() — usado tras un cambio de tamaño
+    // de usuario (ShellAction::kSetSize*), igual que TrySwitchActivePet
+    // lo hace tras un switch.
+    void ApplyPetWindowMetrics();
 
     // La API de switching en runtime reutilizable: intenta cargar el
     // pack de `target` según catalog_. Si falla, retorna false y no
@@ -315,6 +359,31 @@ private:
     persistence::AppState appState_;
     std::optional<persistence::AppStateStore> appStateStore_;
     persistence::PersistenceScheduler persistenceScheduler_;
+
+    // Identidad a NIVEL DE CATÁLOGO del pet realmente activo (petId +
+    // variantId) — distinta de pet_.id/variantGroup, que es la
+    // auto-identidad del pack (ver docs/CATALOG.md §2). Es la fuente de
+    // verdad para el modelo de Collection, el invariante "el activo es
+    // propio", y el nombre en el menú, e incluye correctamente el caso
+    // NIMVLETS_DEV_SELECT_PET (que no toca appState_.activePetId).
+    catalog::PetIdentity activeCatalogIdentity_;
+
+    // Ventana de aplicación normal para el Product UI (Collection).
+    // Cerrada al arranque; se abre desde el menú. Cerrarla no afecta al
+    // runtime del pet (block brief §4/§18).
+    productui::ProductWindow productWindow_;
+
+    // Presencia nativa en el System Shell (macOS: NSStatusItem).
+    std::unique_ptr<platform::SystemShell> systemShell_;
+
+    // Tipo de SDL_EVENT_USER registrado para las acciones del menú
+    // rápido — 0 si SDL_RegisterEvents falló o no hay shell nativo.
+    std::uint32_t shellUserEventType_ = 0;
+
+    // Si la ventana del pet está oculta por "Hide Nimvlet" (block brief
+    // §17). NO se persiste: al reabrir la app el pet siempre arranca
+    // visible. Esconder != salir.
+    bool petHidden_ = false;
 
     bool usingNativeShapeHitTest_ = false;
     bool usingPollDrivenClickThrough_ = false;

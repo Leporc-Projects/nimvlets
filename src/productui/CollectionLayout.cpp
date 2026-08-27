@@ -16,19 +16,19 @@ namespace {
 constexpr float kMargin = 36.0f;
 constexpr float kTitleTop = 30.0f;
 constexpr float kTitleH = 24.0f;
-constexpr float kSectionLabelTop = 78.0f;
+constexpr float kSectionLabelTop = 74.0f;
 constexpr float kSectionLabelH = 16.0f;
-constexpr float kGridTop = 112.0f;
+constexpr float kGridTop = 100.0f;
 constexpr int kMaxCols = 3;
-constexpr float kArtMax = 148.0f;
+constexpr float kArtMax = 140.0f;
 constexpr float kNameH = 18.0f;
 constexpr float kStatusH = 15.0f;
-constexpr float kArtToName = 14.0f;
+constexpr float kArtToName = 12.0f;
 constexpr float kNameToStatus = 5.0f;
-constexpr float kRowGap = 26.0f;
+constexpr float kRowGap = 20.0f;
 
-constexpr float kDetailTopGap = 30.0f;
-constexpr float kDetailArt = 176.0f;
+constexpr float kDetailTopGap = 20.0f;
+constexpr float kDetailArt = 150.0f;
 constexpr float kDetailNameH = 24.0f;
 constexpr float kChipW = 74.0f;
 constexpr float kChipH = 30.0f;
@@ -125,13 +125,21 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
         box.hasVariants = item.HasVariants();
         box.focusId = "item:" + item.petId;
 
-        const float cellX = kMargin + static_cast<float>(col) * colW;
+        const float colX = kMargin + static_cast<float>(col) * colW;
         const float cellY = (kGridTop - sy) + static_cast<float>(row) * rowH;
-        box.cell = UiRect{cellX, cellY, colW, rowH - kRowGap * 0.4f};
 
-        box.art = UiRect{cellX + (colW - art) * 0.5f, cellY, art, art};
-        box.name = UiRect{cellX, box.art.Bottom() + kArtToName, colW, kNameH};
-        box.status_ = UiRect{cellX, box.name.Bottom() + kNameToStatus, colW, kStatusH};
+        // La "celda" (fondo de hover/selección/foco) abraza el contenido
+        // — arte + nombre + estado — con un poco de aire, NO toda la
+        // columna (block brief §8: sin cards fuertes alrededor de cada
+        // pet).
+        const float cellW = std::min(colW - 12.0f, art + 44.0f);
+        const float cellX = colX + (colW - cellW) * 0.5f;
+        const float cellH = art + kArtToName + kNameH + kNameToStatus + kStatusH + 22.0f;
+        box.cell = UiRect{cellX, cellY - 8.0f, cellW, cellH};
+
+        box.art = UiRect{colX + (colW - art) * 0.5f, cellY, art, art};
+        box.name = UiRect{colX, box.art.Bottom() + kArtToName, colW, kNameH};
+        box.status_ = UiRect{colX, box.name.Bottom() + kNameToStatus, colW, kStatusH};
 
         lastRowBottom = std::max(lastRowBottom, box.status_.Bottom());
         out.items.push_back(box);

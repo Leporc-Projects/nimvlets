@@ -78,12 +78,56 @@ void UiPainter::FillRoundRect(const UiRect& r, float radius, UiColor color) {
     }
 }
 
-void UiPainter::RoundRectBorder(const UiRect& r, float radius, UiColor border, UiColor fill) {
-    FillRoundRect(r, radius, border);
-    const UiRect inner = r.Inset(1.0f);
-    if (fill.a != 0 && inner.w > 0.0f && inner.h > 0.0f) {
-        FillRoundRect(inner, std::max(0.0f, radius - 1.0f), fill);
+void UiPainter::StrokeRoundRect(const UiRect& r, float radius, float thickness, UiColor color) {
+    if (color.a == 0 || r.w <= 0.0f || r.h <= 0.0f || thickness <= 0.0f) {
+        return;
     }
+    const float rad = std::clamp(radius, 0.0f, std::min(r.w, r.h) * 0.5f);
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SetColor(renderer_, color);
+
+    const float px = r.x * scale_;
+    const float py = r.y * scale_;
+    const float pw = r.w * scale_;
+    const float ph = r.h * scale_;
+    const float pr = rad * scale_;
+    const float pt = std::max(1.0f, thickness * scale_);
+    const int rows = static_cast<int>(std::lround(ph));
+
+    for (int i = 0; i < rows; ++i) {
+        const float yTop = static_cast<float>(i);
+        float inset = 0.0f;
+        float dy = -1.0f;
+        if (yTop < pr) {
+            dy = pr - (yTop + 0.5f);
+        } else if (yTop > ph - pr) {
+            dy = (yTop + 0.5f) - (ph - pr);
+        }
+        if (dy > 0.0f && dy < pr) {
+            inset = pr - std::sqrt(std::max(0.0f, pr * pr - dy * dy));
+        } else if (dy >= pr) {
+            continue;
+        }
+        const bool edgeRow = yTop < pt || yTop >= ph - pt;
+        if (edgeRow) {
+            const SDL_FRect span{px + inset, py + yTop, pw - 2.0f * inset, 1.0f};
+            if (span.w > 0.0f) {
+                SDL_RenderFillRect(renderer_, &span);
+            }
+        } else {
+            const SDL_FRect left{px + inset, py + yTop, pt, 1.0f};
+            const SDL_FRect right{px + pw - inset - pt, py + yTop, pt, 1.0f};
+            SDL_RenderFillRect(renderer_, &left);
+            SDL_RenderFillRect(renderer_, &right);
+        }
+    }
+}
+
+void UiPainter::RoundRectBorder(const UiRect& r, float radius, UiColor border, UiColor fill) {
+    if (fill.a != 0) {
+        FillRoundRect(r, radius, fill);
+    }
+    StrokeRoundRect(r, radius, 1.0f, border);
 }
 
 void UiPainter::DrawTextureContained(SDL_Texture* texture, const UiRect& box, unsigned char alpha) {

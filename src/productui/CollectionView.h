@@ -53,6 +53,10 @@ class CollectionView {
     bool Dirty() const { return dirty_; }
     void ClearDirty() { dirty_ = false; }
 
+    // Solo-DEV: abre el panel de detalle de `petId` sin un click real
+    // (para QA / capturas). No-op si `petId` no está en el modelo.
+    void OpenDetailForQA(const std::string& petId) { OpenDetail(petId); }
+
     void Render(
         UiPainter& painter, TextCache& text, PetPreviewCache& previews, const catalog::PetCatalog& catalog,
         float viewportW, float viewportH);

@@ -74,6 +74,9 @@ class ProductWindow {
     // y no-op si no hay nada que hacer.
     void RenderIfNeeded();
 
+    // Solo-DEV: abre el detalle de `petId` (para QA / capturas).
+    void OpenDetailForQA(const std::string& petId) { view_.OpenDetailForQA(petId); }
+
  private:
     void RecomputeScale();
     void DestroyResources();

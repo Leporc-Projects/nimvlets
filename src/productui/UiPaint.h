@@ -33,9 +33,14 @@ class UiPainter {
     // event-driven, y evita depender de SDL_RenderGeometry.
     void FillRoundRect(const UiRect& r, float radius, UiColor color);
 
-    // Borde de 1 punto: se dibuja el round-rect en `border` y encima el
-    // interior en `fill`. `fill.a == 0` => solo el borde (útil sobre un
-    // fondo ya pintado).
+    // Solo el CONTORNO de un round-rect, `thickness` puntos de grosor
+    // hacia adentro. No rellena el interior (a diferencia de un fill).
+    // Para anillos de foco y chips sin seleccionar.
+    void StrokeRoundRect(const UiRect& r, float radius, float thickness, UiColor color);
+
+    // Relleno + contorno en una sola llamada: primero FillRoundRect(fill),
+    // luego StrokeRoundRect(border). Para chips seleccionados / botones
+    // con borde.
     void RoundRectBorder(const UiRect& r, float radius, UiColor border, UiColor fill);
 
     // Dibuja `texture` (RGBA) escalada para CONTENER dentro de `box`

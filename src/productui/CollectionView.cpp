@@ -276,7 +276,7 @@ void CollectionView::Render(
             painter.FillRoundRect(box.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
         }
         if (focusedId == box.focusId) {
-            painter.RoundRectBorder(box.cell.Inset(2.0f), 12.0f, theme::kAccent, UiColor{0, 0, 0, 0});
+            painter.StrokeRoundRect(box.cell.Inset(2.0f), 12.0f, 2.0f, theme::kAccent);
         }
 
         if (item.status != OwnershipStatus::kLocked) {
@@ -286,6 +286,10 @@ void CollectionView::Render(
                 art = previews.Acquire(catalog, box.petId, item.selectedVariantId);
             }
             painter.DrawTextureContained(art, box.art, 255);
+        } else {
+            // Locked: sin arte (block brief §8/§9), pero una caja MUY
+            // tenue mantiene el ritmo de las tres columnas.
+            painter.FillRoundRect(box.art.Inset(-6.0f), 14.0f, theme::kArtBed.WithAlpha(90));
         }
 
         DrawText(painter, text, item.displayName, type::kPetName, TextWeight::kMedium, theme::kText,
@@ -322,12 +326,13 @@ void CollectionView::Render(
 
         for (const VariantChip& chip : d.variants) {
             if (chip.selected) {
-                painter.RoundRectBorder(chip.rect, 9.0f, theme::kAccent, theme::kAccentSoft);
+                painter.FillRoundRect(chip.rect, 9.0f, theme::kAccentSoft);
+                painter.StrokeRoundRect(chip.rect, 9.0f, 1.5f, theme::kAccent);
             } else {
-                painter.RoundRectBorder(chip.rect, 9.0f, theme::kHairline, theme::kBackground);
+                painter.StrokeRoundRect(chip.rect, 9.0f, 1.0f, theme::kHairline);
             }
             if (focusedId == chip.focusId) {
-                painter.RoundRectBorder(chip.rect.Inset(-3.0f), 12.0f, theme::kAccent, UiColor{0, 0, 0, 0});
+                painter.StrokeRoundRect(chip.rect.Inset(-3.0f), 12.0f, 2.0f, theme::kAccent);
             }
             DrawText(painter, text, chip.label, type::kChip, TextWeight::kMedium,
                      chip.selected ? theme::kText : theme::kTextMuted, chip.rect.CenterX(),
@@ -337,12 +342,12 @@ void CollectionView::Render(
         if (d.actionEnabled) {
             painter.FillRoundRect(d.actionButton, 9.0f, theme::kButtonFill);
             if (focusedId == d.actionFocusId) {
-                painter.RoundRectBorder(d.actionButton.Inset(-3.0f), 12.0f, theme::kAccent, UiColor{0, 0, 0, 0});
+                painter.StrokeRoundRect(d.actionButton.Inset(-3.0f), 12.0f, 2.0f, theme::kAccent);
             }
             DrawText(painter, text, d.actionLabel, type::kButton, TextWeight::kSemibold, theme::kButtonText,
                      d.actionButton.CenterX(), d.actionButton.CenterY() + 4.5f, HAlign::kCenter);
         } else {
-            painter.RoundRectBorder(d.actionButton, 9.0f, theme::kHairline, theme::kBackground);
+            painter.StrokeRoundRect(d.actionButton, 9.0f, 1.0f, theme::kHairline);
             DrawText(painter, text, d.actionLabel, type::kButton, TextWeight::kMedium, theme::kTextMuted,
                      d.actionButton.CenterX(), d.actionButton.CenterY() + 4.5f, HAlign::kCenter,
                      static_cast<int>(d.actionButton.w - 6.0f));

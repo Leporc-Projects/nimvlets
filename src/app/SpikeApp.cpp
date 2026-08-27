@@ -1,7 +1,10 @@
 #include "app/SpikeApp.h"
 
 #include "catalog/PetCatalogLoader.h"
+#include "core/DisplayControls.h"
+#include "platform/QuickMenuModel.h"
 #include "platform/RendererPolicy.h"
+#include "platform/SystemShellTypes.h"
 #include "platform/TransparentWindowSupport.h"
 
 #include <algorithm>
@@ -155,11 +158,13 @@ bool ShutdownRequested() {
 }
 
 int SpikeApp::EffectiveCanvasWidth() const {
-    return std::max(1, static_cast<int>(std::lround(pet_.canvasWidth * pet_.visualScale)));
+    const double sizeFactor = core::PetSizeScaleFactor(core::ParsePetSizeChoice(appState_.sizeChoice));
+    return std::max(1, static_cast<int>(std::lround(pet_.canvasWidth * pet_.visualScale * sizeFactor)));
 }
 
 int SpikeApp::EffectiveCanvasHeight() const {
-    return std::max(1, static_cast<int>(std::lround(pet_.canvasHeight * pet_.visualScale)));
+    const double sizeFactor = core::PetSizeScaleFactor(core::ParsePetSizeChoice(appState_.sizeChoice));
+    return std::max(1, static_cast<int>(std::lround(pet_.canvasHeight * pet_.visualScale * sizeFactor)));
 }
 
 double SpikeApp::ComputeEffectiveAmbientIntervalSeconds(const content::BehaviorState& state) const {
@@ -308,6 +313,28 @@ bool SpikeApp::Init() {
             loadedEntry->identity.variantId.c_str());
     }
 
+    // Identidad de catálogo del pet realmente activo esta sesión (cubre
+    // NIMVLETS_DEV_SELECT_PET, que no escribe appState_). Fuente de
+    // verdad para la Collection, el invariante de propiedad, y el menú.
+    activeCatalogIdentity_ = loadedEntry->identity;
+
+    // --- Estado de propiedad (Block 06) ---
+    // Siembra de desarrollo SOLO en el primer arranque tras la
+    // migración a schema v2 (o una instalación nueva). Un bloque futuro
+    // de onboarding reemplaza esto sin tocar el catálogo.
+    if (!appState_.ownershipSeeded) {
+        appState_.ownedPetIds = catalog::SeedOwnershipFromCatalog(catalog_);
+        appState_.ownershipSeeded = true;
+        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+        SDL_Log("nimvlets: ownership seeded from catalog (%zu pet(s) owned by default)", appState_.ownedPetIds.size());
+    }
+    // Invariante duro: el pet que está en el escritorio siempre es
+    // propio (block brief §9). Se persiste salvo que la sesión sea una
+    // selección DEV transitoria, igual que la reparación de arriba.
+    if (catalog::EnsureActivePetOwned(appState_.ownedPetIds, activeCatalogIdentity_.petId) && !haveDevSelection) {
+        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    }
+
     const SDL_WindowFlags flags =
         SDL_WINDOW_TRANSPARENT |
         SDL_WINDOW_BORDERLESS |
@@ -434,6 +461,28 @@ bool SpikeApp::Init() {
 
     passiveActionRng_.seed(std::random_device{}());
 
+    // --- Preferencia de opacidad de usuario (Block 06) ---
+    // 0 = sin preferencia guardada -> 100% (totalmente opaco).
+    {
+        const int pct =
+            appState_.opacityPercent == 0 ? 100 : core::NormalizeOpacityPercent(static_cast<int>(appState_.opacityPercent));
+        SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
+    }
+
+    // --- System Shell: menú rápido nativo (Block 06) ---
+    shellUserEventType_ = SDL_RegisterEvents(1);
+    if (shellUserEventType_ == 0 || shellUserEventType_ == static_cast<std::uint32_t>(-1)) {
+        shellUserEventType_ = 0;
+        SDL_Log("nimvlets: SDL_RegisterEvents failed -- quick menu actions disabled this run");
+    } else {
+        systemShell_ = platform::CreateSystemShell();
+        if (systemShell_->Install(shellUserEventType_)) {
+            PushShellState();
+        } else {
+            SDL_Log("nimvlets: no native system-shell menu on this platform (see docs/PRODUCT_UI.md)");
+        }
+    }
+
     int logicalW = 0;
     int logicalH = 0;
     int pixelW = 0;
@@ -506,6 +555,10 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
 
     appState_.activePetId = target.petId;
     appState_.activeVariantId = target.variantId;
+    activeCatalogIdentity_ = target;
+    // El pet recién puesto en el escritorio es, por definición, propio
+    // (block brief §9) — CanActivate ya lo garantiza, pero se reafirma.
+    catalog::EnsureActivePetOwned(appState_.ownedPetIds, target.petId);
     persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
     RearmAmbientDeadline(static_cast<double>(SDL_GetTicks()));
     MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
@@ -514,6 +567,148 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
         "nimvlets: switched active pet to '%s'%s%s ('%s')",
         pet_.id.c_str(), pet_.variantGroup.empty() ? "" : "/", pet_.variantGroup.c_str(), pet_.displayName.c_str());
     return true;
+}
+
+catalog::CollectionModel SpikeApp::BuildCurrentCollectionModel() const {
+    return catalog::BuildCollectionModel(catalog_, appState_.ownedPetIds, activeCatalogIdentity_);
+}
+
+content::FrameDefinition SpikeApp::CurrentRestFrame() const {
+    if (pet_.states.empty()) {
+        return content::FrameDefinition{};
+    }
+    const content::BehaviorState& state = pet_.states.front();
+    const content::AnimationDefinition& anim = content::ResolveAnimation(
+        state.baseAnimation, state.baseAnimationDirectionOverrides, content::Direction::kRight);
+    if (anim.frames.empty()) {
+        return content::FrameDefinition{};
+    }
+    return anim.frames.front();  // copia -- un solo frame, solo al abrir la Collection
+}
+
+void SpikeApp::PushCollectionModelToProductWindow() {
+    if (productWindow_.IsOpen()) {
+        productWindow_.SetModel(BuildCurrentCollectionModel(), appState_.clickBalance);
+    }
+}
+
+void SpikeApp::PushShellState() {
+    if (!systemShell_) {
+        return;
+    }
+    platform::ShellState state;
+    state.currentPetName = pet_.displayName;
+    state.petHidden = petHidden_;
+    state.lockPosition = appState_.lockPosition;
+    state.sizeChoiceId = appState_.sizeChoice.empty() ? "medium" : appState_.sizeChoice;
+    state.opacityPercent =
+        appState_.opacityPercent == 0 ? 100 : static_cast<int>(appState_.opacityPercent);
+    systemShell_->SetState(state);
+}
+
+void SpikeApp::ApplyPetWindowMetrics() {
+    SDL_SetWindowSize(window_, EffectiveCanvasWidth(), EffectiveCanvasHeight());
+    SDL_SetRenderLogicalPresentation(
+        renderer_, EffectiveCanvasWidth(), EffectiveCanvasHeight(), SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    UpdateDirectionFromWindowPosition();
+    MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
+}
+
+void SpikeApp::OpenProductWindow() {
+    if (!productWindow_.Open(catalog_)) {
+        SDL_Log("nimvlets: could not open the Product UI window");
+        return;
+    }
+    productWindow_.SetActivePreview(
+        activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
+    productWindow_.SetModel(BuildCurrentCollectionModel(), appState_.clickBalance);
+    productWindow_.FocusWindow();
+}
+
+void SpikeApp::HandleActivateRequest(const productui::ActivateRequest& request) {
+    const catalog::CollectionModel model = BuildCurrentCollectionModel();
+    if (!catalog::CanActivate(model, request.petId)) {
+        SDL_Log("nimvlets: Collection: '%s' cannot be activated (locked or unknown) -- ignoring", request.petId.c_str());
+        return;
+    }
+    const catalog::PetIdentity target{request.petId, request.variantId};
+    if (target == activeCatalogIdentity_) {
+        return;  // ya está en el escritorio -- no-op
+    }
+    if (TrySwitchActivePet(target)) {
+        productWindow_.SetActivePreview(
+            activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
+        PushCollectionModelToProductWindow();
+        PushShellState();
+    }
+}
+
+void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
+    const auto action = static_cast<platform::ShellAction>(shellActionCode);
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    switch (action) {
+        case platform::ShellAction::kTogglePetVisibility:
+            petHidden_ = !petHidden_;
+            if (petHidden_) {
+                SDL_HideWindow(window_);
+            } else {
+                SDL_ShowWindow(window_);
+                MarkNeedsRedraw(nowMs);
+            }
+            SDL_Log("nimvlets: pet window %s (application still running)", petHidden_ ? "hidden" : "shown");
+            PushShellState();
+            break;
+
+        case platform::ShellAction::kOpenCollection:
+            OpenProductWindow();
+            break;
+
+        case platform::ShellAction::kToggleLockPosition:
+            appState_.lockPosition = !appState_.lockPosition;
+            persistenceScheduler_.MarkDirty(nowMs);
+            SDL_Log("nimvlets: pet position %s", appState_.lockPosition ? "LOCKED (drag disabled)" : "unlocked");
+            PushShellState();
+            break;
+
+        case platform::ShellAction::kSetSizeSmall:
+        case platform::ShellAction::kSetSizeMedium:
+        case platform::ShellAction::kSetSizeLarge: {
+            const core::PetSizeChoice choice = action == platform::ShellAction::kSetSizeSmall
+                                                   ? core::PetSizeChoice::kSmall
+                                                   : (action == platform::ShellAction::kSetSizeLarge
+                                                          ? core::PetSizeChoice::kLarge
+                                                          : core::PetSizeChoice::kMedium);
+            appState_.sizeChoice = core::PetSizeChoiceId(choice);
+            persistenceScheduler_.MarkDirty(nowMs);
+            ApplyPetWindowMetrics();
+            SDL_Log("nimvlets: pet size -> %s (%dx%d on screen)", appState_.sizeChoice.c_str(),
+                    EffectiveCanvasWidth(), EffectiveCanvasHeight());
+            PushShellState();
+            break;
+        }
+
+        case platform::ShellAction::kSetOpacity100:
+        case platform::ShellAction::kSetOpacity85:
+        case platform::ShellAction::kSetOpacity70:
+        case platform::ShellAction::kSetOpacity55: {
+            const int pct = action == platform::ShellAction::kSetOpacity100
+                                ? 100
+                                : (action == platform::ShellAction::kSetOpacity85
+                                       ? 85
+                                       : (action == platform::ShellAction::kSetOpacity70 ? 70 : 55));
+            appState_.opacityPercent = static_cast<std::uint32_t>(pct);
+            persistenceScheduler_.MarkDirty(nowMs);
+            SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
+            SDL_Log("nimvlets: pet opacity -> %d%%", pct);
+            PushShellState();
+            break;
+        }
+
+        case platform::ShellAction::kQuit:
+            SDL_Log("nimvlets: quit requested from the quick menu");
+            running = false;
+            break;
+    }
 }
 
 void SpikeApp::RunDevSwitchSmokeTestIfRequested() {
@@ -751,6 +946,14 @@ void SpikeApp::RunDevHoverSmokeTestIfRequested() {
 
 void SpikeApp::Shutdown() {
     FlushPersistedState();
+
+    // Product UI + System Shell primero: cada uno con su propio
+    // renderer/recursos nativos, independientes de la ventana del pet.
+    productWindow_.Close();
+    if (systemShell_) {
+        systemShell_->Shutdown();
+        systemShell_.reset();
+    }
 
     // Antes de destruir el renderer: la textura activa debe morir
     // primero (SDL exige que ninguna textura sobreviva a su renderer).
@@ -990,9 +1193,38 @@ void SpikeApp::UpdateClickThrough(bool cursorInsideWindow, bool cursorOverOpaque
 }
 
 void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
+    // Ruteo del Product UI: los eventos de ESA ventana se manejan
+    // aparte y NUNCA terminan la app (block brief §4/§18). Cerrar la
+    // Collection solo libera sus recursos; el runtime del pet sigue.
+    if (productWindow_.IsOpen()) {
+        const productui::ProductWindowEvent pe = productWindow_.HandleEvent(event);
+        if (pe.consumed) {
+            if (pe.hasActivate) {
+                HandleActivateRequest(pe.activate);
+            }
+            if (pe.closeRequested) {
+                productWindow_.Close();
+            }
+            return;
+        }
+    }
+
+    // Acción del menú rápido nativo, llegada como SDL_EVENT_USER en el
+    // hilo principal (ver platform::SystemShell).
+    if (shellUserEventType_ != 0 && event.type == shellUserEventType_) {
+        HandleShellAction(event.user.code, running);
+        return;
+    }
+
     switch (event.type) {
         case SDL_EVENT_QUIT:
+            running = false;
+            break;
+
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            // Solo la ventana del pet llega acá (la del Product UI ya se
+            // filtró arriba). Es borderless y sin botón de cerrar, pero
+            // si el window system igual manda un close, se respeta.
             running = false;
             break;
 
@@ -1080,7 +1312,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                     }
                 }
 
-                if (dragClassifier_.IsDragging()) {
+                // Block 06 §16: con la posición BLOQUEADA el gesto sigue
+                // clasificándose (un click corto sigue contando) pero la
+                // ventana no se mueve. Hover, click-through y animaciones
+                // quedan intactos porque nada más de esta rama cambia.
+                if (dragClassifier_.IsDragging() && core::PetDragAllowed(appState_.lockPosition)) {
                     float globalX = 0.0f;
                     float globalY = 0.0f;
                     SDL_GetGlobalMouseState(&globalX, &globalY);
@@ -1141,6 +1377,10 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 animController_->TriggerClick(NextUniformRandom01(), nowMs);
                 MarkNeedsRedraw(nowMs);
                 RearmAmbientDeadline(nowMs);  // un click es una interacción real -- ver el comentario del campo
+                // Si la Collection está abierta, el balance visible se
+                // actualiza en vivo (block brief §13). No-op si está
+                // cerrada.
+                PushCollectionModelToProductWindow();
                 SDL_Log(
                     "nimvlets: click #%d this session (balance: %llu)",
                     clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
@@ -1178,6 +1418,39 @@ int SpikeApp::Run() {
     RunDevDirectionSmokeTestIfRequested();
     RunDevClickSmokeTestIfRequested();
     RunDevHoverSmokeTestIfRequested();
+
+    // Mecanismo solo-DEV (Block 06): abre la Collection al arrancar,
+    // para QA / capturas de pantalla sin tener que clickear el menú de
+    // la barra. Ausente/vacía: no-op — la Collection solo se abre desde
+    // el menú rápido, exactamente como en producción. Ver README.md.
+    if (const char* openCol = std::getenv("NIMVLETS_DEV_OPEN_COLLECTION");
+        openCol != nullptr && openCol[0] != '\0' && openCol[0] != '0') {
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_OPEN_COLLECTION (opening Collection at startup)");
+        OpenProductWindow();
+        // Si el valor es un petId presente en el catálogo, además se
+        // abre su detalle (para capturas de QA de los estados de
+        // detalle).
+        const std::string spec(openCol);
+        if (spec != "1") {
+            for (const catalog::CatalogEntry& entry : catalog_.Entries()) {
+                if (entry.identity.petId == spec) {
+                    productWindow_.OpenDetailForQA(spec);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para
+    // capturar la Collection sin la ventana always-on-top del pet en el
+    // cuadro. Equivale a elegir "Hide Nimvlet" en el menú. Ver README.md.
+    if (const char* hidePet = std::getenv("NIMVLETS_DEV_HIDE_PET");
+        hidePet != nullptr && hidePet[0] != '\0' && hidePet[0] != '0') {
+        petHidden_ = true;
+        SDL_HideWindow(window_);
+        PushShellState();
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_HIDE_PET (pet window hidden at startup)");
+    }
 
     bool running = true;
 
@@ -1327,6 +1600,15 @@ int SpikeApp::Run() {
         if (usingPollDrivenClickThrough_ && clickThroughSamplingActive_ &&
             afterMs >= hoverScheduler_.NextFrameDeadline(afterMs)) {
             PollHover();
+        }
+
+        // Product UI: redibuja SOLO si su vista está sucia o hubo un
+        // EXPOSED (event-driven, sin loop ni polling — block brief §19).
+        // No-op barato cuando la Collection está cerrada, y no toca el
+        // cálculo de waitMs de arriba, así que el idle del pet con la
+        // Collection cerrada es idéntico al de antes de este bloque.
+        if (productWindow_.IsOpen()) {
+            productWindow_.RenderIfNeeded();
         }
     }
 
