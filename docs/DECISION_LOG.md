@@ -3768,3 +3768,108 @@ re-export de `lie_to_sit` en Ludo cuyo root-motion cierre contra
 `sit_to_lie` -- la recomendación que DEC-101 ya hacía y que sigue en
 pie. La hembra queda con una mejora real y medible, y su residual
 (5.32px, ~3.2pt en un pet de 185pt) es probablemente ya imperceptible.
+
+### DEC-105 — `lie_to_sit` terminal: sustitución de cola reemplazada por traslación rígida de los frames autorados reales
+**Status:** DECIDIDO · Block 05, pasada de corrección posicional final.
+
+**Contexto.** QA sobre DEC-101 (que substituía los últimos N frames de
+`lie_to_sit` por copias congeladas de la base sentada): "the wolf is
+already almost/fully seated but is located a few pixels away from the
+correct stable seated position... TAKE THE EXISTING AUTHORED FRAME AND
+DRAW/COMPOSE IT A FEW PIXELS TO THE CORRECT X/Y LOCATION" -- explícita
+la petición de trasladar, no reemplazar. El owner rechaza otro
+re-export de Ludo, otra vez.
+
+**Mecanismo, genérico.** Nuevo campo declarativo por-animación,
+`terminal_rigid_translation: {start_frame, dx, dy}`. Desde
+`start_frame` en adelante, el compilador suma `(dx, dy)` a la
+colocación de CADA frame en pixeles del frame COMPILADO -- los mismos
+pixeles autorados, compuestos en otro lugar del mismo canvas de
+trabajo compartido. Nunca escala, nunca interpola, nunca depende del
+índice del frame más allá de este único corte binario: exactamente DOS
+offsets posibles en toda la animación (`None` antes de `start_frame`,
+`(dx, dy)` desde ahí), verificado interceptando `_compile_frame()`
+real. Nunca toca un frame ya cubierto por
+`first_frame_is_state_base`/`last_frame_is_state_base` (DEC-099): esos
+siguen usando el archivo Y la colocación exactos de su base, sin
+intervención.
+
+Esto NO es la interpolación por-frame que DEC-097 retiró: aquella
+calculaba un offset DISTINTO para cada frame (una función continua del
+índice) para forzar una continuidad de root-motion que el export no
+tiene, y produjo el "todo el personaje deriva por la ventana" que QA
+rechazó. Acá hay exactamente DOS valores constantes, la misma
+distinción que ya regía `content_scale`/`stable_pose_tail_frames`.
+
+**Prueba matemática de por qué el K óptimo es el MISMO que en DEC-104.**
+Anclar el frame K contra la base sentada (`dx,dy = base -
+centroide(frame K)`, lo que este mecanismo hace) produce en el borde
+K-1 -> K EXACTAMENTE el mismo salto (`|base - centroide(frame K-1)|`)
+que sustituir K directamente por la base -- la posición de K-1 no
+cambia en ninguno de los dos esquemas. Verificado: la búsqueda
+exhaustiva de DEC-104 (K=17 macho, K=21 hembra, bajo el mismo criterio
+"minimizar distancia sujeto a paso de entrada > 0.5px") sigue siendo
+óptima acá, re-confirmada con un test que recompila y reproduce la
+búsqueda completa sobre el pack de referencia SIN la corrección.
+
+**dx/dy medidos por dirección, nunca asumidos por espejo.** El brief
+lo exige explícitamente ("Do not assume. Verify from the compiled
+packs"): se midieron los dos runtime directions por separado sobre el
+pack YA compilado.
+
+| variante | dirección | dx | dy |
+|---|---|---|---|
+| macho | right | +23.444248 | -6.326784 |
+| macho | left | -23.516887 | -6.325220 |
+| hembra | right | -1.714820 | -5.111141 |
+| hembra | left | +1.503224 | -5.095938 |
+
+`dx` se invierte de signo entre direcciones (el espejado horizontal
+invierte X), pero NO es exactamente simétrico -- macho: 23.444 vs
+23.517, una diferencia real de 0.07px, la asimetría genuina del
+contenido, no un artefacto de redondeo. `dy` mantiene signo y magnitud
+similar entre direcciones (el espejado es horizontal, no vertical).
+
+**Resultado: el salto NO se redujo -- lo que se muestra después SÍ
+cambió.** Midiendo distancia a la base sentada por frame, ANTES (con
+DEC-104, sustitución):
+
+| macho | f016 | f017 | f018 | ... | f023 | f024 |
+|---|---|---|---|---|---|---|
+| distancia | 24.46px | 0.00px (=base) | 0.00px | ... | 0.00px | 0.00px (=base) |
+
+DESPUÉS (esta pasada, traslación):
+
+| macho | f016 | f017 | f018 | f019 | f020 | f021 | f022 | f023 | f024 |
+|---|---|---|---|---|---|---|---|---|---|
+| distancia | 24.46px | 0.55px | 0.84px | 1.34px | 1.72px | 1.88px | 1.94px | 2.08px | 0.00px (=base) |
+
+El salto en el borde 16->17 sigue midiendo ~24px (right: 23.95px,
+left: 24.90px) -- EL PISO GEOMÉTRICO de DEC-104 no desapareció, y no
+podía: es el mismo argumento matemático (la posición de frame16 no
+cambia bajo ningún esquema). Lo que sí cambió es que, DESDE el frame
+17 en adelante, el lobo ya está VISIBLEMENTE cerca de la posición
+correcta (0.5-2.1px, no 24-25px) -- y esos pixeles son la animación
+REAL, no una copia congelada: los pasos entre 17-23 (0.07-0.56px) son
+la misma micro-variación autorada que ya existía en el export
+original, ahora VISIBLE en vez de oculta detrás de una sustitución.
+Hembra: mismo patrón, salto ~5.3px en el borde 20->21, luego 0.3-0.8px
+de distancia hasta el frame final.
+
+**Sobre "does it actually get smaller, not just relocated".** La
+respuesta honesta: el ÚNICO salto (16->17 macho, 20->21 hembra) no se
+redujo respecto de DEC-104 -- es el mismo piso geométrico. Lo que se
+ganó es que YA NO hay una segunda discontinuidad perceptual (una
+"meseta" de pixeles congelados en la posición correcta que se sentía
+distinta de la animación real que la precedía). Antes: [movimiento real]
+-> [salto] -> [pose estática repetida 7-8 veces]. Ahora: [movimiento
+real] -> [salto] -> [movimiento real, minúsculo, en la posición
+correcta] -> [pose exacta]. Es la misma magnitud de salto, con
+animación auténtica a ambos lados en vez de solo uno.
+
+**El canvas de trabajo compartido no necesitó crecer.** El margen ya
+calculado por `compute_frame_normalization_plan()` para cada entrada
+resultó suficiente para absorber el desplazamiento de ~24-32px
+(working-canvas, antes del downscale de runtime) sin disparar la
+verificación de "contenido excede el canvas" (`_compile_frame()`,
+DEC-075) -- no hizo falta ninguna lógica de crecimiento adicional.

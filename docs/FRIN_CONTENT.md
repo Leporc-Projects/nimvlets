@@ -910,3 +910,53 @@ del macho hace falta un re-export de `lie_to_sit` en Ludo cuyo
 root-motion cierre contra `sit_to_lie` -- la recomendación de DEC-101
 sigue en pie. La hembra queda con una mejora real; su residual
 (~3.2pt en un pet de 185pt) es probablemente ya imperceptible.
+
+## 15. Pasada de corrección posicional final (Block 05): `lie_to_sit` traslada en vez de sustituir
+
+QA sobre §14: el salto terminal seguía siendo visible, pero esta vez la
+observación fue más específica -- cerca del final, el lobo YA está
+casi/completamente sentado, solo desplazado unos pixeles de la
+posición correcta. La petición: tomar ese frame autorado real y
+componerlo unos pixeles más allá, no reemplazarlo por una copia
+congelada de la base.
+
+### 15.1 El mecanismo
+
+`terminal_rigid_translation` (DEC-105): desde el frame K declarado, se
+suma un `(dx, dy)` CONSTANTE a la colocación de cada frame -- los
+mismos pixeles autorados, en otro lugar del canvas. K sigue siendo el
+mismo que §14 ya había re-derivado (17 macho, 21 hembra): matemáticamente,
+anclar un frame contra la base sentada produce el mismo salto en el
+borde anterior que sustituirlo directamente, así que el K óptimo no
+cambia -- solo QUÉ pixeles se muestran desde ahí en adelante.
+
+`dx`/`dy` se midieron por separado para las dos direcciones runtime
+sobre el pack ya compilado, sin asumir simetría de espejo:
+
+| variante | right (dx, dy) | left (dx, dy) |
+|---|---|---|
+| macho | (+23.44, -6.33) | (-23.52, -6.33) |
+| hembra | (-1.71, -5.11) | (+1.50, -5.10) |
+
+### 15.2 El resultado, medido con honestidad
+
+El salto ÚNICO (borde K-1 -> K) no se redujo -- sigue siendo ~24px
+(macho) / ~5.3px (hembra), el mismo piso geométrico de §14, y no podía
+ser distinto: es el mismo argumento de posición. Lo que cambió es qué
+se ve DESPUÉS de ese salto: antes, 7-8 frames (macho) idénticos entre
+sí, una copia congelada de la base; ahora, esos mismos frames muestran
+la micro-variación autorada real del export (pasos de 0.07-0.56px), ya
+visiblemente cerca de la posición correcta (0.5-2.1px, no 24-25px).
+
+Antes: [movimiento real] -> [salto] -> [pose estática repetida].
+Ahora: [movimiento real] -> [salto] -> [movimiento real minúsculo, ya
+en la posición correcta] -> [base exacta].
+
+### 15.3 Sin re-export, otra vez
+
+Como en §13/§14, no se tocó ningún PNG fuente. La traducción es
+puramente de composición: los mismos bytes RGBA, compuestos en otra
+posición del mismo canvas de trabajo compartido -- verificado por test
+(`test_frames_from_k_preserve_rgba_content_translated_only`): el
+multiconjunto de valores RGBA de cada frame traducido es idéntico al
+de la versión sin traducir.
