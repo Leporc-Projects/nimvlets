@@ -5,9 +5,11 @@
 #include "AppStateStoreTest.h"
 #include "ClickAccountingTest.h"
 #include "ClickThroughPolicyTest.h"
+#include "CollectionLayoutTest.h"
 #include "CollectionModelTest.h"
 #include "DirectionTest.h"
 #include "DisplayControlsTest.h"
+#include "FocusListTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
 #include "HoverDwellTrackerTest.h"
@@ -42,6 +44,8 @@ int main() {
     nimvlets::tests::RegisterPetCatalogLoaderTests(runner);
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
     nimvlets::tests::RegisterCollectionModelTests(runner);
+    nimvlets::tests::RegisterCollectionLayoutTests(runner);
+    nimvlets::tests::RegisterFocusListTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
     nimvlets::tests::RegisterRendererPolicyTests(runner);

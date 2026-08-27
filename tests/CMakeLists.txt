@@ -51,6 +51,10 @@ add_executable(nimvlets_tests
   ClickThroughPolicyTest.cpp
   CollectionModelTest.h
   CollectionModelTest.cpp
+  CollectionLayoutTest.h
+  CollectionLayoutTest.cpp
+  FocusListTest.h
+  FocusListTest.cpp
   DisplayControlsTest.h
   DisplayControlsTest.cpp
   DirectionTest.h
@@ -67,6 +71,11 @@ target_include_directories(nimvlets_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAK
 # src/platform/CMakeLists.txt y src/platform/LinuxBackendPolicy.h — así
 # que LinuxBackendPolicyTest.cpp corre en cualquier host, incluido uno
 # sin Linux real.
-target_link_libraries(nimvlets_tests PRIVATE nimvlets_persistence nimvlets_catalog nimvlets_platform_policy nimvlets_warnings)
+# nimvlets_catalog llega transitivamente por nimvlets_productui_core
+# (PUBLIC), y nimvlets_content/core por debajo de ese — enlistarlos otra
+# vez solo produce el warning "duplicate library" (misma lección que
+# src/app/CMakeLists.txt). nimvlets_persistence y nimvlets_platform_policy
+# NO tienen ese camino transitivo, así que se enlazan explícitamente.
+target_link_libraries(nimvlets_tests PRIVATE nimvlets_persistence nimvlets_productui_core nimvlets_platform_policy nimvlets_warnings)
 
 add_test(NAME nimvlets_unit_tests COMMAND nimvlets_tests)

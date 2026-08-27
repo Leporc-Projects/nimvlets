@@ -49,6 +49,7 @@ add_subdirectory(src/content)
 add_subdirectory(src/catalog)
 add_subdirectory(src/persistence)
 add_subdirectory(src/graphics)
+add_subdirectory(src/productui)
 
 # nimvlets_platform_policy es lógica pura (sin SDL) y se compila en
 # cualquier OS -- a diferencia de los tres adapters de abajo, uno de
