@@ -738,3 +738,78 @@ porcentuales peor que eso.
 **Esto no se declara resuelto.** Es deuda de export, y la única forma de
 quitarla es re-exportar el arte a una escala de mundo consistente. La
 QA visual del owner es la puerta de aceptación, no esta medición.
+
+## 20. Pasada de consistencia visual final (Block 05): la causa real del "levemente más gordo"
+
+QA del owner tras la pasada anterior: todo lo demás correcto, pero
+Bunny **todavía** se ve muy levemente más ancho/grande mientras anima
+que quieto. Sutil, pero visible.
+
+### 20.1 La causa
+
+Los exports de Bunny traen al conejo con una RELACIÓN DE ASPECTO
+distinta a la de la pose base, de forma constante. Medido con momentos
+ponderados por alpha sobre los PNG nativos, en las dos puntas de reposo
+de cada secuencia (los únicos frames donde la pose es la misma que la
+de la base):
+
+| secuencia | punta f000 | punta f024 |
+|---|---|---|
+| `groom` | -1.49% | -1.28% |
+| `click_reaction` | -2.37% | -2.20% |
+| `idle_breathing` | 0.00% (mismo archivo que la base) | +1.19% |
+
+Que las dos puntas de `groom` y `click` coincidan es la firma de una
+propiedad constante del export. `idle_breathing` es el contraste que lo
+demuestra: comparte export con la base, así que su desacuerdo real es
+cero, y el +1.19% de su última punta es el conejo RESPIRANDO -- pose,
+no error. Por eso `idle_breathing` no recibe ninguna corrección.
+
+Con una escala uniforme, ningún factor casa los dos ejes: el conejo se
+muestra a la vez algo más ancho y algo más bajo. Eso es exactamente lo
+que el owner describe.
+
+### 20.2 La corrección
+
+`groom` y `click` declaran `match_aspect_to_stable_poses` (ver DEC-100).
+El compilador deriva un par constante (scale_x, scale_y) de la
+correspondencia de poses estables ya declarada -- sin números mágicos en
+este generador -- y lo aplica a toda la secuencia. Constante para todos
+los frames: no es deformación de poses, es devolver la secuencia al
+sistema de proporciones del propio Bunny.
+
+Resultado (error de aspecto tal como se muestra; positivo = más ancho
+relativo a alto):
+
+| secuencia | antes | después |
+|---|---|---|
+| `click` | +2.4% a +5.2% | **media -0.57%** |
+| `groom` | +1.3% a +3.8% | **media +1.29%** |
+
+### 20.3 Efecto secundario: se eliminó una duplicación que era un bug latente
+
+Este generador construía a mano su propio plan de normalización para
+derivar el canvas lógico, duplicando lo que
+`compile_pet_pack._build_content_plan()` ya calcula. En cuanto una
+acción declaró una corrección de aspecto, la copia local siguió
+calculando la escala vieja y el canvas del manifest quedó derivado de
+un canvas de trabajo que ya no era el real (425x559 contra 418x563).
+Ahora hay una sola fuente de verdad, como en
+`tools/generate_frin_pack.py`.
+
+El canvas lógico pasa de 134x176 a 131x176, pero el TAMAÑO EN PANTALLA
+del conejo no cambia de forma apreciable: su contenido visible pasa de
+~115.1x160.2pt a ~114.4x159.1pt (menos de 0.7% en los dos ejes). El
+tamaño aprobado se preserva.
+
+### 20.4 Límite honesto
+
+`groom` conserva ~+1.3% de media. Sus puntas de reposo justifican una
+corrección de -1.39%, pero el cuerpo del clip pide ~-2.7%. Derivar del
+promedio del clip está descartado con evidencia: `idle_breathing`, cuya
+corrección correcta es exactamente cero, daría +4.38% por ese método.
+Las puntas de reposo son el único estimador sano.
+
+Referencia de magnitud, no de aprobación: las propias animaciones de
+Nidir -- aprobadas como perfectas -- muestran +2.31% y +2.70% en su
+frame más parecido al reposo. La QA visual del owner es la única puerta.

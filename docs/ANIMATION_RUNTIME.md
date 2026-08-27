@@ -987,3 +987,84 @@ puede quitar sin escala no uniforme, que deformaría poses reales. Las
 opciones honestas son convivir con ello o re-exportar el arte. Ver
 DEC-099 para las mediciones completas y los dos métodos independientes
 con que se confirmaron.
+
+## 20. Corrección de export constante por secuencia (Block 05, pasada de consistencia visual final)
+
+La §19 dejó las PUNTAS exactas. Esta sección cubre lo que queda en
+medio: un export cuya geometría o cuyo color no coinciden con la pose
+base del pet, de forma CONSTANTE.
+
+La distinción que gobierna todo acá:
+
+- **Variación autorada** — la cola se abre, la cabeza sube, el conejo
+  respira. Cambia entre frames. Es arte. No se toca nunca.
+- **Desajuste de export** — el mismo personaje traído a otra escala de
+  aspecto o a otra exposición, igual en TODOS los frames. No cambia
+  entre frames. Es un error de coordenadas, y sí se corrige.
+
+Distinguirlas no es una heurística: se mide en las dos puntas de reposo
+declaradas, que son los únicos frames donde se sabe que la pose es la
+misma que la de la base. Si las dos puntas dan el mismo desacuerdo, es
+del export; si difieren, es pose.
+
+### 20.1 `match_aspect_to_stable_poses` — UN par (scale_x, scale_y)
+
+Hasta esta pasada, la escala de una secuencia era obligatoriamente
+uniforme, para no deformar poses. Medido, esa restricción era justo lo
+que impedía el arreglo: cuando un export trae al personaje con otra
+RELACIÓN DE ASPECTO, ningún factor uniforme casa los dos ejes, y la
+secuencia entera se ve más ancha y más baja que el pet quieto -- el
+"se ve más gordo mientras anima" que QA reportó tres pasadas seguidas.
+
+Con el flag, el compilador deriva un par constante de la
+correspondencia de poses estables y lo aplica a toda la secuencia.
+Constante para todos los frames, nunca por frame, nunca interpolado.
+No deforma la pose: la devuelve al sistema de proporciones de la base.
+
+Peor caso medido del proyecto: `howl` de Frin macho, **-3.90%** de
+desacuerdo entre ejes, idéntico en sus dos puntas, y confirmado por
+triangulación contra un tercer export (`tail_greet`, que coincide con
+la base dentro del 0.20%).
+
+### 20.2 `stable_pose_tail_frames` — la cola ya llegó
+
+Un export puede llegar a la pose de destino y quedarse quieto varios
+frames. Si su root-motion no cierra contra la base, esos frames son el
+personaje INMÓVIL EN EL LUGAR EQUIVOCADO, y después un salto -- que es
+exactamente el peor caso perceptivo, porque un salto en movimiento se
+disimula y uno en quietud no.
+
+Declarar cuántos frames finales ya son la pose estable deja que el
+compilador los tome del archivo de la base. No se sintetiza arte, no se
+inventa movimiento, no se pierde ningún frame autorado que todavía se
+esté moviendo, y el clip conserva su cantidad de frames y su duración.
+
+### 20.3 `match_color_to_stable_poses` — UNA ganancia RGB
+
+Mismo patrón para la exposición: si un export viene globalmente más
+oscuro que la pose base, se deriva una ganancia constante de la misma
+correspondencia y se aplica a toda la secuencia. Alpha nunca se toca,
+la ganancia no varía entre frames (nada de auto-exposición), y las
+puntas sustituidas no la reciben porque ya SON los pixeles de la base.
+
+La variación de sombreado del medio del clip se conserva a propósito:
+aplanarla sería normalizar brillo por frame, que produce parpadeo y
+borra intención artística.
+
+### 20.4 Cómo medir "tamaño" y "color" entre dos exports
+
+- Tamaño por eje: `alpha_weighted_sigma()` — momentos de segundo orden
+  ponderados por alpha, la generalización anisotrópica de
+  `alpha_rms_radius()` (DEC-088). Un pixel de antialiasing suelto mueve
+  un bounding box; no mueve un momento.
+- Color: `interior_mean_rgb()` — solo pixeles con alpha>=250. El borde
+  antialiaseado arrastra la media cuando dos exports tienen distinta
+  resolución nativa, y excluirlo vuelve la medición inmune a si el
+  borde está premultiplicado o no.
+
+### 20.5 Lo que sigue prohibido, sin cambios
+
+Nada de esto reabre lo que DEC-097/099 cerraron. El compilador sigue
+sin inventar root-motion: ninguna transforma cambia a lo largo de un
+clip, ni de posición ni de escala ni de color. Todo lo que esta sección
+agrega es constante por secuencia, y opt-in desde el contenido.

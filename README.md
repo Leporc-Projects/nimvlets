@@ -49,8 +49,15 @@ se retiró tras QA ([§17](docs/ANIMATION_RUNTIME.md)). La variación de
 silueta autorada (una cola que se abre, una cabeza que se levanta) es
 arte y no se corrige. Cuando un export no cierra geométricamente, el
 residual se mide y se reporta como deuda de contenido en vez de
-disimularse (`lie_to_sit` de Frin, y la anisotropía de export de
-`howl` — ver [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §12).
+disimularse. Cuando en cambio el desajuste es CONSTANTE en toda una
+secuencia —un export que trae al personaje con otra relación de aspecto
+o con otra exposición— el contenido puede declararlo y el compilador
+deriva **una** corrección fija para ese clip entero (un par
+`(scale_x, scale_y)`, o una ganancia RGB con alpha intacto): nunca por
+frame, nunca interpolada, y derivada de la correspondencia de poses
+estables, nunca de los frames intermedios, que cambian de silueta a
+propósito — ver [`docs/ANIMATION_RUNTIME.md`](docs/ANIMATION_RUNTIME.md)
+§20 y [`docs/FRIN_CONTENT.md`](docs/FRIN_CONTENT.md) §13.
 Esto explícitamente *no* es
 todavía el producto terminado — ver
 [`docs/PLATFORM_SPIKE.md`](docs/PLATFORM_SPIKE.md) para lo que está

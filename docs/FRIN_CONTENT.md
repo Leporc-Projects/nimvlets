@@ -760,3 +760,97 @@ queda del "se ve más gordo mientras anima". No se puede quitar sin
 escala no uniforme, que deformaría la pose real del aullido. Convivir
 con ello o re-exportar son las dos opciones honestas; el owner eligió
 no re-exportar.
+
+## 13. Pasada de consistencia visual final (Block 05): aspecto de `howl`, frontera de `lie_to_sit`, color de `tail_greet`
+
+Tres defectos distintos, tres causas distintas, tres correcciones
+distintas -- y una secuencia que deliberadamente no se toca.
+
+### 13.1 `howl` se veía más gordo: el export usa otra relación de aspecto
+
+Medido con momentos ponderados por alpha sobre los PNG nativos, en las
+dos puntas de reposo (los únicos frames cuya pose se sabe igual a la de
+la base):
+
+| secuencia | punta f000 | punta f024 |
+|---|---|---|
+| macho `howl` | **-3.90%** | **-3.90%** |
+| hembra `howl` | -2.13% | -2.05% |
+| macho `tail_greet` | +0.20% | +0.21% |
+| hembra `tail_greet` | -0.71% | -0.76% |
+
+Que dos frames autorados separados por 3 segundos den EL MISMO valor
+(-3.90% contra -3.90%) no puede ser una coincidencia de pose.
+
+**Triangulación, la prueba decisiva.** Frin macho tiene tres exports
+independientes de la misma pose sentada de reposo. Entre sí: base ↔
+`tail_greet` = **-0.20%** (coinciden), base ↔ `howl` = **+4.05%**,
+`tail_greet` ↔ `howl` = **+4.26%**. Dos exports independientes están de
+acuerdo y el tercero discrepa con los dos: el anómalo es `howl`.
+
+`howl` declara `match_aspect_to_stable_poses` (DEC-100). Resultado
+medido sobre el pack compilado: de +2.7%..+5.5% de "más ancho relativo
+a alto" a **media -0.64%, rango [-1.43%, +1.49%]** (macho) y **media
++0.84%** (hembra).
+
+### 13.2 `tail_greet` NO se corrige geométricamente -- es el control negativo
+
+QA dijo que su geometría es la mejor de Frin, y la medición coincide:
+su export ya está dentro del 0.2%-0.8% de la pose sentada. Su escala
+sigue siendo perfectamente uniforme y no declara ninguna corrección de
+aspecto; hay un test que lo fija.
+
+Sus oscilaciones de aspecto en medio del clip (hasta -21%) son la cola
+abriéndose: animación real. De paso, eso demuestra por qué la
+derivación NUNCA usa frames intermedios -- ahí, medir sería confundir
+animación con error.
+
+### 13.3 `lie_to_sit`: el defecto era quietud en el lugar equivocado
+
+QA: cerca del final, el frame autorado está visiblemente en otro sitio
+que la pose sentada final, y después aparece la base en el lugar
+correcto -- sin que nadie moviera la ventana.
+
+Perfilando el pack frame a frame apareció la forma exacta: el lobo
+termina de levantarse y **se queda quieto** (pasos de centroide
+<=0.55px desde f017 en el macho, <=1.04px desde f020 en la hembra) pero
+quieto a ~26px / ~6px del lugar donde está la pose sentada real, porque
+el root-motion de este export no cierra contra el de `sit_to_lie`.
+Recién al terminar saltaba. Casi un segundo inmóvil en el lugar
+equivocado y después un teletransporte: por eso salta a la vista.
+
+La reparación es de CONTENIDO (`stable_pose_tail_frames`, DEC-101), no
+de movimiento: macho 8 frames finales, hembra 5, elegidos del perfil
+medido en el primer frame donde el lobo ya llegó Y dejó de moverse, de
+modo que ningún frame autorado que todavía se mueva se pierde. Los dos
+valores difieren porque los dos exports difieren.
+
+Resultado: ya no hay ningún frame con el lobo inmóvil fuera de lugar
+(desplazamiento posterior medido: 0.00px). El desajuste se reubicó a UN
+solo paso -- 24.46px (macho) / 5.59px (hembra) -- que ocurre mientras
+el lobo todavía se mueve. **La magnitud casi no bajó** (25.85 ->
+24.46); lo que cambió es cuándo ocurre.
+
+### 13.4 `tail_greet` se veía más oscuro: viene así del export, y solo en el macho
+
+Medido sobre pixeles interiores (alpha>=250, sin borde antialiaseado):
+`tail_greet` del macho está -2.5%/-2.8%/-2.4% (R/G/B) contra la pose
+sentada ya EN EL PNG FUENTE. El pipeline de compilación se midió fiel a
++0.15%, así que la causa no es el downscale, ni la compilación, ni el
+formato de textura, ni el blending. **Ningún cambio bajo `src/`.**
+
+La hembra está en -0.5%, dentro del ruido y del mismo orden que su
+propio `howl`, que nadie reportó: no se le aplica nada.
+
+`match_color_to_stable_poses` (DEC-102) deriva una ganancia RGB
+constante -- macho: (1.0265, 1.032, 1.024) -- de la misma
+correspondencia de poses estables. Alpha intacto, sin variación entre
+frames. Frames de reposo: -2.5% -> +0.2%. Mitad de clip: -3.9%/-5.0%/
+-4.1% -> -1.5%/-2.1%/-1.9%; ese resto es sombreado autorado y se
+conserva a propósito.
+
+### 13.5 `sit_to_lie` congelado
+
+Sin cambios: su interior autorado no se toca, sus dos puntas siguen
+compartiendo archivo real con `seated_base`/`lying_base`, su escala
+sigue siendo (1.0, 1.0) y no declara ninguna corrección.

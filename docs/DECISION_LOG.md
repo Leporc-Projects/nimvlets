@@ -3469,3 +3469,184 @@ del macho se muestra ~1.8% más ancho y ~1.8% más bajo que la base
 durante todo el clip. Eso es lo que queda del "se ve más gordo", y no
 se puede quitar sin deformar el arte. Las opciones honestas son
 convivir con ello o re-exportar; el owner eligió no re-exportar.
+
+### DEC-100 — Corrección de ASPECTO de export, constante por secuencia: la escala uniforme dejó de ser sagrada
+**Status:** DECIDIDO · Block 05, pasada de consistencia visual final.
+
+**Contexto.** Tras DEC-099 las puntas semánticas son exactas y las seis
+capas de aproximación están borradas, pero QA del owner seguía viendo
+lo mismo: Bunny "muy levemente más ancho/gordo" mientras anima, y
+`howl` de Frin "más gordo" que la pose sentada. `tail_greet`, en
+cambio, "geometría BUENA" -- el mejor de Frin. Nidir, perfecto.
+
+**Lo que las pasadas anteriores prohibían.** Escala no uniforme, para
+no deformar poses autoradas. Este brief levantó explícitamente esa
+restricción *si la medición prueba* que el export entero usa un sistema
+de proporciones distinto.
+
+**La medición.** Momentos de segundo orden ponderados por alpha
+(`alpha_weighted_sigma()`), sobre los PNG NATIVOS, comparando cada
+secuencia contra la pose base estable que su propio contenido declara.
+El desacuerdo entre ejes (`sx/sy - 1`) en las DOS puntas de reposo:
+
+| secuencia | punta f000 | punta f024 | ¿consistente? |
+|---|---|---|---|
+| nidir `click_reaction` | -0.30% | +0.06% | no (ruido, ~0) |
+| nidir `wing_stretch` | -0.69% | -0.56% | sí, pequeño |
+| bunny `groom` | -1.49% | -1.28% | **sí** |
+| bunny `click_reaction` | -2.37% | -2.20% | **sí** |
+| frin macho `howl` | **-3.90%** | **-3.90%** | **sí, exacto** |
+| frin macho `tail_greet` | +0.20% | +0.21% | sí, ~0 |
+| frin hembra `howl` | -2.13% | -2.05% | **sí** |
+| frin hembra `tail_greet` | -0.71% | -0.76% | sí, ~0 |
+| frin macho `lie_to_sit` | -1.45% | -1.44% | **sí** |
+
+Que dos frames autorados independientes, separados por 3 segundos de
+animación, den el MISMO desacuerdo es la firma de una propiedad
+constante del export -- no de una pose. Contraste directo:
+`idle_breathing` de Bunny, que comparte export con la base, da 0.00% y
++1.19% en sus dos puntas; ahí la diferencia SÍ es pose (el conejo
+respira).
+
+**Triangulación (la prueba decisiva).** Frin macho tiene TRES exports
+independientes de la misma pose sentada de reposo. Comparados entre sí
+por relación de aspecto: base ↔ `tail_greet` = **-0.20%** (coinciden);
+base ↔ `howl` = **+4.05%**; `tail_greet` ↔ `howl` = **+4.26%**. Dos
+exports independientes coinciden y el tercero discrepa con los dos: el
+sistema de proporciones anómalo es el de `howl`, no el de la base.
+
+**Verificación con frames intermedios.** Perfilando el clip entero,
+`howl` nunca cruza cero (-2.7% a -5.5% en los 25 frames), mientras
+`tail_greet` oscila entre -21% y +0.2% -- su cola se abre, y eso es
+animación real. Confirma dos cosas a la vez: que `howl` arrastra un
+offset constante, y que **medir frames intermedios para derivar una
+corrección sería confundir animación con error**. Por eso la derivación
+usa exclusivamente las dos puntas de reposo.
+
+**Decisión.** Nuevo campo declarativo por acción,
+`match_aspect_to_stable_poses`. Cuando está, el compilador deriva UN
+par constante (scale_x, scale_y) de la correspondencia de poses
+estables que el contenido YA declara (`first_frame_is_state_base` /
+`last_frame_is_state_base`) y lo aplica a toda la secuencia. Sin número
+mágico en ningún generador: el par sale de los pixeles.
+
+Requisitos duros: constante para todos los frames, nunca por frame,
+nunca interpolado, nunca progresivo. Esto NO es deformar una pose -- es
+lo contrario: devuelve la secuencia al sistema de proporciones de la
+pose base, del que su export se había ido.
+
+**Quién lo declara, y quién no.** Bunny `groom` y `click`; Frin
+`howl` (macho y hembra) y `lie_to_sit`. NO lo declaran: `tail_greet`
+(control negativo -- su geometría está aprobada por QA y su export ya
+coincide), `sit_to_lie` (congelado, y sus dos puntas comparten archivo
+real con las bases), `idle_breathing` de Bunny (comparte export con la
+base; su variación es respiración autorada), y NINGUNA secuencia de
+Nidir.
+
+**Resultado medido** (error de aspecto TAL COMO SE MUESTRA, sobre el
+pack compilado; positivo = se ve más ancho relativo a alto = "más
+gordo"):
+
+| secuencia | antes | después |
+|---|---|---|
+| frin macho `howl` | +2.7% a +5.5% | **media -0.64%, rango [-1.43, +1.49]** |
+| frin hembra `howl` | ~+2.1% | **media +0.84%** |
+| bunny `click` | +2.4% a +5.2% | **media -0.57%** |
+| bunny `groom` | +1.3% a +3.8% | **media +1.29%** |
+
+**Calibración honesta con el control aprobado.** Las propias
+animaciones de Nidir, que el owner llama perfectas, muestran +2.31%
+(`wing_stretch`) y +2.70% (`click_fire`) en su frame más parecido al
+reposo. Esa es la banda que el owner YA acepta, medida y no inventada.
+Las cuatro secuencias corregidas quedan dentro o por debajo. **Eso no
+prueba que el defecto se resolvió** -- lo prueba la QA visual del
+owner; sirve para saber qué magnitud es plausible.
+
+**Límite que queda.** `groom` de Bunny conserva ~+1.3% de media: sus
+puntas de reposo justifican una corrección de -1.39%, pero el cuerpo
+del clip pide ~-2.7%. Derivar del promedio del clip está descartado --
+`idle_breathing`, cuyo export es el de la base y cuya corrección
+correcta es exactamente cero, daría +4.38% por ese método. Las puntas
+de reposo son el único estimador sano.
+
+### DEC-101 — `lie_to_sit`: reparación de FRONTERA a nivel de contenido, no de movimiento
+**Status:** DECIDIDO · Block 05, pasada de consistencia visual final.
+
+**El defecto, esta vez identificado con precisión.** QA: "cerca del
+FINAL de la animación de levantarse, el frame autorado está visiblemente
+en otro lugar que la pose sentada final; después aparece la base
+sentada en el lugar correcto" -- sin que el usuario moviera la ventana.
+
+Perfilando el pack compilado frame a frame apareció la forma exacta del
+problema. El lobo termina de levantarse y **se queda quieto** varios
+frames (pasos de centroide <=0.55px desde f017 en el macho, <=1.04px
+desde f020 en la hembra) pero quieto a **~26px (macho) / ~6px (hembra)
+del lugar** donde está la pose sentada real, porque el root-motion de
+este export no cierra contra el de `sit_to_lie`. Recién al terminar
+saltaba a su sitio. Casi un segundo inmóvil en el lugar equivocado, y
+después un teletransporte: por eso se ve tanto.
+
+**Decisión.** Nuevo campo declarativo `stable_pose_tail_frames`: cuántos
+frames FINALES representan la pose estable declarada, no solo el
+último. El compilador los compila desde el archivo de esa base.
+
+Macho: 8 (f017..f024). Hembra: 5 (f020..f024). Distintos porque los dos
+exports son distintos -- se eligieron del perfil medido, en el primer
+frame donde el lobo ya llegó a la pose sentada Y dejó de moverse, de
+modo que **ningún frame autorado que todavía se mueva se pierde**.
+
+**Lo que esto NO hace:** no interpola, no suaviza, no recentra
+progresivamente, no mueve la ventana, no sintetiza arte nuevo, no toca
+un solo PNG fuente. El clip conserva sus 25 frames y sus 3.0s exactos.
+
+**Resultado.** Ya no queda ningún frame en que el lobo esté INMÓVIL en
+el lugar equivocado: desde que muestra la pose sentada, no se desplaza
+más (medido: 0.00px). El desajuste del export no desapareció -- se
+reubicó a UN solo paso (24.46px macho / 5.59px hembra) que ocurre
+mientras el lobo todavía está en movimiento (su propio paso autorado
+ahí es 2.90px / 2.58px). La magnitud del paso apenas bajó (25.85 ->
+24.46 en el macho); **lo que cambió es CUÁNDO ocurre**, y eso es lo que
+el owner reportó como el problema. La QA visual decide si alcanza.
+
+### DEC-102 — Ganancia de color constante por secuencia: `tail_greet` del macho viene más oscuro del export
+**Status:** DECIDIDO · Block 05, pasada de consistencia visual final.
+
+**Diagnóstico antes de tocar nada.** QA: `tail_greet` tiene buena
+geometría pero se ve algo más oscuro que la pose sentada. Se midió el
+color medio de los pixeles INTERIORES (alpha>=250) -- deliberadamente
+sin el borde antialiaseado, que arrastra la media cuando dos exports
+tienen distinta resolución nativa, y que de paso vuelve la medición
+inmune a si el borde está premultiplicado o no.
+
+| | R | G | B |
+|---|---|---|---|
+| macho `tail_greet` f000 vs base | -2.5% | -2.8% | -2.4% |
+| macho `tail_greet` f012 vs base | -3.9% | -5.0% | -4.1% |
+| macho `howl` f000 vs base | -0.3% | -0.3% | +0.2% |
+| hembra `tail_greet` f000 vs base | -0.4% | -0.7% | +0.4% |
+
+**Causa: el PNG fuente (A).** Descartadas las otras: el pipeline de
+compilación se midió fiel a **+0.12%/+0.15%/+0.18%** (fuente contra
+pack compilado, mismos pixeles interiores), así que no hay
+oscurecimiento por downscale ni por compilación; y como la medición es
+solo de interior, ni el formato de textura ni el blending ni el
+premultiplicado entran en juego. **Ningún cambio bajo `src/`.**
+
+Es un problema del MACHO. La hembra está en -0.5%, dentro del ruido y
+del mismo orden que su propio `howl` (que nadie reportó): no se le
+aplica nada, porque corregir ahí sería resamplear para nada.
+
+**Decisión.** Campo declarativo `match_color_to_stable_poses`: el
+compilador deriva UNA ganancia RGB constante de la misma correspondencia
+de poses estables, y la aplica a toda la secuencia sobre los pixeles
+nativos. Derivada para el macho: **(1.0265, 1.032, 1.024)**.
+
+Alpha nunca se toca. La ganancia no varía entre frames (nada de
+auto-exposición). Las puntas sustituidas NO la reciben: ya SON los
+pixeles de la base.
+
+**Resultado.** Frames de reposo del macho: -2.5% -> **+0.20%/+0.14%/
++0.06%**. Mitad de clip: -3.9%/-5.0%/-4.1% -> -1.5%/-2.1%/-1.9%. Ese
+resto es sombreado AUTORADO (el lobo gira, la cola tapa luz) y se
+conserva a propósito -- aplanarlo sería auto-exposición, que es
+justamente lo prohibido.
