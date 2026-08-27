@@ -972,7 +972,7 @@
           "first_frame_is_state_base": "lying",
           "last_frame_is_state_base": "seated",
           "match_aspect_to_stable_poses": true,
-          "stable_pose_tail_frames": 5
+          "stable_pose_tail_frames": 4
         }
       ]
     }

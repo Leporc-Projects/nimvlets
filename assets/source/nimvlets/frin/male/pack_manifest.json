@@ -3,7 +3,7 @@
   "display_name": "Frin",
   "variant_group": "frin",
   "alpha_hit_threshold": 128,
-  "visual_scale": 1.05,
+  "visual_scale": 1.1025,
   "content_version": "block05-frin-1",
   "runtime_max_frame_dimension": 320,
   "normalize_visual_scale": true,
