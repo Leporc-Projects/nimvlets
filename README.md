@@ -5,9 +5,11 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 05 — Behavior Runtime + Frin Vertical
-Slice + Baseline Cleanup**, construido sobre Block 04.3 (corrección
-post-QA de Nidir/Bunny), Block 04.2 (assets reales + pipeline
+Este repositorio está en **Block 06 — Product Shell + Collection +
+Native Quick Menu** (ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)),
+construido sobre Block 05 (Behavior Runtime + Frin Vertical Slice),
+Block 04.3 (corrección post-QA de Nidir/Bunny), Block 04.2 (assets
+reales + pipeline
 direccional), Block 04.1 (Linux como plataforma de escritorio, ver
 [`docs/LINUX_PLATFORM.md`](docs/LINUX_PLATFORM.md)), Block 04
 (catálogo de pets + switching en runtime, ver
@@ -146,6 +148,35 @@ NIMVLETS_DEV_DIRECTION_TEST_COUNT=5 ./build/macos-debug/src/app/nimvlets_spike
 Combiná `NIMVLETS_DEV_SELECT_PET` con `NIMVLETS_DEV_APPDATA_DIR` para
 probar cualquier pet sin arriesgar tu estado persistido real — ver
 "Owner manual QA" más abajo para la lista completa de comandos.
+
+### Product UI (Block 06)
+
+El menú de la barra de macOS (icono monocromo arriba a la derecha)
+abre la **Collection**: un álbum de tus Nimvlets con estados
+poseído/activo/bloqueado, panel de detalle, variantes de Frin, switch
+de pet en vivo, y el click balance (visible SOLO acá). El mismo menú
+tiene Show/Hide, Lock Position, Size (Small/Medium/Large), Opacity
+(100/85/70/55 %) y Quit. Cerrar la Collection NO termina la app. Ver
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
+
+```bash
+# QA / capturas: abrir la Collection al arrancar (sin clickear el menú).
+# "1" solo la abre; un petId además abre su panel de detalle.
+NIMVLETS_DEV_OPEN_COLLECTION=1     ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_OPEN_COLLECTION=frin  ./build/macos-debug/src/app/nimvlets_spike
+
+# QA: arrancar con el pet oculto (equivale a "Hide Nimvlet"), para
+# capturar la Collection sin la ventana always-on-top del pet.
+NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 ./build/macos-debug/src/app/nimvlets_spike
+
+# QA: disparar una activación desde la Collection sin un click real
+# ("petId" o "petId/variantId") — misma ruta que el botón "Use".
+NIMVLETS_DEV_ACTIVATE=frin/female ./build/macos-debug/src/app/nimvlets_spike
+
+# QA: abrir y cerrar la ventana de Collection N veces (smoke de ciclo
+# de vida — el runtime del pet lo sobrevive).
+NIMVLETS_DEV_COLLECTION_CYCLES=8 ./build/macos-debug/src/app/nimvlets_spike
+```
 
 This opens a small, borderless, always-on-top, transparent window
 showing whichever pet the catalog resolves as active (see

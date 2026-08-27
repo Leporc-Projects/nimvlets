@@ -85,9 +85,12 @@ yet — pets are only reachable via the `NIMVLETS_DEV_SELECT_PET`/
 - Shop (buy Nimvlets) and Collection (view/switch owned Nimvlets) are
   **separate** areas of the eventual UI.
 
-None of Shop, Collection, or persisted economy exist yet — Block 01's
-spike counts clicks in memory only, logged to stdout for development
-visibility, and discards them on exit.
+**Block 06 built the Collection** — a real Product UI window with an
+album of owned/active/locked Nimvlets, live pet switching, and the
+click balance shown *only inside that window*. Persisted economy
+(balance, owned set) exists since Block 03/06. Shop (spending clicks)
+is still Block 07 — no purchase behaviour anywhere yet. See
+`docs/PRODUCT_UI.md`.
 
 ## 6. Global click mode (future, opt-in — not implemented)
 

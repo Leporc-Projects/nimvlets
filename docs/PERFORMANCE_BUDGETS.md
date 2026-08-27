@@ -621,3 +621,59 @@ anterior: `FrameDefinition::pixels` queda residente porque
 frame. Precalcular/cachear la máscara y liberar `pixels` sigue siendo
 la siguiente ganancia grande de memoria, y sigue pendiente — esta
 pasada no la abordó (estaba fuera de alcance).
+
+## Mediciones reales de Block 06 (Product UI + menú rápido)
+
+macOS Release, Apple Silicon nativo, una sola máquina. Muestras chicas
+(`top -l 4/5 -s 1`, ventanas de 1 s) — **NO son presupuestos finales**
+(esta metodología no establece presupuestos desde VMs ni desde muestras
+de 1 s — misma honestidad que el resto de este documento). Se sanea el
+directorio de app-data (`NIMVLETS_DEV_APPDATA_DIR`) para no tocar el
+estado real del owner.
+
+| Escenario | Idle CPU | RSS |
+|---|---|---|
+| Pet-only en reposo (Bunny, tras ~12–16 s de asentarse) | **≈0.0%** | ≈120–166 MB |
+| Product UI ABIERTO, en reposo (pet oculto, tras ~12–17 s) | **≈0–1%** (muestras de 1 s, ruido) | ≈103–112 MB |
+| Pet-only en reposo TRAS 3 ciclos open/close de la Collection | **≈0.0%** | ≈165–166 MB |
+
+### Lo que estas cifras SÍ dicen
+
+- **No hay loop de render oculto del Product UI** (brief §19). Con la
+  Collection abierta y sin interacción, el CPU es ≈0%:
+  `ProductWindow::RenderIfNeeded()` — llamada una vez por vuelta del
+  event loop del pet — es un no-op salvo que la vista esté `dirty_` o
+  haya un `EXPOSED` pendiente. El cálculo de `waitMs` del event loop
+  del pet NO se toca: no se agrega ningún término de deadline para la
+  ventana de producto (ver DEC-112). Los eventos de SDL despiertan el
+  loop de todos modos.
+- **Cerrar la Collection no deja residuo.** Tras 3 ciclos open/close, el
+  pet-only idle vuelve a ≈0% de CPU y el RSS queda en la misma banda
+  que un arranque pet-only fresco (≈165 vs ≈164–166 MB) — sin
+  acumulación. `ProductWindow::Close()` destruye el `SDL_Renderer`, sus
+  texturas y los caches (`TextCache`/`PetPreviewCache`).
+- Verificado además contra el binario con `NIMVLETS_DEV_COLLECTION_CYCLES=8`:
+  8 pares open/close seguidos, pet activo tras todos, renderer del pet
+  vivo, shutdown limpio.
+
+### Costo transitorio conocido
+
+Abrir la Collection carga el pack del pet **poseído-inactivo** (Frin,
+~72 MB en disco) para extraer su frame de preview; el `PetDefinition`
+se descarta de inmediato, solo queda una textura chica. Es un pico
+transitorio pagado una vez por apertura de la Collection (o una vez por
+ciclo en la prueba de ciclos — de ahí que cada ciclo tarde ~1.3 s). Con
+muchos pets poseídos esto escalaría; un thumbnail precompilado o un
+loader en background sería el fix — se registra como limitación
+conocida (DEC-113), no se abordó en este bloque.
+
+### Honestidad sobre el RSS
+
+El RSS varía run a run entre ~103 y ~166 MB, dominado por asignaciones
+del driver SDL/Metal y por `FrameDefinition::pixels` residente (el
+término que la sección de Block 05 identificó y que sigue pendiente).
+No es una regresión de Block 06: la ventana de producto en reposo mide
+*menos* (≈103–112 MB, pet oculto) que el pet-only (el pet oculto no
+tiene su textura de frame residente). Precalcular/liberar la máscara de
+alpha sigue siendo la siguiente ganancia grande de memoria y sigue
+fuera de alcance.

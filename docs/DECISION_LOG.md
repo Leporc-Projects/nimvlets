@@ -3873,3 +3873,242 @@ resultó suficiente para absorber el desplazamiento de ~24-32px
 (working-canvas, antes del downscale de runtime) sin disparar la
 verificación de "contenido excede el canvas" (`_compile_frame()`,
 DEC-075) -- no hizo falta ninguna lógica de crecimiento adicional.
+
+---
+
+### DEC-106 — Product UI: capa SDL propia y chica, no Electron/Qt/ImGui
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §5 exige un Product UI que se sienta como una app
+de escritorio nativa, prohíbe Electron/Chromium/Qt/WebView/motor de
+juego/ImGui-en-producción, y pide "solo los componentes que Nimvlets
+realmente necesita, no un framework de UI general".
+
+**Decisión.** Se extiende la arquitectura SDL3/nativa existente con
+`src/productui/`: una librería PURA (`nimvlets_productui_core`:
+`FocusList`, `CollectionLayout`, `Format`) más una capa SDL
+(`UiPaint`, `TextCache`, `PetPreviewCache`, `CollectionView`,
+`ProductWindow`). `UiPaint` implementa exactamente los primitivos que
+la Collection usa: fill/stroke de round-rect por scanline, blit
+contain-fit, blit de glyphs, un clip rect. Sin sistema de widgets, sin
+data-binding, sin theming en runtime.
+
+**Dependencias agregadas: ninguna.** El texto del sistema se rasteriza
+con Core Text (framework del OS, no un paquete — igual que AppKit,
+AGENTS.md §10). Ver DEC-107.
+
+**Costura de plataforma.** `src/platform/TextRasterizer.h` y
+`src/platform/SystemShell.h` siguen el mismo patrón que
+`TransparentWindowSupport.h`: uno de macos/windows/linux se compila
+según `CMAKE_SYSTEM_NAME`. macOS real; Windows/Linux stubs honestos
+(`false`/no-op), no fingidos (brief §24).
+
+---
+
+### DEC-107 — Texto del sistema vía Core Text, straight alpha, non-ARC
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El Product UI necesita tipografía del sistema (SF Pro en
+macOS) sin `SDL_ttf` (AGENTS.md §10 lo prohíbe sin una razón concreta
+documentada) y sin una fuente decorativa embebida (brief §3). El debug
+text de SDL (8×8 bitmap) se ve como una herramienta de debug, lo que el
+brief prohíbe explícitamente (§6).
+
+**Decisión.** `src/platform/macos/TextRasterizer.mm` usa **Core Text**
+sobre `[NSFont systemFontOfSize:weight:]` para rasterizar una string a
+un bitmap RGBA8 **straight alpha** (para encajar con
+`SDL_BLENDMODE_BLEND`/`SDL_PIXELFORMAT_RGBA32` como el resto del
+runtime): peso regular/medium/semibold, escala de DPI, tinte de color,
+recorte de una línea con "…" a un ancho máximo en píxeles, y
+`MeasureTextWidth` para layout.
+
+**Detalle que costó una pasada de QA.** El target `nimvlets_platform_macos`
+NO usa ARC (igual que `TransparentWindowSupport.mm`). La primera
+versión hacía `CFRelease` sobre un `NSFont` autoreleased → doble free
+al drenar el pool → segfault. Corregido tratando los `NSObject*` como
+prestados (los libera el `@autoreleasepool`) y CF-releaseando solo los
+objetos CF (`CTLine`, `CGColor`, `CGColorSpace`, `CGContext`).
+
+**Orientación.** El buffer de un `CGBitmapContext` sobre memoria propia
+resultó ser **top-first** en esta plataforma (medido: el primer render
+salía verticalmente espejado con una inversión de filas manual). Se
+copia sin voltear.
+
+**Windows/Linux.** Stubs que devuelven `false`. `src/productui` trata
+`false` como "esta plataforma no dibuja texto de producto todavía" sin
+crashear. DirectWrite / fontconfig+FreeType son trabajo futuro.
+
+---
+
+### DEC-108 — Propiedad: semilla en el catálogo (v2), autoridad en AppState (v2)
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §12 pide un estado de propiedad de desarrollo
+"limpio, data-driven y testeable", que NO codifique permanentemente los
+pets poseídos de hoy en lógica de runtime, y que permita la
+inicialización de propiedad de un primer arranque futuro (Block 09) sin
+rediseño.
+
+**Decisión.**
+- **Semilla**: `catalog::CatalogEntry::initiallyOwned` (bool), schema
+  `NVCATLG1` v1→v2 (un byte por entrada). El manifest de dev marca
+  Bunny + Frin; Nidir queda sin marcar → **bloqueado**. Así los tres
+  estados de propiedad se ejercitan con solo los packs reales que ya
+  existen — sin una entrada falsa ni arte nuevo.
+- **Autoridad**: `persistence::AppState::ownedPetIds`
+  (`std::vector<std::string>` canónico: ordenado, sin duplicados, sin
+  vacío) + `ownershipSeeded` (bool), schema `NVSTATE1` v1→v2.
+  `SpikeApp::Init()` siembra desde el catálogo **solo cuando
+  `ownershipSeeded` es false**, y lo pone en true. "Nunca se
+  inicializó" y "posee cero Nimvlets" son estados distintos por ese
+  flag.
+- **Invariante**: `catalog::EnsureActivePetOwned()` — el pet del
+  escritorio siempre es propio (brief §9).
+- **Por petId, no por variante**: poseer "frin" da acceso a macho y
+  hembra (un Nimvlet lógico).
+- **Frontera para el Shop (Block 07)**: comprar = agregar un `petId` a
+  `ownedPetIds` + descontar `clickBalance`. `catalog::CollectionModel`
+  (`kActive`/`kOwnedInactive`/`kLocked`) NO cambia.
+
+`catalog::CollectionModel` (puro) deriva la vista de álbum: agrupa las
+filas del catálogo por `petId` lógico, colapsa las variantes de Frin.
+13 tests puros nuevos (`CollectionModelTest` + `CollectionLayoutTest`).
+
+---
+
+### DEC-109 — AppState schema v2 CON migración hacia adelante mínima desde v1
+**Status:** DECIDIDO · Block 06. Supersede la nota de Block 03
+"sin migración en este bloque" para `persistence::AppState`.
+
+**Contexto.** Block 06 agrega 5 campos a `AppState` (ownedPetIds,
+ownershipSeeded, lockPosition, sizeChoice, opacityPercent). El contrato
+de Block 03 (`docs/PERSISTENCE.md` §3) era "cualquier `schemaVersion`
+distinto de la actual se trata como corrupto → defaults seguros" —
+lo que borraría el click balance y la posición de ventana del owner al
+actualizar.
+
+**Decisión.** `DeserializeAppState` ahora lee **v1 O v2**. Un archivo
+v1 se lee con su layout viejo (magic + version + el cuerpo de Block 03)
+y los campos v2 quedan en su default; `outState.schemaVersion` se fija
+a la versión actual, así que el próximo `Save()` lo reescribe como v2.
+Migración de una sola vez, sin lógica de conversión más allá de "los
+campos nuevos arrancan en su default". El balance y la posición
+sobreviven la actualización.
+
+Una versión más nueva desconocida (v3+) o basura sigue tratándose como
+"no se puede usar este dato" → defaults, igual que antes.
+
+El catálogo (`NVCATLG1`) NO migra: es un artefacto de build que se
+recompila desde su manifest en el mismo commit, no datos del usuario.
+
+3 tests nuevos: v1→v2 forward, round-trip de campos v2, normalización
+canónica de `ownedPetIds`.
+
+---
+
+### DEC-110 — Tamaño de usuario: multiplicador SOBRE visualScale, no un reemplazo
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §15 pide un conjunto finito (Small/Medium/Large)
+"o un modelo compatible con la arquitectura de `visual_scale`
+existente". `visualScale` es dato de CONTENIDO por-pet, congelado en
+Block 05 (brief §21).
+
+**Decisión.** `core::PetSizeChoice` (puro) es un MULTIPLICADOR encima
+de `visualScale`, nunca lo edita:
+`tamaño = canvasW · visualScale · factor`. **Medium = 1.00 exacto** —
+un owner que nunca toca el control ve el pet idéntico a antes de Block
+06, sin cambio de comportamiento. Small = 0.80, Large = 1.30
+(documentado en `docs/PRODUCT_UI.md` §8). Se persiste como string
+legible; un valor desconocido → "medium".
+
+Opacidad: conjunto finito {100, 85, 70, 55} %, `SDL_SetWindowOpacity`;
+55 % es el piso (por debajo el pet cuesta encontrar/clickear). Un valor
+arbitrario se ajusta a la opción más cercana
+(`core::NormalizeOpacityPercent`).
+
+---
+
+### DEC-111 — Menú rápido: NSStatusItem, acciones vía SDL_EVENT_USER
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §14 pide una "presencia real en la barra de
+menús de macOS" compacta, con un icono monocromo propio (sin emoji).
+
+**Decisión.** `src/platform/macos/QuickMenu.mm`: un `NSStatusItem` en la
+barra del sistema. El `NSMenu` se construye a partir de
+`platform::BuildQuickMenuModel(ShellState)` — un modelo **puro**
+(`nimvlets_platform_policy`, compila y se testea en cualquier host) que
+`tests/QuickMenuModelTest.cpp` cubre etiqueta por etiqueta. Así el test
+verifica exactamente la estructura enviada (header con el nombre del
+pet, Show/Hide según estado, Collection…, Size ▸, Opacity ▸, Lock
+Position checkable, Quit).
+
+**Entrega de acciones.** Cada item accionable empuja un
+`SDL_EVENT_USER` (`.type` = `SDL_RegisterEvents(1)`, `.code` =
+`int(ShellAction)`) en el hilo principal. `SpikeApp::HandleEvent` lo
+despacha en el MISMO event loop — sin threads, sin callbacks, sin
+estado global. La ventana de producto se rutea aparte por `windowID` y
+NUNCA termina la app (brief §18).
+
+**Icono.** Dibujado por código en `MakeMenuBarIcon()` (silueta de
+criatura sentada, `template` para el tinte del tema). Documentado como
+**icono de desarrollo reemplazable** — cuando exista arte de marca, se
+reemplaza esa función por una carga de recurso.
+
+**Activación de app.** Nimvlets corre como accessory app (sin Dock) para
+el pet. `platform::BringApplicationToForeground()`
+(`activateIgnoringOtherApps:`, sin cambiar la activation policy) se
+llama al abrir la Collection para que esa ventana normal reciba teclado
+y clicks de contenido sin el "primer click solo activa" del sistema
+(brief §6/§23). Windows/Linux: no-op.
+
+---
+
+### DEC-112 — Product UI event-driven: sin loop de render oculto tras cerrar
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §19 exige que, con el Product UI cerrado, el idle
+del pet siga siendo liviano: "no hidden 60 FPS Product UI renderer, no
+background UI polling", y prefiere comportamiento event/deadline-driven.
+
+**Decisión.** `CollectionView` tiene un flag `dirty_` que se activa
+SOLO ante un cambio real (hover, foco, scroll, abrir/cerrar detalle,
+cambio de modelo, `EXPOSED`). `ProductWindow::RenderIfNeeded()` —
+llamada una vez por vuelta del event loop del pet — es un no-op salvo
+que `dirty_` esté activo o haya un `EXPOSED` pendiente. NO se agrega
+ningún término de deadline para la ventana de producto al cálculo de
+`waitMs` del loop; los eventos de SDL despiertan el loop de todos
+modos. Con la Collection cerrada, `RenderIfNeeded()` ni se llama
+(`if (productWindow_.IsOpen())`), y `Close()` destruye el renderer, las
+texturas y los caches.
+
+**Medido** (macOS Release): Product UI abierto en reposo → CPU ≈ 0 %.
+Pet-only en reposo tras 3 ciclos open/close → CPU ≈ 0 %, RSS en la
+misma banda que un arranque fresco (sin acumulación). Ver
+`docs/PERFORMANCE_BUDGETS.md`.
+
+---
+
+### DEC-113 — Previews de la Collection: activo inyectado, inactivo carga-y-suelta, locked sin arte
+**Status:** DECIDIDO · Block 06.
+
+**Contexto.** El brief §8 quiere que "el arte del Nimvlet domine cada
+entrada". Cargar el pack completo de cada pet (~46–76 MB) solo para un
+thumbnail es caro (brief §19).
+
+**Decisión.** `productui::PetPreviewCache`:
+- **pet activo**: su frame de reposo se INYECTA desde `src/app` (el
+  pack ya está en memoria) — cero costo extra.
+- **pet poseído-inactivo**: la primera vez que se dibuja su entrada se
+  carga su pack, se copia el frame 0 de la pose base (Direction::kRight)
+  a una textura chica, y el `PetDefinition` se descarta de inmediato.
+  Costo: una carga de pack transitoria por pet poseído-inactivo,
+  pagada una vez mientras la Collection está abierta.
+- **pet locked**: SIN arte (brief §8/§9 — el ejemplo del brief,
+  "Sweetie / Not in your collection", tampoco tiene). Solo una caja muy
+  tenue mantiene el ritmo de las tres columnas.
+
+`Clear()` libera todas las texturas al cerrar la ventana. Con muchos
+pets poseídos esto escalaría — un thumbnail precompilado o un loader en
+background sería el fix; se registra como limitación conocida.

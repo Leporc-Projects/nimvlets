@@ -28,10 +28,24 @@ Persistido, con significado real en el runtime hoy:
   actualiza cada vez que termina un drag; se usa para reabrir la
   ventana donde el usuario la dejó (ver §7).
 
-No persistido, y no planeado para este bloque (ver §9): historial de
-compras, estado de desbloqueo, estado de onboarding/selección de
-starter, cualquier cosa con forma de Shop/Collection, procedencia/
-analítica de cualquier tipo.
+**Agregado en Block 06 (schema v2 — ver §3):**
+
+- **Propiedad** (`AppState::ownedPetIds`, `AppState::ownershipSeeded`) —
+  qué Nimvlets posee el owner, por `petId`. `ownershipSeeded` distingue
+  "nunca se inicializó" de "posee cero". Semilla desde
+  `catalog::CatalogEntry::initiallyOwned` solo en el primer arranque.
+  Ver `docs/CATALOG.md` §11 y `docs/PRODUCT_UI.md` §5.
+- **Preferencias del menú rápido** (`AppState::lockPosition`,
+  `sizeChoice`, `opacityPercent`) — controles de usuario expuestos por
+  el menú de la barra (`docs/PRODUCT_UI.md` §8). `core::DisplayControls`
+  (puro) los traduce a comportamiento genérico de runtime.
+- **NO** persistido: la visibilidad del pet ("Hide Nimvlet"). Al
+  relanzar la app el pet siempre arranca visible (esconder ≠ salir,
+  brief §17).
+
+No persistido, y no planeado: historial de compras, precios, estado de
+onboarding/selección de starter, cualquier cosa con forma de Shop,
+procedencia/analítica de cualquier tipo.
 
 Genérico por construcción: `activePetId`/`activeVariantId` son simples
 strings, no un enum de Nimvlets conocidos — agregar un nuevo pet id o
@@ -91,14 +105,22 @@ x86_64, arm64 — es little-endian; no se implementa byte-swapping,
 igual que todo otro formato en disco de este repositorio).
 
 ```
-magic             : 8 bytes, "NVSTATE1"
-schemaVersion     : uint32
+magic             : 8 bytes, "NVSTATE1"   (el magic NO cambió con v2)
+schemaVersion     : uint32                (2 desde Block 06)
+-- cuerpo compartido v1/v2 (Block 03):
 clickBalance      : uint64
 activePetId       : string   (uint32 byte-length + UTF-8 bytes)
 activeVariantId   : string
 hasWindowPosition : uint8   (0/1)
 lastWindowX       : int32   (solo tiene sentido si hasWindowPosition)
 lastWindowY       : int32
+-- añadido de v2 (Block 06):
+ownershipSeeded   : uint8   (0/1)
+ownedPetIdCount   : uint32
+ownedPetIds       : string[ownedPetIdCount]   (ordenados, sin duplicados)
+lockPosition      : uint8   (0/1)
+sizeChoice        : string  ("small"/"medium"/"large"; "" => "medium")
+opacityPercent    : uint32  (0 => sin preferencia => 100)
 ```
 
 **Determinista:** serializar el mismo `AppState` dos veces produce una
@@ -106,14 +128,17 @@ salida idéntica byte a byte — sin timestamps, sin padding, sin orden de
 iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
-**Versionado, sin migración en este bloque:** `DeserializeAppState`
-rechaza cualquier `schemaVersion` que no sea exactamente igual a
-`AppState::kCurrentSchemaVersion` (actualmente 1) — una versión más
-vieja *o* más nueva se trata idénticamente a datos corruptos (ver §5),
-nunca se adivina. Hay exactamente una versión soportada por ahora; un
-bloque futuro que agregue lógica de migración tiene una costura limpia
-y obvia (`schemaVersion` ya se lee y verifica primero, antes que
-cualquier otra cosa) en vez de necesitar improvisar una.
+**Versionado + migración hacia adelante v1→v2 (Block 06, DEC-109):**
+`DeserializeAppState` lee **v1 O v2**. Un archivo v1 (Block 03/04/05) se
+lee con su layout viejo (el "cuerpo compartido" de arriba) y los campos
+v2 quedan en su default; `outState.schemaVersion` se fija a la versión
+actual, así que el próximo `Save()` lo reescribe como v2. Migración de
+una sola vez, sin lógica de conversión más allá de "los campos nuevos
+arrancan en su default" — el click balance y la posición de ventana del
+owner **sobreviven** la actualización. Una versión más nueva desconocida
+(v3+) o basura sigue tratándose como datos corruptos (ver §5), nunca se
+adivina. La costura sigue siendo limpia: `schemaVersion` se lee y
+verifica primero.
 
 ## 4. Comportamiento de escritura atómica
 

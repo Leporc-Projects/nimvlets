@@ -60,14 +60,15 @@ plataforma que el resto de formatos de este repositorio).
 
 ```
 magic       : 8 bytes, "NVCATLG1"
-schemaVersion: uint32
+schemaVersion: uint32   (2 desde Block 06; ver §11)
 entryCount  : uint32
 entries[entryCount]:
-  petId       : string  (uint32 byte-length + UTF-8 bytes)
-  variantId   : string
-  displayName : string
-  packPath    : string
-  isDefault   : uint8 (0/1)
+  petId          : string  (uint32 byte-length + UTF-8 bytes)
+  variantId      : string
+  displayName    : string
+  packPath       : string
+  isDefault      : uint8 (0/1)
+  initiallyOwned : uint8 (0/1)   -- agregado en schema v2 (Block 06), ver §11
 ```
 
 **Determinista:** orden de campos fijo, sin iteración de map/set en
@@ -311,14 +312,55 @@ usuario ni requiere display.
 
 ## 10. Intencionalmente no implementado
 
-- **Sin UI ni menú de selección.** El switching es una API de backend
-  reutilizable, sin ningún punto de entrada visible al usuario todavía
-  — pets solo se alcanzan vía `NIMVLETS_DEV_SELECT_PET`/
-  `NIMVLETS_DEV_SWITCH_TEST_COUNT` (mecanismos solo-DEV).
-- **Sin migración de schema del catálogo.** Exactamente un
-  `schemaVersion` soportado, igual que `persistence::AppState`.
+- **Sin UI ni menú de selección** *(hasta Block 05)*. Block 06 agrega la
+  **Collection** — ver §11 y `docs/PRODUCT_UI.md`. El switching sigue
+  siendo la misma API de backend reutilizable (`TrySwitchActivePet`);
+  la Collection es su primer punto de entrada visible.
+- **Sin migración de schema del catálogo.** El `.nvcat` es un artefacto
+  de build que se recompila desde su manifest en el mismo commit, no
+  datos del usuario — a diferencia de `persistence::AppState`, que sí
+  migra v1→v2 en Block 06 (ver DEC-109). Un `schemaVersion` inesperado
+  se rechaza.
 - **Sin verificación de existencia de `packPath` en el loader C++.**
   Ver §3/§5 para por qué, y dónde sí se descubre un pack faltante.
+
+## 11. Propiedad de pets (Block 06)
+
+Block 06 sube el schema `NVCATLG1` a **v2** agregando un byte
+`initiallyOwned` por entrada, y agrega la capa de Collection encima del
+switching de §6.
+
+- **`catalog::CatalogEntry::initiallyOwned`** — la SEMILLA de propiedad
+  de desarrollo/default. NO es autoridad de runtime: `SpikeApp::Init()`
+  la consulta UNA sola vez, cuando `persistence::AppState::
+  ownershipSeeded` todavía es false, para poblar `AppState::
+  ownedPetIds`; a partir de ahí el archivo de estado manda. Un bloque
+  futuro de onboarding (Block 09) reemplaza esa siembra sin tocar el
+  catálogo. El manifest de dev marca Bunny + Frin (macho y hembra);
+  Nidir queda sin marcar → **bloqueado**, para que la Collection
+  ejercite los tres estados de propiedad con solo los packs reales que
+  ya existen.
+
+- **`catalog::CollectionModel`** (puro, sin SDL) — la vista de álbum:
+  `BuildCollectionModel(catalog, ownedPetIds, activeId)` agrupa las
+  filas del catálogo por `petId` lógico (las dos entradas de Frin
+  colapsan a un `CollectionItem` con dos variantes — un Nimvlet lógico,
+  brief §11) y deriva el estado de cada una:
+  `kActive` / `kOwnedInactive` / `kLocked`.
+  `CanActivate()` gatea el switching (un pet locked nunca puede
+  activarse en este bloque — sin compra hasta Block 07).
+  `EnsureActivePetOwned()` impone el invariante "el pet del escritorio
+  siempre es propio". `SeedOwnershipFromCatalog()` produce la semilla.
+
+- **La propiedad es por `petId`, no por variante**: poseer `"frin"` da
+  acceso a macho y hembra.
+
+- **Frontera para el Shop (Block 07)**: cuando exista una compra, solo
+  agrega un `petId` a `AppState::ownedPetIds` y descuenta
+  `clickBalance`. `CollectionModel` y su enum de estados NO necesitan
+  rediseño (brief §9).
+
+Ver `docs/PRODUCT_UI.md` §5–§6 y `docs/PERSISTENCE.md` §3 para el resto.
 
 **Actualización (histórica, hasta Block 05):** hasta Block 04.3, Bunny
 seguía siendo un fixture de QA sintético (no arte real) y no existía

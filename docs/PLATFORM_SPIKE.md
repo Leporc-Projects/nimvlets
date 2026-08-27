@@ -547,3 +547,73 @@ transparente llegue a la app de abajo. Mover la ventana por debajo de
 un cursor quieto genera CERO eventos de mouse (medido: `motion=0
 enter=0 leave=0` en ambos estados), así que este harness no puede
 simular movimiento real de cursor.
+
+## 12. Product UI + menú rápido (Block 06)
+
+### 12.1 Estado por plataforma
+
+| Item | macOS | Windows | Linux |
+|---|---|---|---|
+| Ventana de producto (Collection) se abre/cierra, renderiza | **PASS** (visto, capturas de QA) | NOT TESTED (compila) | NOT TESTED (compila) |
+| Texto del sistema (`platform::RasterizeText`) | **PASS** (Core Text; `nimvlets_macos_text_check` headless + capturas) | N/A — stub devuelve `false` | N/A — stub devuelve `false` |
+| Menú rápido nativo (`NSStatusItem`) | **PARTIAL** — se instala (log "quick menu installed"), estructura cubierta por `QuickMenuModelTest`; el despliegue visual del `NSMenu` no se capturó por harness (ver 12.3) | N/A — adapter no-op | N/A — adapter no-op |
+| Live pet switch desde la Collection | **PASS** — `NIMVLETS_DEV_ACTIVATE=frin/female` cambia el pet del escritorio y la Collection lo refleja, sin reiniciar | NOT TESTED | NOT TESTED |
+| Open/close lifecycle (pet sobrevive) | **PASS** — `NIMVLETS_DEV_COLLECTION_CYCLES=8`, pet activo tras todos, shutdown limpio | NOT TESTED | NOT TESTED |
+| Ciclo de vida event-driven (sin loop de render oculto) | **PASS** — CPU ≈0% con la Collection abierta en reposo (`docs/PERFORMANCE_BUDGETS.md`) | — | — |
+
+Windows/Linux: los tres jobs de CI (configure/build/test) siguen verdes.
+Las costuras (`TextRasterizer`, `SystemShell`,
+`BringApplicationToForeground`) tienen stubs honestos, no fingidos
+(brief §24). Una implementación real (DirectWrite / fontconfig+FreeType;
+bandeja / StatusNotifierItem) es trabajo futuro, hardware mediante.
+
+### 12.2 QA manual del owner (macOS) — checklist
+
+Desde la raíz del repo, Release recomendado. Usar
+`NIMVLETS_DEV_APPDATA_DIR` para no tocar el estado real.
+
+```bash
+./build/macos-release/src/app/nimvlets_spike
+```
+
+1. **Menú de la barra**: aparece el icono monocromo de Nimvlets arriba
+   a la derecha. Abrirlo: header con el nombre del pet, "Hide Nimvlet",
+   "Collection…", "Size ▸" (Small/Medium/Large, uno marcado),
+   "Opacity ▸" (100/85/70/55 %), "Lock Position" (checkable),
+   "Quit Nimvlets".
+2. **Collection…**: abre una ventana normal ~760×540. Grid: Bunny
+   ("On desktop"), Nidir ("Not in your collection", sin arte), Frin
+   ("Male · Female"). Balance arriba a la derecha.
+3. **Detalle**: click en Frin → panel expandido con arte grande, chips
+   Male/Female, botón "Use Frin". Cambiar de chip actualiza la preview.
+4. **Switch en vivo**: "Use Frin" → el pet del escritorio pasa a ser
+   Frin, sin reiniciar; la Collection ahora muestra Bunny "Use" y Frin
+   "On desktop".
+5. **Cerrar la Collection** (botón rojo): la app sigue viva, el pet
+   sigue en el escritorio, el menú sigue disponible. Reabrir Collection
+   funciona.
+6. **Hide Nimvlet / Show Nimvlet**: oculta/restaura solo el pet; la app
+   no termina.
+7. **Lock Position**: arrastrar el pet no lo mueve; clickearlo sí
+   cuenta (el balance sube, visible al reabrir la Collection); hover y
+   click-through siguen.
+8. **Size / Opacity**: cambian el pet en vivo y persisten (cerrar y
+   reabrir).
+9. **Quit Nimvlets**: la app entera termina, limpio.
+10. **Teclado en la Collection**: Tab recorre las entradas y (con
+    detalle abierto) los chips + el botón; Enter/Space activa; Esc
+    cierra el detalle o la ventana; anillo de foco terracota visible.
+
+### 12.3 Límite del harness de captura
+
+El entorno de agente de este bloque no pudo inyectar clicks/teclas
+sintéticas de forma confiable a la ventana SDL (`CGEventPost` requiere
+permiso de Accessibility para el proceso que los emite, no concedido) —
+por eso las capturas del panel de detalle y del switch en vivo se
+generaron con los mecanismos `NIMVLETS_DEV_OPEN_COLLECTION=<petId>` /
+`NIMVLETS_DEV_ACTIVATE` (que ejercitan la MISMA ruta de código que un
+click real: `HitTest` → `OpenDetail` / `CanActivate` →
+`TrySwitchActivePet`), y el `NSMenu` desplegado no se capturó. La ruta
+de input real está cubierta por tests puros
+(`CollectionLayout::HitTest`, `FocusList`) y es idéntica en estructura
+a la de la ventana del pet, que sí funciona con input real.

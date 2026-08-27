@@ -148,3 +148,30 @@ por herencia de las reglas de arriba:
 - **Sin red/telemetría en runtime**, igual que en toda otra
   plataforma -- grep-verificable en `src/platform/linux/` igual que en
   el resto de `src/` (§C de este documento).
+
+## G. Product UI + menú rápido (Block 06)
+
+Block 06 agrega una ventana de aplicación normal (Collection) y un
+`NSStatusItem` con menú rápido en macOS. **No introduce ningún permiso
+nuevo** (brief §20), grep-verificable igual que el resto de `src/`:
+
+- **Sin captura de pantalla.** El producto nunca captura la pantalla,
+  bajo ninguna circunstancia — el contrato permanente de §C. Las
+  capturas de QA de este bloque son diagnóstico de DESARROLLO de
+  nuestra propia ventana (AGENTS.md §5): nunca se comitean, nunca son
+  comportamiento del producto, nunca automatizadas dentro de él.
+- **Sin Accessibility / Input Monitoring / Screen Recording.** Un
+  `NSStatusItem` y un `NSMenu` son UI de nuestra propia app. Core Text
+  (`platform::RasterizeText`) dibuja en un `CGBitmapContext` de nuestra
+  propia memoria. `-[NSApplication activateIgnoringOtherApps:]`
+  (`platform::BringApplicationToForeground`, para que la ventana de
+  producto reciba teclado) no dispara ningún diálogo de TCC. Ningún
+  hook de input global (AGENTS.md §5/§14).
+- **Sin conteo global de clicks.** El click balance sigue
+  incrementándose SOLO por un click real sobre el pet. Este bloque lo
+  MUESTRA dentro del Product UI pero no puede gastarlo (no hay Shop
+  todavía) y no lo expone junto al pet cuando el Product UI está
+  cerrado (brief §13).
+- **Sin cuenta, sin red, sin telemetría, sin sync.** Igual que siempre.
+  El nuevo estado persistido (propiedad + preferencias del menú) va al
+  mismo único archivo local sin autenticación de §E.
