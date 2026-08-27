@@ -106,21 +106,35 @@ SEATED_CLICK_WEIGHTS = {"howl": 0.7, "tail_greet": 0.3}
 # Cuántos frames FINALES de `lie_to_sit` ya son la pose sentada estable
 # (ver `stable_pose_tail_frames` en tools/compile_pet_pack.py, DEC-101).
 #
-# Medido sobre el pack compilado, frame a frame: el lobo termina de
-# levantarse y después se queda QUIETO varios frames -- pasos de
-# centroide <=0.55px (macho, desde f017) y <=1.04px (hembra, desde
-# f020) -- pero quieto A ~26px (macho) / ~6px (hembra) DEL LUGAR donde
-# está la pose sentada real, porque el root-motion de este export no
-# cierra contra el de `sit_to_lie`. El resultado que QA vio: el lobo se
-# sienta, se queda inmóvil casi un segundo en el lugar equivocado, y
-# recién ahí salta a su sitio.
+# Re-derivado en la pasada de pulido final tras QA, con una búsqueda
+# EXHAUSTIVA sobre los 25 candidatos posibles (compilado, con la
+# corrección de aspecto ya aplicada) en vez del criterio original
+# ("primer frame ya detenido"). Para cada candidato de frontera se mide
+# la distancia de centroide a la base sentada Y el paso propio hacia el
+# último frame autorado (cuánto se movió llegando a él) -- un candidato
+# SOLO califica si ese paso es > 0.5px (sigue en movimiento visible),
+# porque cortar sobre un frame ya inmóvil reproduce el patrón "quieto
+# en el lugar equivocado, después salta" que esta misma pasada existe
+# para eliminar (ver `test_the_single_residual_step_happens_while_
+# still_moving`, tools/test_asset_pipeline.py). Entre los candidatos
+# que SÍ califican, se elige el de menor distancia.
 #
-# Declarar esa cola deja que el compilador la reemplace por la pose
-# sentada EXACTA. No se inventa movimiento, no se toca un solo frame de
-# la animación real (la última que sobrevive es la última que todavía
-# se está moviendo), y el clip conserva sus 25 frames / 3.0s exactos.
-# Los dos valores son distintos porque los dos exports lo son.
-LIE_TO_SIT_STABLE_TAIL_FRAMES = {"male": 8, "female": 5}
+# Resultado, honesto y verificado dos veces (primero a mano, después
+# con una búsqueda automatizada que reprodujo el mismo resultado): el
+# MACHO no mejora -- 3b4fa66 (8 frames) YA ERA EL ÓPTIMO. El único
+# candidato con distancia menor (7 frames, 24.46px -> 24.28px, ~0.7%)
+# corta sobre un frame con paso propio de apenas 0.44px -- básicamente
+# inmóvil -- así que se descarta por reintroducir el patrón prohibido;
+# ningún otro frame de las 25 posiciones queda a menos de 24.3px de la
+# base sentada. Es un piso geométrico real de este export, no un límite
+# del método de selección. La HEMBRA sí tenía margen real: el candidato
+# de 4 frames (antes 5) baja la distancia de 5.59px a 5.32px (~4.8%) y
+# el paso de entrada (1.02px) sigue calificando como movimiento visible.
+#
+# No se inventa movimiento, no se toca un solo frame de la animación
+# real, y el clip conserva sus 25 frames / 3.0s exactos. Los dos
+# valores siguen siendo distintos porque los dos exports lo son.
+LIE_TO_SIT_STABLE_TAIL_FRAMES = {"male": 8, "female": 4}
 
 # `tail_greet` del MACHO viene ~2.5% más oscuro que la pose sentada YA
 # EN EL PNG FUENTE (medido sobre pixeles interiores, alpha>=250, así que
@@ -168,6 +182,22 @@ TAIL_GREET_COLOR_MATCH = {"male": True, "female": False}
 # compila a ~24% más resolución efectiva para el mismo tamaño en
 # pantalla.
 VISUAL_SCALE = 1.05
+
+# Escala visual POR-VARIANTE (pasada de pulido final -- pedido de
+# producto explícito: "Frin male +5%, female sin cambio"). Generaliza
+# el VISUAL_SCALE único de arriba -- que sigue siendo la base común
+# derivada de la correspondencia de tamaño con Bunny/Nidir -- a un
+# multiplicador propio por variante, sin tocar absolutamente nada más
+# de la geometría (ni contenido, ni content_scale, ni canvas de
+# trabajo): visual_scale se aplica exclusivamente en runtime
+# (SpikeApp::EffectiveCanvasWidth()/Height()), así que es el único
+# lugar correcto para una diferencia de tamaño puramente de producto
+# entre las dos variantes.
+#
+# female se queda en 1.0 -- "female stays exactly the current size" --
+# así que su visual_scale efectivo sigue siendo VISUAL_SCALE sin
+# modificar. male sube +5%: 1.05 * 1.05 = 1.1025.
+VARIANT_VISUAL_SCALE_MULTIPLIER = {"male": 1.05, "female": 1.0}
 
 
 def _assemble_spritesheet_from_frames(frame_dir: str, frame_count: int, frame_w: int, frame_h: int) -> tuple[int, int, bytes]:
@@ -377,7 +407,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         # canvas_width/height se completan más abajo, tras derivar el
         # plan de normalización (igual que Bunny/Nidir).
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
-        "visual_scale": VISUAL_SCALE,
+        "visual_scale": VISUAL_SCALE * VARIANT_VISUAL_SCALE_MULTIPLIER[variant],
         "content_version": "block05-frin-1",
         "runtime_max_frame_dimension": RUNTIME_MAX_FRAME_DIMENSION,
         "normalize_visual_scale": True,

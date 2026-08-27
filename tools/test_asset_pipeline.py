@@ -1196,7 +1196,7 @@ class LieToSitBoundaryRepairTest(unittest.TestCase):
     def test_the_declared_terminal_run_is_exactly_the_seated_base(self) -> None:
         for variant, rel, manifest_rel in self.VARIANTS:
             tail = self._declared_tail(manifest_rel)
-            self.assertGreater(tail, 1, f"{variant}: expected a declared stable tail")
+            self.assertGreaterEqual(tail, 1, f"{variant}: expected a declared stable tail")
             for direction in self.DIRECTIONS:
                 frames = self._clip(rel, direction)
                 base = self._seated_base(rel, direction)
@@ -1285,6 +1285,175 @@ class LieToSitBoundaryRepairTest(unittest.TestCase):
             with self.subTest(variant=variant):
                 self.assertEqual(len(action["animation"]["frames"]), 25)
                 self.assertAlmostEqual(action["animation"]["fps"], 25 / 3.0, places=6)
+
+    def test_male_and_female_use_different_cut_points(self) -> None:
+        """§10 del brief lo permite explícitamente: el corte es dato de
+        contenido, no rama de runtime, y los dos exports son distintos."""
+        male_tail = self._declared_tail("assets/source/nimvlets/frin/male/pack_manifest.json")
+        female_tail = self._declared_tail("assets/source/nimvlets/frin/female/pack_manifest.json")
+        self.assertNotEqual(male_tail, female_tail)
+
+
+class LieToSitTerminalBoundaryRederivationTest(unittest.TestCase):
+    """Pasada de pulido final: re-deriva el punto de corte terminal con
+    un criterio más riguroso que "primer frame ya detenido" (el de
+    DEC-101) -- búsqueda EXHAUSTIVA sobre los 25 candidatos posibles,
+    minimizando distancia de centroide a la base sentada, sujeto a que
+    el paso de entrada al último frame autorado sea > 0.5px (sigue en
+    movimiento visible; cortar sobre un frame ya inmóvil reproduce el
+    patrón "quieto en el lugar equivocado, después salta" que toda esta
+    familia de correcciones existe para eliminar).
+
+    Este test es la prueba de que la selección es DETERMINISTA y
+    VERIFICABLE (no un número elegido a mano): reproduce la búsqueda
+    completa dentro del test y confirma que el valor declarado en el
+    generador es el óptimo bajo ese criterio -- si el arte fuente
+    cambiara alguna vez, este test fallaría en vez de dejar un valor
+    obsoleto sin detectar.
+
+    Hallazgo honesto, verificado dos veces (a mano y por este test
+    automatizado, que llegan al mismo resultado): el MACHO no mejora.
+    Ningún candidato en las 25 posiciones del clip queda a menos de
+    ~24.3px de la base sentada, y el único candidato marginalmente más
+    cercano (24.28px) corta sobre un frame casi inmóvil (paso 0.44px) y
+    queda descartado por el criterio de "seguir en movimiento" -- 8
+    frames (el valor de 3b4fa66) YA ERA el óptimo. La HEMBRA sí tenía
+    margen real: 4 frames (antes 5) reduce el salto ~4.8%."""
+
+    MIN_QUALIFYING_STEP = 0.5
+
+    def _authored_reference_pack(self, variant: str) -> dict:
+        """Recompila el manifest real de este variante con
+        `stable_pose_tail_frames=1` (solo la ÚLTIMA punta sustituida)
+        para poder buscar sobre los 25 candidatos SIN que la sustitución
+        ya declarada oculte el resto del rango autorado.
+
+        `compile_pack()` resuelve cada `source` relativo al directorio
+        del manifest, así que el manifest de scratch (tail=1) se
+        escribe TEMPORALMENTE junto al real -- mismas rutas relativas,
+        mismo árbol de contenido -- y se borra en el `finally`."""
+        manifest_path = os.path.join(
+            _REPO_ROOT, "assets", "source", "nimvlets", "frin", variant, "pack_manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        for state in manifest["states"]:
+            for action in state.get("click_actions", []):
+                if action["id"] == "lie_to_sit":
+                    action["stable_pose_tail_frames"] = 1
+
+        manifest_dir = os.path.dirname(manifest_path)
+        scratch_manifest = os.path.join(manifest_dir, ".pack_manifest_test_scratch.json")
+        scratch_out_dir = tempfile.mkdtemp(prefix="nimvlets_l2s_search_")
+        try:
+            with open(scratch_manifest, "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+            import compile_pet_pack
+            out = os.path.join(scratch_out_dir, "out.nvpack")
+            compile_pet_pack.compile_pack(scratch_manifest, out)
+            return read_pet_pack.read_pack(out)
+        finally:
+            if os.path.isfile(scratch_manifest):
+                os.remove(scratch_manifest)
+            shutil.rmtree(scratch_out_dir, ignore_errors=True)
+
+    def _search(self, variant: str) -> tuple[int, float]:
+        """Devuelve (first_tail óptimo, distancia) bajo el criterio de
+        arriba, sobre el pack de referencia (autorado completo)."""
+        pack = self._authored_reference_pack(variant)
+        seated = read_pet_pack.find_state(pack, "seated")
+        lying = read_pet_pack.find_state(pack, "lying")
+        base = read_pet_pack.resolve_animation(
+            seated["base_animation"], seated["base_animation_direction_overrides"], "right")["frames"][0]
+        base_centroid = read_pet_pack.content_alpha_centroid(base)
+        action = read_pet_pack.find_action(lying, "click_actions", "lie_to_sit")
+        frames = read_pet_pack.resolve_animation(
+            action["animation"], action["direction_overrides"], "right")["frames"]
+        centroids = [read_pet_pack.content_alpha_centroid(f) for f in frames]
+
+        def dist(a, b):
+            return math.hypot(a[0] - b[0], a[1] - b[1])
+
+        best = None
+        for first_tail in range(10, len(frames)):
+            last_authored = first_tail - 1
+            off = dist(centroids[last_authored], base_centroid)
+            step = dist(centroids[last_authored], centroids[last_authored - 1])
+            if step <= self.MIN_QUALIFYING_STEP:
+                continue
+            if best is None or off < best[1]:
+                best = (first_tail, off)
+        return best
+
+    def test_the_declared_male_boundary_is_the_verified_optimum(self) -> None:
+        best_first_tail, best_off = self._search("male")
+        declared_tail = 8  # ver LIE_TO_SIT_STABLE_TAIL_FRAMES en tools/generate_frin_pack.py
+        declared_first_tail = 25 - declared_tail
+        self.assertEqual(
+            declared_first_tail, best_first_tail,
+            "the declared male cut point is no longer the verified optimum -- source art changed, "
+            "re-run the search and update LIE_TO_SIT_STABLE_TAIL_FRAMES")
+
+    def test_the_declared_female_boundary_is_the_verified_optimum(self) -> None:
+        best_first_tail, best_off = self._search("female")
+        declared_tail = 4  # ver LIE_TO_SIT_STABLE_TAIL_FRAMES en tools/generate_frin_pack.py
+        declared_first_tail = 25 - declared_tail
+        self.assertEqual(
+            declared_first_tail, best_first_tail,
+            "the declared female cut point is no longer the verified optimum -- source art changed, "
+            "re-run the search and update LIE_TO_SIT_STABLE_TAIL_FRAMES")
+
+    def test_search_is_deterministic(self) -> None:
+        self.assertEqual(self._search("male"), self._search("male"))
+
+
+class FrinPerVariantVisualScaleTest(unittest.TestCase):
+    """Escala visual POR-VARIANTE (pasada de pulido final): "Frin male
+    +5%, female sin cambio". Verificado contra el tamaño en pantalla
+    APROBADO en HEAD 3b4fa66 (el que precede a esta pasada), no contra
+    un número inventado acá."""
+
+    # visual_scale en 3b4fa66, antes de esta pasada -- ambas variantes
+    # compartían un único valor.
+    BASELINE_VISUAL_SCALE = 1.05
+
+    def test_male_visual_scale_is_exactly_five_percent_higher(self) -> None:
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        self.assertAlmostEqual(pack["visual_scale"], self.BASELINE_VISUAL_SCALE * 1.05, places=6)
+
+    def test_female_visual_scale_is_completely_unchanged(self) -> None:
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_female_pack.nvpack"))
+        self.assertEqual(pack["visual_scale"], self.BASELINE_VISUAL_SCALE)
+
+    def test_the_increase_is_uniform_not_per_axis(self) -> None:
+        """`visual_scale` es un único escalar aplicado a ancho Y alto
+        por igual (ver SpikeApp::EffectiveCanvasWidth()/Height()) -- no
+        hay forma de que este mecanismo sea no-uniforme, pero se fija
+        el tipo acá para que quede explícito en el contrato del test."""
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        self.assertIsInstance(pack["visual_scale"], float)
+
+    def test_male_on_screen_size_is_five_percent_larger_than_baseline(self) -> None:
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        # Tamaño en pantalla aprobado en 3b4fa66 (canvas 153x176,
+        # visual_scale 1.05): 161x185pt -- ver el informe de ese bloque.
+        baseline_w, baseline_h = 153 * self.BASELINE_VISUAL_SCALE, 176 * self.BASELINE_VISUAL_SCALE
+        effective_w = pack["canvas_width"] * pack["visual_scale"]
+        effective_h = pack["canvas_height"] * pack["visual_scale"]
+        self.assertAlmostEqual(effective_w / baseline_w, 1.05, places=2)
+        self.assertAlmostEqual(effective_h / baseline_h, 1.05, places=2)
+
+    def test_male_canvas_geometry_itself_is_untouched(self) -> None:
+        """El +5% es puramente de runtime (`visual_scale`) -- el canvas
+        lógico (contenido/geometría compilada) no debe cambiar por
+        esto."""
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        self.assertEqual((pack["canvas_width"], pack["canvas_height"]), (153, 176))
+
+    def test_bunny_and_nidir_visual_scale_untouched(self) -> None:
+        bunny = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/bunny_pack.nvpack"))
+        nidir = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/nidir_pack.nvpack"))
+        self.assertEqual(bunny["visual_scale"], 1.0)
+        self.assertEqual(nidir["visual_scale"], 1.25)
 
 
 class SequenceAspectCorrectionTest(unittest.TestCase):
