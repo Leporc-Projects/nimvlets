@@ -103,38 +103,47 @@ REST_DELAY_SECONDS = 12.0
 # acá aplicado al trigger de click en vez de ambient.
 SEATED_CLICK_WEIGHTS = {"howl": 0.7, "tail_greet": 0.3}
 
-# Cuántos frames FINALES de `lie_to_sit` ya son la pose sentada estable
-# (ver `stable_pose_tail_frames` en tools/compile_pet_pack.py, DEC-101).
+# Corrección posicional TERMINAL de `lie_to_sit` (pasada de corrección
+# posicional final -- ver `terminal_rigid_translation` en
+# tools/compile_pet_pack.py, DEC-105). Reemplaza la sustitución de cola
+# (`stable_pose_tail_frames`, DEC-101): en vez de reemplazar los frames
+# finales por copias congeladas de la base, se TRASLADAN los pixeles
+# AUTORADOS a la posición correcta -- misma animación real, compuesta
+# en otro lugar del canvas compartido. Solo el frame absolutamente
+# final sigue siendo sustitución exacta (contrato semántico de punta,
+# DEC-099, sin cambios).
 #
-# Re-derivado en la pasada de pulido final tras QA, con una búsqueda
-# EXHAUSTIVA sobre los 25 candidatos posibles (compilado, con la
-# corrección de aspecto ya aplicada) en vez del criterio original
-# ("primer frame ya detenido"). Para cada candidato de frontera se mide
-# la distancia de centroide a la base sentada Y el paso propio hacia el
-# último frame autorado (cuánto se movió llegando a él) -- un candidato
-# SOLO califica si ese paso es > 0.5px (sigue en movimiento visible),
-# porque cortar sobre un frame ya inmóvil reproduce el patrón "quieto
-# en el lugar equivocado, después salta" que esta misma pasada existe
-# para eliminar (ver `test_the_single_residual_step_happens_while_
-# still_moving`, tools/test_asset_pipeline.py). Entre los candidatos
-# que SÍ califican, se elige el de menor distancia.
+# `start_frame` es el mismo K re-derivado en la pasada anterior (misma
+# búsqueda exhaustiva, mismo criterio -- minimizar distancia de
+# centroide a la base sentada sujeto a que el paso de entrada al último
+# frame ANTES del corte sea > 0.5px, para no cortar sobre un frame ya
+# inmóvil). Matemáticamente equivalente: anclar el frame K exactamente
+# sobre la base sentada dando (dx, dy) = base - centroide(frame K)
+# produce, en el borde K-1 -> K, el MISMO salto que sustituir K
+# directamente por la base -- la traslación no reduce esa magnitud
+# (piso geométrico real, medido en la pasada anterior: macho ~24.46px,
+# irreducible; hembra ~5.32px). Lo que SÍ cambia es qué pixeles se
+# muestran desde K en adelante: la animación autorada real (por chica
+# que sea su variación en esta cola -- pasos <=1px), en vez de una
+# pose congelada repetida.
 #
-# Resultado, honesto y verificado dos veces (primero a mano, después
-# con una búsqueda automatizada que reprodujo el mismo resultado): el
-# MACHO no mejora -- 3b4fa66 (8 frames) YA ERA EL ÓPTIMO. El único
-# candidato con distancia menor (7 frames, 24.46px -> 24.28px, ~0.7%)
-# corta sobre un frame con paso propio de apenas 0.44px -- básicamente
-# inmóvil -- así que se descarta por reintroducir el patrón prohibido;
-# ningún otro frame de las 25 posiciones queda a menos de 24.3px de la
-# base sentada. Es un piso geométrico real de este export, no un límite
-# del método de selección. La HEMBRA sí tenía margen real: el candidato
-# de 4 frames (antes 5) baja la distancia de 5.59px a 5.32px (~4.8%) y
-# el paso de entrada (1.02px) sigue calificando como movimiento visible.
-#
-# No se inventa movimiento, no se toca un solo frame de la animación
-# real, y el clip conserva sus 25 frames / 3.0s exactos. Los dos
-# valores siguen siendo distintos porque los dos exports lo son.
-LIE_TO_SIT_STABLE_TAIL_FRAMES = {"male": 8, "female": 4}
+# `dx`/`dy` en pixeles del frame COMPILADO (esta resolución, tras el
+# downscale de runtime), medidos por separado para CADA dirección
+# runtime sobre el pack ya compilado -- nunca una derivada y la otra
+# negada por suposición de espejo (macho: derecha +23.44/-6.33,
+# izquierda -23.52/-6.33 -- casi exactos pero NO idénticos, la
+# asimetría real del contenido). Ver el informe de este bloque para la
+# tabla completa antes/después.
+LIE_TO_SIT_TERMINAL_TRANSLATION = {
+    "male": {
+        "right": (17, 23.444248400828172, -6.3267841749587035),
+        "left": (17, -23.516887190412987, -6.325219572337261),
+    },
+    "female": {
+        "right": (21, -1.7148204938495581, -5.111141094585719),
+        "left": (21, 1.503223680930546, -5.095938161702634),
+    },
+}
 
 # `tail_greet` del MACHO viene ~2.5% más oscuro que la pose sentada YA
 # EN EL PNG FUENTE (medido sobre pixeles interiores, alpha>=250, así que
@@ -328,6 +337,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         match_aspect_to_stable_poses: bool = False,
         match_color_to_stable_poses: bool = False,
         stable_pose_tail_frames: int = 1,
+        terminal_rigid_translation: "dict[str, tuple[int, float, float]] | None" = None,
     ) -> dict:
         """IDENTIDAD SEMÁNTICA DE POSE (DEC-099). Cada acción declara
         qué pose ESTABLE representa cada una de sus dos puntas, y el
@@ -382,6 +392,26 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
             manifest_action["match_color_to_stable_poses"] = True
         if stable_pose_tail_frames != 1:
             manifest_action["stable_pose_tail_frames"] = stable_pose_tail_frames
+        if terminal_rigid_translation is not None:
+            # Por-DIRECCIÓN RUNTIME, NUNCA por espejo asumido (pasada de
+            # corrección posicional -- ver DEC-105): `dx` se invierte de
+            # signo entre kRight/kLeft porque el espejado horizontal
+            # invierte el eje X, pero se MIDE por separado para cada una
+            # de las dos, sobre el pack YA compilado -- nunca se deriva
+            # una y se niega la otra por suposición. Ver el informe de
+            # este bloque para la verificación (-23.52 vs +23.44 en el
+            # macho: casi exactos pero no idénticos, la asimetría real
+            # del contenido).
+            right = terminal_rigid_translation.get("right")
+            if right is not None:
+                start_frame, dx, dy = right
+                manifest_action["terminal_rigid_translation"] = {
+                    "start_frame": start_frame, "dx": dx, "dy": dy}
+            left = terminal_rigid_translation.get("left")
+            if left is not None:
+                start_frame, dx, dy = left
+                manifest_action["direction_overrides"][0]["terminal_rigid_translation"] = {
+                    "start_frame": start_frame, "dx": dx, "dy": dy}
         return manifest_action
 
     # Poses base: referencian frames YA importados de sit_to_lie (frame
@@ -448,7 +478,7 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                     action("lie_to_sit", 1.0, "seated",
                            first_frame_is_state_base="lying", last_frame_is_state_base="seated",
                            match_aspect_to_stable_poses=True,
-                           stable_pose_tail_frames=LIE_TO_SIT_STABLE_TAIL_FRAMES[variant])
+                           terminal_rigid_translation=LIE_TO_SIT_TERMINAL_TRANSLATION[variant])
                 ],
             },
         ],

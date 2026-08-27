@@ -130,8 +130,27 @@ AnimationManifest:
         {"source": "relative/or/manifest-relative/path.png",
          "duration_ms": 100,        # optional, default 0.0 (only matters if fps == 0)
          "anchor_x": 80, "anchor_y": 80}   # optional, default = frame center
-      ]
-    }
+      ],
+      "terminal_rigid_translation": {   # optional, BUILD-TIME ONLY (never reaches the compiled
+        "start_frame": 17,              # .nvpack). Content saying "the export's own root motion
+        "dx": 23.44, "dy": -6.33        # doesn't land at the declared stable pose, but a single
+      }                                 # constant nudge (dx, dy) makes it land close enough that
+                                     # from `start_frame` onward the AUTHORED pixels can stay, moved
+                                     # rather than replaced". Applies to frames [start_frame, end) of
+                                     # THIS animation only, in compiled-frame pixels (this animation's
+                                     # own resolution, after any runtime downscale) -- never touches
+                                     # scale, never touches a frame already covered by
+                                     # `first_frame_is_state_base`/`last_frame_is_state_base` (those
+                                     # keep using their base's own exact pixels and placement,
+                                     # unaffected). ONE constant vector for the whole declared range
+                                     # -- never interpolated, never a function of frame index beyond
+                                     # this single before/after split. This is the opposite of the
+                                     # per-frame translation schedule DEC-097 removed: that computed a
+                                     # different offset for every frame to force smooth root motion
+                                     # the export doesn't have; this places a handful of terminal
+                                     # frames — already close to the target pose — at the position
+                                     # their own content says they belong, and nowhere else. See
+                                     # DEC-105.
 
 `source` paths are resolved relative to the manifest file's own
 directory, not the current working directory.
@@ -236,6 +255,7 @@ def _compile_frame(
     runtime_max_frame_dimension: int | None,
     normalization: tuple[tuple[float, float], int, int, int, int] | None,
     color_gain: tuple[float, float, float] | None = None,
+    extra_offset: tuple[int, int] | None = None,
 ) -> tuple[int, int, bytes]:
     source = _require(frame_manifest, "source", context)
     path = os.path.join(manifest_dir, source)
@@ -281,6 +301,23 @@ def _compile_frame(
         final_working_height = max(1, round(working_height * runtime_ratio))
         final_offset_x = round(offset_x * runtime_ratio)
         final_offset_y = round(offset_y * runtime_ratio)
+
+        # Traslación rígida terminal, opcional (ver
+        # `terminal_rigid_translation`, DEC-105): un desplazamiento
+        # CONSTANTE en pixeles del frame COMPILADO (esta misma
+        # resolución, después del downscale de runtime), sumado a la
+        # colocación de ESTE frame puntual. Es la ÚNICA forma en que
+        # este módulo permite que dos frames de una misma animación
+        # terminen en offsets distintos -- y es deliberadamente NO una
+        # transforma "por frame" en el sentido que DEC-097 prohíbe: no
+        # depende del índice del frame más que por un corte binario
+        # (antes/después de `start_frame`), nunca interpola ni
+        # progresa. No cambia la escala ni el tamaño del canvas -- las
+        # mismas dimensiones compiladas de siempre, solo compuesto en
+        # otro lugar dentro de él.
+        if extra_offset is not None:
+            final_offset_x += extra_offset[0]
+            final_offset_y += extra_offset[1]
 
         if abs(combined_scale_x - 1.0) > 1e-9 or abs(combined_scale_y - 1.0) > 1e-9:
             target_w = max(1, round(width * combined_scale_x))
@@ -379,6 +416,18 @@ def _compile_animation(
     # idéntico byte a byte al frame que el runtime muestra cuando está
     # quieto en ese estado. No es una transforma por-frame inventada por
     # el compilador -- es literalmente el mismo frame, referenciado.
+    # Traslación rígida terminal, opcional (ver `terminal_rigid_translation`
+    # en el docstring del módulo y DEC-105): UN desplazamiento constante
+    # (dx, dy), aplicado a todos los frames desde `start_frame` en
+    # adelante -- salvo los que ya estén cubiertos por una sustitución
+    # de punta (`boundary`), que siguen usando los pixeles Y la
+    # colocación exactos de su propia base, sin tocar. Es contenido de
+    # ESTA animación puntual (no un mecanismo genérico del compilador
+    # que otras animaciones activen sin declararlo).
+    terminal = anim_manifest.get("terminal_rigid_translation")
+    terminal_start = int(terminal["start_frame"]) if terminal is not None else None
+    terminal_offset = (round(terminal["dx"]), round(terminal["dy"])) if terminal is not None else None
+
     frame_blobs: list[bytes] = []
     first_dims: tuple[int, int] | None = None
     last_index = len(frame_manifests) - 1
@@ -386,6 +435,10 @@ def _compile_animation(
         substitution = boundary.get(i)
         frame_normalization = normalization
         frame_color_gain = color_gain
+        frame_extra_offset = (
+            terminal_offset if terminal_start is not None and i >= terminal_start and substitution is None
+            else None
+        )
         if substitution is not None:
             base_frame_manifest, base_context = substitution
             # Se conserva el `duration_ms` autorado por ESTA animación
@@ -402,7 +455,7 @@ def _compile_animation(
             frame_color_gain = None
         w, h, blob = _compile_frame(
             fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension,
-            frame_normalization, frame_color_gain)
+            frame_normalization, frame_color_gain, frame_extra_offset)
         if first_dims is None:
             first_dims = (w, h)
         elif (w, h) != first_dims:

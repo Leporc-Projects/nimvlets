@@ -34,6 +34,7 @@ import real -- ver docs/NIDIR_CONTENT.md).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import inspect
 import json
@@ -47,6 +48,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+import generate_frin_pack  # noqa: E402
 import prep_dev_sprite  # noqa: E402
 import read_pet_pack  # noqa: E402
 import validate_frame_sequence  # noqa: E402
@@ -66,6 +68,48 @@ def _solid_frame(width: int, height: int, rgb: tuple[int, int, int], alpha_rect:
                 out[off : off + 4] = bytes([rgb[0], rgb[1], rgb[2], 255])
             # si no, queda en (0, 0, 0, 0) -- transparente
     return bytes(out)
+
+
+@functools.lru_cache(maxsize=None)
+def _compile_frin_reference_pack(variant: str, *, strip_terminal_translation: bool = False) -> dict:
+    """Recompila el manifest REAL de este variante de Frin, opcionalmente
+    quitando `terminal_rigid_translation` de `lie_to_sit` -- usado por
+    varios tests para comparar "con la corrección" contra "sin la
+    corrección" sobre el MISMO árbol de contenido real, en vez de un
+    fixture sintético.
+
+    `compile_pack()` resuelve cada `source` relativo al directorio del
+    manifest, así que el manifest de scratch se escribe TEMPORALMENTE
+    junto al real -- mismas rutas relativas, mismo árbol de contenido
+    -- y se borra en el `finally`."""
+    manifest_path = os.path.join(
+        _REPO_ROOT, "assets", "source", "nimvlets", "frin", variant, "pack_manifest.json")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    if strip_terminal_translation:
+        for state in manifest["states"]:
+            for action in state.get("click_actions", []):
+                if action["id"] != "lie_to_sit":
+                    continue
+                action.pop("terminal_rigid_translation", None)
+                for override in action.get("direction_overrides", []):
+                    override.pop("terminal_rigid_translation", None)
+
+    manifest_dir = os.path.dirname(manifest_path)
+    scratch_manifest = os.path.join(manifest_dir, ".pack_manifest_test_scratch.json")
+    scratch_out_dir = tempfile.mkdtemp(prefix="nimvlets_frin_reference_")
+    try:
+        with open(scratch_manifest, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "tools"))
+        import compile_pet_pack
+        out = os.path.join(scratch_out_dir, "out.nvpack")
+        compile_pet_pack.compile_pack(scratch_manifest, out)
+        return read_pet_pack.read_pack(out)
+    finally:
+        if os.path.isfile(scratch_manifest):
+            os.remove(scratch_manifest)
+        shutil.rmtree(scratch_out_dir, ignore_errors=True)
 
 
 class MirrorHorizontalTest(unittest.TestCase):
@@ -478,9 +522,9 @@ class RigidTransformOnlyTest(unittest.TestCase):
             seen = []
             original = compile_pet_pack._compile_frame
 
-            def spy(frame_manifest, manifest_dir, context, rmax, normalization, color_gain=None):
+            def spy(frame_manifest, manifest_dir, context, rmax, normalization, color_gain=None, extra_offset=None):
                 seen.append(normalization)
-                return original(frame_manifest, manifest_dir, context, rmax, normalization, color_gain)
+                return original(frame_manifest, manifest_dir, context, rmax, normalization, color_gain, extra_offset)
 
             compile_pet_pack._compile_frame = spy
             try:
@@ -495,6 +539,107 @@ class RigidTransformOnlyTest(unittest.TestCase):
             self.assertEqual(len(seen), 4)
             self.assertEqual(len(set(seen)), 1, f"per-frame normalization leaked back in: {seen}")
             self.assertEqual(seen[0], ((1.0, 1.0), 60, 60, 5, 7))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_terminal_rigid_translation_is_piecewise_constant_not_a_schedule(self) -> None:
+        """`terminal_rigid_translation` (DEC-105) es la ÚNICA excepción
+        deliberada a "una normalización por animación", y este test fija
+        exactamente su forma: EXACTAMENTE DOS offsets distintos en toda
+        la animación (antes de `start_frame`, y desde `start_frame`),
+        nunca uno por frame -- lo opuesto de la interpolación por-frame
+        que DEC-097 eliminó. Se verifica interceptando `_compile_frame()`
+        real, igual que el test de arriba."""
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "tools"))
+        import compile_pet_pack
+
+        tmpdir = tempfile.mkdtemp(prefix="nimvlets_terminal_translation_")
+        try:
+            frames = []
+            for i in range(6):
+                name = f"f{i}.png"
+                prep_dev_sprite.write_png_rgba(
+                    os.path.join(tmpdir, name), 40, 40,
+                    _solid_frame(40, 40, (3, 3, 3), (10, 10, 25, 25)))
+                frames.append({"source": name, "duration_ms": 0})
+
+            seen = []
+            original = compile_pet_pack._compile_frame
+
+            def spy(frame_manifest, manifest_dir, context, rmax, normalization, color_gain=None, extra_offset=None):
+                seen.append((normalization, extra_offset))
+                return original(frame_manifest, manifest_dir, context, rmax, normalization, color_gain, extra_offset)
+
+            compile_pet_pack._compile_frame = spy
+            try:
+                compile_pet_pack._compile_animation(
+                    {"id": "a", "kind": "one_shot", "frames": frames,
+                     "terminal_rigid_translation": {"start_frame": 4, "dx": 7.0, "dy": -3.0}},
+                    tmpdir, "ctx", None,
+                    compile_pet_pack.ContentPlan(
+                        normalization={"ctx": ((1.0, 1.0), 60, 60, 5, 7)}, boundary_base_frames={}))
+            finally:
+                compile_pet_pack._compile_frame = original
+
+            self.assertEqual(len(seen), 6)
+            distinct_extra_offsets = {eo for _norm, eo in seen}
+            self.assertEqual(
+                distinct_extra_offsets, {None, (7, -3)},
+                f"expected exactly two piecewise offsets (before/after start_frame), got: {seen}")
+            # los primeros 4 frames (0..3) sin corrección; desde el 4 en
+            # adelante, LA MISMA corrección constante -- nunca progresiva.
+            self.assertEqual([eo for _n, eo in seen[:4]], [None, None, None, None])
+            self.assertEqual([eo for _n, eo in seen[4:]], [(7, -3), (7, -3)])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_terminal_rigid_translation_never_touches_boundary_substituted_frames(self) -> None:
+        """Un frame ya cubierto por `first_frame_is_state_base`/
+        `last_frame_is_state_base` (DEC-099) usa los pixeles Y la
+        colocación EXACTOS de su base -- `terminal_rigid_translation`
+        nunca debe tocarlo, aunque su índice caiga dentro del rango
+        declarado."""
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "tools"))
+        import compile_pet_pack
+
+        tmpdir = tempfile.mkdtemp(prefix="nimvlets_terminal_no_touch_boundary_")
+        try:
+            frames = []
+            for i in range(4):
+                name = f"f{i}.png"
+                prep_dev_sprite.write_png_rgba(
+                    os.path.join(tmpdir, name), 40, 40,
+                    _solid_frame(40, 40, (3, 3, 3), (10, 10, 25, 25)))
+                frames.append({"source": name, "duration_ms": 0})
+            base_name = "base.png"
+            prep_dev_sprite.write_png_rgba(
+                os.path.join(tmpdir, base_name), 40, 40,
+                _solid_frame(40, 40, (9, 9, 9), (12, 12, 28, 28)))
+
+            seen = []
+            original = compile_pet_pack._compile_frame
+
+            def spy(frame_manifest, manifest_dir, context, rmax, normalization, color_gain=None, extra_offset=None):
+                seen.append(extra_offset)
+                return original(frame_manifest, manifest_dir, context, rmax, normalization, color_gain, extra_offset)
+
+            compile_pet_pack._compile_frame = spy
+            try:
+                # start_frame=2 caeria sobre el ultimo indice (3), que
+                # el boundary de más abajo declara como sustitución --
+                # ese índice NO debe recibir extra_offset.
+                compile_pet_pack._compile_animation(
+                    {"id": "a", "kind": "one_shot", "frames": frames,
+                     "terminal_rigid_translation": {"start_frame": 2, "dx": 5.0, "dy": 5.0}},
+                    tmpdir, "ctx", None,
+                    compile_pet_pack.ContentPlan(
+                        normalization={"ctx": ((1.0, 1.0), 60, 60, 0, 0),
+                                      "base_ctx": ((1.0, 1.0), 60, 60, 0, 0)},
+                        boundary_base_frames={"ctx": {3: ({"source": base_name}, "base_ctx")}}))
+            finally:
+                compile_pet_pack._compile_frame = original
+
+            self.assertEqual(seen, [None, None, (5, 5), None])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1140,29 +1285,27 @@ class CanonicalPetGeometryTest(unittest.TestCase):
                     self.assertEqual(len({(f["width"], f["height"]) for f in anim["frames"]}), 1)
 
 
-class LieToSitBoundaryRepairTest(unittest.TestCase):
-    """El defecto que QA reportó en `lie_to_sit`, y la reparación de
-    CONTENIDO que lo resuelve (DEC-101).
+class LieToSitTerminalTranslationTest(unittest.TestCase):
+    """`terminal_rigid_translation` (DEC-105) -- reemplaza la
+    sustitución de cola (`stable_pose_tail_frames`, DEC-101) por una
+    traslación rígida de los pixeles AUTORADOS reales.
 
-    Perfilando el pack compilado frame a frame quedó claro qué veía el
-    owner: el lobo termina de levantarse y después se queda QUIETO
-    varios frames -- pasos de centroide <=0.55px (macho, desde f017) --
-    pero quieto a ~26px DEL LUGAR donde está la pose sentada real,
-    porque el root-motion de este export no cierra contra el de
-    `sit_to_lie`. Recién al final saltaba a su sitio. Un salto en medio
-    del movimiento se disimula; un salto después de casi un segundo de
-    inmovilidad no.
+    QA sobre DEC-101: el owner podía distinguir varios frames
+    congelados, idénticos entre sí, antes del salto final -- el
+    contenido REAL de esos frames (una micro-variación de <=1px, real
+    pero mínima en esta cola) quedaba oculto detrás de una copia
+    estática de la base. Y explícitamente: "TAKE THE EXISTING AUTHORED
+    FRAME AND DRAW/COMPOSE IT A FEW PIXELS TO THE CORRECT X/Y
+    LOCATION" -- no reemplazar, TRASLADAR.
 
-    La reparación no inventa movimiento ni toca un frame autorado que
-    todavía se esté moviendo: el contenido declara cuántos frames
-    FINALES ya son la pose estable, y esos se compilan desde el archivo
-    de la base. Lo que queda es UN solo paso, y ocurre mientras el lobo
-    todavía está en movimiento."""
+    Mecanismo: desde el frame K declarado, se suma UN (dx, dy)
+    constante a la colocación de cada frame -- los MISMOS pixeles
+    autorados, compuestos en otro lugar del mismo canvas compartido.
+    Nunca escala, nunca interpola, nunca varía frame a frame más allá
+    de ese único corte binario (antes/después de K)."""
 
-    VARIANTS = (("male", "assets/dev/frin_male_pack.nvpack",
-                 "assets/source/nimvlets/frin/male/pack_manifest.json"),
-                ("female", "assets/dev/frin_female_pack.nvpack",
-                 "assets/source/nimvlets/frin/female/pack_manifest.json"))
+    VARIANTS = (("male", "assets/dev/frin_male_pack.nvpack"),
+                ("female", "assets/dev/frin_female_pack.nvpack"))
     DIRECTIONS = ("right", "left")
     RUNTIME_RIGHT_SOURCE_DIR = "left"
     MAX_INJECTED_MOTION_PX = 0.5
@@ -1180,105 +1323,195 @@ class LieToSitBoundaryRepairTest(unittest.TestCase):
         return read_pet_pack.resolve_animation(
             state["base_animation"], state["base_animation_direction_overrides"], direction)["frames"][0]
 
-    def _declared_tail(self, manifest_rel: str) -> int:
-        with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        for state in manifest["states"]:
-            for action in state.get("click_actions", []):
-                if action["id"] == "lie_to_sit":
-                    return int(action.get("stable_pose_tail_frames", 1))
-        raise AssertionError("lie_to_sit not found")
+    def _lying_base(self, rel: str, direction: str = "right"):
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+        state = read_pet_pack.find_state(pack, "lying")
+        return read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], direction)["frames"][0]
 
     @staticmethod
     def _travel(a, b) -> float:
         return math.hypot(b[0] - a[0], b[1] - a[1])
 
-    def test_the_declared_terminal_run_is_exactly_the_seated_base(self) -> None:
-        for variant, rel, manifest_rel in self.VARIANTS:
-            tail = self._declared_tail(manifest_rel)
-            self.assertGreaterEqual(tail, 1, f"{variant}: expected a declared stable tail")
+    @staticmethod
+    def _alpha_multiset(frame) -> list:
+        w, h, px = frame["width"], frame["height"], frame["pixels"]
+        return sorted(px[i * 4:i * 4 + 4] for i in range(w * h) if px[i * 4 + 3] > 0)
+
+    def test_first_frame_is_exactly_the_lying_base(self) -> None:
+        for variant, rel in self.VARIANTS:
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    frames = self._clip(rel, direction)
+                    base = self._lying_base(rel, direction)
+                    self.assertEqual(frames[0]["pixels"], base["pixels"])
+
+    def test_final_frame_is_exactly_the_seated_base(self) -> None:
+        for variant, rel in self.VARIANTS:
+            for direction in self.DIRECTIONS:
+                with self.subTest(variant=variant, direction=direction):
+                    frames = self._clip(rel, direction)
+                    base = self._seated_base(rel, direction)
+                    self.assertEqual(frames[-1]["pixels"], base["pixels"])
+
+    def test_frames_before_k_are_completely_unchanged(self) -> None:
+        """Comparado contra un pack de referencia compilado SIN
+        `terminal_rigid_translation` -- los frames antes del corte no
+        deben diferir ni un bit."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
+            reference = _compile_frin_reference_pack(variant, strip_terminal_translation=True)
+            for direction in self.DIRECTIONS:
+                frames = self._clip(rel, direction)
+                ref_frames = read_pet_pack.resolve_animation(
+                    read_pet_pack.find_action(
+                        read_pet_pack.find_state(reference, "lying"), "click_actions", "lie_to_sit"
+                    )["animation"],
+                    read_pet_pack.find_action(
+                        read_pet_pack.find_state(reference, "lying"), "click_actions", "lie_to_sit"
+                    )["direction_overrides"], direction)["frames"]
+                for index in range(k):
+                    with self.subTest(variant=variant, direction=direction, frame=index):
+                        self.assertEqual(frames[index]["pixels"], ref_frames[index]["pixels"])
+
+    def test_frames_from_k_preserve_rgba_content_translated_only(self) -> None:
+        """Los frames traducidos deben tener EXACTAMENTE el mismo
+        multiconjunto de valores RGBA que la versión sin traducir --
+        prueba de que la corrección es una traslación pura (mismos
+        pixeles, otra posición), nunca una reinterpretación del
+        contenido."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
+            reference = _compile_frin_reference_pack(variant, strip_terminal_translation=True)
+            for direction in self.DIRECTIONS:
+                frames = self._clip(rel, direction)
+                ref_frames = read_pet_pack.resolve_animation(
+                    read_pet_pack.find_action(
+                        read_pet_pack.find_state(reference, "lying"), "click_actions", "lie_to_sit"
+                    )["animation"],
+                    read_pet_pack.find_action(
+                        read_pet_pack.find_state(reference, "lying"), "click_actions", "lie_to_sit"
+                    )["direction_overrides"], direction)["frames"]
+                for index in range(k, len(frames) - 1):  # excluye el final, exacto = base
+                    with self.subTest(variant=variant, direction=direction, frame=index):
+                        self.assertEqual(
+                            self._alpha_multiset(frames[index]), self._alpha_multiset(ref_frames[index]),
+                            f"frame {index} content changed -- this must be a pure translation")
+
+    def test_the_correction_moves_the_declared_frames_close_to_the_seated_base(self) -> None:
+        """El resultado que el owner pidió: desde K en adelante, los
+        frames YA ESTÁN cerca de la posición correcta (no solo el
+        último) -- a diferencia de la sustitución anterior, donde esa
+        distancia se mantenía en ~24-25px hasta el frame final."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
             for direction in self.DIRECTIONS:
                 frames = self._clip(rel, direction)
                 base = self._seated_base(rel, direction)
-                for index in range(len(frames) - tail, len(frames)):
+                base_centroid = read_pet_pack.content_alpha_centroid(base)
+                for index in range(k, len(frames) - 1):
+                    off = self._travel(
+                        read_pet_pack.content_alpha_centroid(frames[index]), base_centroid)
                     with self.subTest(variant=variant, direction=direction, frame=index):
-                        self.assertEqual(frames[index]["pixels"], base["pixels"])
+                        self.assertLess(
+                            off, 3.0,
+                            f"frame {index} is {off:.2f}px from the seated base -- the terminal "
+                            "translation is not landing the corrected frames close to the target")
 
-    def test_once_seated_the_wolf_never_moves_again(self) -> None:
-        """EL invariante que faltaba en d96239b. Allí el lobo llegaba a
-        la pose sentada, se quedaba inmóvil ~0.84s en el lugar
-        equivocado y recién entonces se teletransportaba 25.85px. Acá se
-        exige que, a partir del momento en que muestra la pose sentada,
-        no haya NINGÚN desplazamiento posterior."""
-        for variant, rel, manifest_rel in self.VARIANTS:
-            tail = self._declared_tail(manifest_rel)
-            for direction in self.DIRECTIONS:
-                frames = self._clip(rel, direction)
-                centroids = [read_pet_pack.content_alpha_centroid(f)
-                             for f in frames[len(frames) - tail:]]
-                moved = max(self._travel(a, b) for a, b in zip(centroids, centroids[1:]))
-                with self.subTest(variant=variant, direction=direction):
-                    self.assertEqual(
-                        moved, 0.0,
-                        f"{variant}/{direction}: the wolf still shifts {moved:.2f}px after it has "
-                        "settled into the seated pose -- that is the teleport QA reported")
-
-    def test_the_single_residual_step_happens_while_still_moving(self) -> None:
-        """El desajuste del export no desapareció -- se reubicó. Queda
-        UN paso, en la frontera de sustitución, y el frame anterior
-        todavía se estaba moviendo (su propio paso autorado es > 0), que
-        es lo que hace que se lea como parte del movimiento."""
-        for variant, rel, manifest_rel in self.VARIANTS:
-            tail = self._declared_tail(manifest_rel)
+    def test_only_one_boundary_transition_absorbs_the_export_mismatch(self) -> None:
+        """El desajuste del export no desaparece -- se concentra en UN
+        único paso (K-1 -> K), y ese frame anterior estaba genuinamente
+        en movimiento (paso propio > 0.5px), no congelado."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
             for direction in self.DIRECTIONS:
                 frames = self._clip(rel, direction)
                 centroids = [read_pet_pack.content_alpha_centroid(f) for f in frames]
-                boundary = len(frames) - tail
-                approach = self._travel(centroids[boundary - 2], centroids[boundary - 1])
+                approach = self._travel(centroids[k - 2], centroids[k - 1])
                 with self.subTest(variant=variant, direction=direction):
                     self.assertGreater(
                         approach, 0.5,
-                        f"{variant}/{direction}: the frame before the substitution boundary is "
+                        f"{variant}/{direction}: the frame before the correction boundary is "
                         "stationary -- the residual would read as a teleport, not as motion")
 
-    def test_no_compiler_injected_motion_in_the_authored_range(self) -> None:
-        """Sobre los frames que SIGUEN siendo animación autorada, el
-        recorrido compilado debe coincidir con el de los PNG nativos: el
-        compilador no inventa root-motion (DEC-097)."""
-        for variant, rel, manifest_rel in self.VARIANTS:
-            tail = self._declared_tail(manifest_rel)
+    def test_no_compiler_injected_motion_before_k(self) -> None:
+        """Sobre los frames anteriores a K (animación autorada sin
+        ninguna corrección), el recorrido compilado debe coincidir con
+        el de los PNG nativos: el compilador no inventa root-motion
+        (DEC-097)."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
             frames = self._clip(rel)
             compiled = [read_pet_pack.content_alpha_centroid(f) for f in frames]
             base_dir = os.path.join(_REPO_ROOT, "assets/source/nimvlets/frin", variant,
                                     "animations/lie_to_sit", self.RUNTIME_RIGHT_SOURCE_DIR, "frames")
             authored = []
-            for index in range(len(frames)):
+            for index in range(k):
                 w, h, pixels = prep_dev_sprite.read_png_rgba(
                     os.path.join(base_dir, f"frame_{index:03d}.png"))
                 authored.append((prep_dev_sprite.alpha_weighted_centroid(w, h, pixels),
                                  prep_dev_sprite.alpha_rms_radius(w, h, pixels)))
-            mid = (len(frames) - tail) // 2
+            mid = k // 2
             scale = (prep_dev_sprite.alpha_rms_radius(
                 frames[mid]["width"], frames[mid]["height"], frames[mid]["pixels"]) / authored[mid][1])
-            last_authored = len(frames) - tail - 1
-            for index in range(1, last_authored):
+            for index in range(1, k - 1):
                 with self.subTest(variant=variant, pair=f"{index}->{index + 1}"):
                     injected = abs(self._travel(compiled[index], compiled[index + 1])
                                    - self._travel(authored[index][0], authored[index + 1][0]) * scale)
                     self.assertLess(injected, self.MAX_INJECTED_MOTION_PX)
 
+    def test_no_compiler_injected_motion_after_k(self) -> None:
+        """Sobre los frames DESDE K (traducidos, sin sustituir), el
+        recorrido RELATIVO entre ellos debe seguir coincidiendo con el
+        de los PNG nativos -- la traslación desplaza el conjunto en
+        bloque, nunca deforma el movimiento relativo interno."""
+        for variant, rel in self.VARIANTS:
+            k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"][0]
+            frames = self._clip(rel)
+            compiled = [read_pet_pack.content_alpha_centroid(f) for f in frames]
+            base_dir = os.path.join(_REPO_ROOT, "assets/source/nimvlets/frin", variant,
+                                    "animations/lie_to_sit", self.RUNTIME_RIGHT_SOURCE_DIR, "frames")
+            authored = []
+            for index in range(k, len(frames)):
+                w, h, pixels = prep_dev_sprite.read_png_rgba(
+                    os.path.join(base_dir, f"frame_{index:03d}.png"))
+                authored.append(prep_dev_sprite.alpha_weighted_centroid(w, h, pixels))
+            for offset in range(len(authored) - 2):  # excluye el ultimo par (toca el frame final exacto)
+                index = k + offset
+                with self.subTest(variant=variant, pair=f"{index}->{index + 1}"):
+                    compiled_step = self._travel(compiled[index], compiled[index + 1])
+                    authored_step = self._travel(authored[offset], authored[offset + 1])
+                    # la escala nativa->compilada varía poco dentro de esta cola corta;
+                    # se compara el ORDEN DE MAGNITUD, no un factor exacto -- lo que
+                    # importa acá es que no aparezca movimiento GRANDE de la nada.
+                    self.assertLess(
+                        compiled_step, max(5.0, authored_step * 3.0),
+                        f"frame {index}->{index + 1}: compiled step {compiled_step:.2f}px looks "
+                        f"inflated versus the authored {authored_step:.2f}px -- possible injected motion")
+
+    def test_scale_is_unchanged_only_position_moved(self) -> None:
+        """El requisito explícito del brief: sin escala, sin rotación,
+        sin corrección de aspecto adicional -- solo x+=dx, y+=dy. Se
+        verifica que TODOS los frames de la animación comparten
+        dimensiones compiladas (invariante de siempre, DEC-097) incluso
+        con la traducción activa."""
+        for variant, rel in self.VARIANTS:
+            frames = self._clip(rel)
+            dims = {(f["width"], f["height"]) for f in frames}
+            with self.subTest(variant=variant):
+                self.assertEqual(len(dims), 1)
+
     def test_the_authored_middle_is_still_there(self) -> None:
         """Control negativo: la reparación no puede degenerar en borrar
         la animación."""
-        for variant, rel, manifest_rel in self.VARIANTS:
-            tail = self._declared_tail(manifest_rel)
+        for variant, rel in self.VARIANTS:
             frames = self._clip(rel)
-            distinct = len({f["pixels"] for f in frames[1:len(frames) - tail]})
+            distinct = len({f["pixels"] for f in frames[1:-1]})
             with self.subTest(variant=variant):
                 self.assertGreaterEqual(distinct, 12)
 
     def test_frame_count_and_timing_are_untouched(self) -> None:
-        for variant, rel, _m in self.VARIANTS:
+        for variant, rel in self.VARIANTS:
             pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
             state = read_pet_pack.find_state(pack, "lying")
             action = read_pet_pack.find_action(state, "click_actions", "lie_to_sit")
@@ -1286,80 +1519,65 @@ class LieToSitBoundaryRepairTest(unittest.TestCase):
                 self.assertEqual(len(action["animation"]["frames"]), 25)
                 self.assertAlmostEqual(action["animation"]["fps"], 25 / 3.0, places=6)
 
-    def test_male_and_female_use_different_cut_points(self) -> None:
-        """§10 del brief lo permite explícitamente: el corte es dato de
-        contenido, no rama de runtime, y los dos exports son distintos."""
-        male_tail = self._declared_tail("assets/source/nimvlets/frin/male/pack_manifest.json")
-        female_tail = self._declared_tail("assets/source/nimvlets/frin/female/pack_manifest.json")
-        self.assertNotEqual(male_tail, female_tail)
+    def test_male_and_female_use_different_correction(self) -> None:
+        """§5/§10 del brief lo permite explícitamente: la corrección es
+        dato de contenido, no rama de runtime, y los dos exports son
+        distintos."""
+        male = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION["male"]["right"]
+        female = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION["female"]["right"]
+        self.assertNotEqual(male, female)
+
+    def test_dx_is_measured_independently_per_direction_not_assumed_mirrored(self) -> None:
+        """§11 del brief: "Do not assume. Verify from the compiled
+        packs." dx SÍ se invierte de signo entre right/left (el
+        espejado horizontal invierte X), pero NO es exactamente
+        simétrico -- se midió por separado para cada dirección sobre el
+        pack ya compilado, y este test fija que ambos valores existen y
+        están en el rango esperado (mismo signo opuesto, magnitud
+        similar), sin asumir una relación exacta de espejo."""
+        for variant in ("male", "female"):
+            right = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["right"]
+            left = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION[variant]["left"]
+            with self.subTest(variant=variant):
+                self.assertEqual(right[0], left[0], "start_frame should match between mirrored directions")
+                # dx opuesto en signo (espejado horizontal), magnitud similar
+                # pero NO forzada a ser idéntica -- la real es +23.44/-23.52.
+                self.assertLess(right[1] * left[1], 0, "dx should have opposite signs between directions")
+                self.assertAlmostEqual(abs(right[1]), abs(left[1]), delta=1.0)
+                # dy NO se invierte (el espejado es horizontal, no vertical)
+                self.assertGreater(right[2] * left[2], 0, "dy should have the same sign between directions")
+                self.assertAlmostEqual(right[2], left[2], delta=0.5)
 
 
 class LieToSitTerminalBoundaryRederivationTest(unittest.TestCase):
-    """Pasada de pulido final: re-deriva el punto de corte terminal con
-    un criterio más riguroso que "primer frame ya detenido" (el de
-    DEC-101) -- búsqueda EXHAUSTIVA sobre los 25 candidatos posibles,
-    minimizando distancia de centroide a la base sentada, sujeto a que
-    el paso de entrada al último frame autorado sea > 0.5px (sigue en
-    movimiento visible; cortar sobre un frame ya inmóvil reproduce el
-    patrón "quieto en el lugar equivocado, después salta" que toda esta
-    familia de correcciones existe para eliminar).
+    """Pasada de corrección posicional final: re-verifica que K (el
+    frame a partir del cual se aplica `terminal_rigid_translation`,
+    DEC-105) sigue siendo el óptimo bajo el mismo criterio riguroso de
+    la pasada anterior -- búsqueda EXHAUSTIVA sobre los 25 candidatos
+    posibles, minimizando distancia de centroide a la base sentada,
+    sujeto a que el paso de entrada al último frame ANTES del corte sea
+    > 0.5px (sigue en movimiento visible; cortar sobre un frame ya
+    inmóvil reproduce el patrón "quieto en el lugar equivocado, después
+    salta").
 
-    Este test es la prueba de que la selección es DETERMINISTA y
-    VERIFICABLE (no un número elegido a mano): reproduce la búsqueda
-    completa dentro del test y confirma que el valor declarado en el
-    generador es el óptimo bajo ese criterio -- si el arte fuente
-    cambiara alguna vez, este test fallaría en vez de dejar un valor
-    obsoleto sin detectar.
-
-    Hallazgo honesto, verificado dos veces (a mano y por este test
-    automatizado, que llegan al mismo resultado): el MACHO no mejora.
-    Ningún candidato en las 25 posiciones del clip queda a menos de
-    ~24.3px de la base sentada, y el único candidato marginalmente más
-    cercano (24.28px) corta sobre un frame casi inmóvil (paso 0.44px) y
-    queda descartado por el criterio de "seguir en movimiento" -- 8
-    frames (el valor de 3b4fa66) YA ERA el óptimo. La HEMBRA sí tenía
-    margen real: 4 frames (antes 5) reduce el salto ~4.8%."""
+    Matemáticamente, anclar el frame K contra la base sentada
+    (`dx,dy = base - centroide(frame K)`, lo que este mecanismo hace)
+    produce en el borde K-1 -> K EXACTAMENTE el mismo salto que
+    sustituir K directamente por la base (lo que el mecanismo anterior,
+    `stable_pose_tail_frames`, hacía) -- así que el K óptimo bajo este
+    criterio es el MISMO que el de la pasada anterior. Este test lo
+    reproduce igual: la búsqueda es determinista y verificable, no un
+    número elegido a mano, y si el arte fuente cambiara alguna vez este
+    test fallaría en vez de dejar un valor obsoleto sin detectar."""
 
     MIN_QUALIFYING_STEP = 0.5
 
-    def _authored_reference_pack(self, variant: str) -> dict:
-        """Recompila el manifest real de este variante con
-        `stable_pose_tail_frames=1` (solo la ÚLTIMA punta sustituida)
-        para poder buscar sobre los 25 candidatos SIN que la sustitución
-        ya declarada oculte el resto del rango autorado.
-
-        `compile_pack()` resuelve cada `source` relativo al directorio
-        del manifest, así que el manifest de scratch (tail=1) se
-        escribe TEMPORALMENTE junto al real -- mismas rutas relativas,
-        mismo árbol de contenido -- y se borra en el `finally`."""
-        manifest_path = os.path.join(
-            _REPO_ROOT, "assets", "source", "nimvlets", "frin", variant, "pack_manifest.json")
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        for state in manifest["states"]:
-            for action in state.get("click_actions", []):
-                if action["id"] == "lie_to_sit":
-                    action["stable_pose_tail_frames"] = 1
-
-        manifest_dir = os.path.dirname(manifest_path)
-        scratch_manifest = os.path.join(manifest_dir, ".pack_manifest_test_scratch.json")
-        scratch_out_dir = tempfile.mkdtemp(prefix="nimvlets_l2s_search_")
-        try:
-            with open(scratch_manifest, "w", encoding="utf-8") as f:
-                json.dump(manifest, f)
-            import compile_pet_pack
-            out = os.path.join(scratch_out_dir, "out.nvpack")
-            compile_pet_pack.compile_pack(scratch_manifest, out)
-            return read_pet_pack.read_pack(out)
-        finally:
-            if os.path.isfile(scratch_manifest):
-                os.remove(scratch_manifest)
-            shutil.rmtree(scratch_out_dir, ignore_errors=True)
-
     def _search(self, variant: str) -> tuple[int, float]:
-        """Devuelve (first_tail óptimo, distancia) bajo el criterio de
-        arriba, sobre el pack de referencia (autorado completo)."""
-        pack = self._authored_reference_pack(variant)
+        """Devuelve (K óptimo, distancia) bajo el criterio de arriba,
+        sobre el pack de referencia (autorado completo, sin corrección
+        -- `_compile_frin_reference_pack()`, cacheado y compartido con
+        `LieToSitTerminalTranslationTest`)."""
+        pack = _compile_frin_reference_pack(variant, strip_terminal_translation=True)
         seated = read_pet_pack.find_state(pack, "seated")
         lying = read_pet_pack.find_state(pack, "lying")
         base = read_pet_pack.resolve_animation(
@@ -1374,33 +1592,31 @@ class LieToSitTerminalBoundaryRederivationTest(unittest.TestCase):
             return math.hypot(a[0] - b[0], a[1] - b[1])
 
         best = None
-        for first_tail in range(10, len(frames)):
-            last_authored = first_tail - 1
-            off = dist(centroids[last_authored], base_centroid)
-            step = dist(centroids[last_authored], centroids[last_authored - 1])
+        for candidate_k in range(10, len(frames)):
+            last_before_cut = candidate_k - 1
+            off = dist(centroids[last_before_cut], base_centroid)
+            step = dist(centroids[last_before_cut], centroids[last_before_cut - 1])
             if step <= self.MIN_QUALIFYING_STEP:
                 continue
             if best is None or off < best[1]:
-                best = (first_tail, off)
+                best = (candidate_k, off)
         return best
 
-    def test_the_declared_male_boundary_is_the_verified_optimum(self) -> None:
-        best_first_tail, best_off = self._search("male")
-        declared_tail = 8  # ver LIE_TO_SIT_STABLE_TAIL_FRAMES en tools/generate_frin_pack.py
-        declared_first_tail = 25 - declared_tail
+    def test_the_declared_male_k_is_the_verified_optimum(self) -> None:
+        best_k, _best_off = self._search("male")
+        declared_k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION["male"]["right"][0]
         self.assertEqual(
-            declared_first_tail, best_first_tail,
-            "the declared male cut point is no longer the verified optimum -- source art changed, "
-            "re-run the search and update LIE_TO_SIT_STABLE_TAIL_FRAMES")
+            declared_k, best_k,
+            "the declared male cut point K is no longer the verified optimum -- source art changed, "
+            "re-run the search and update LIE_TO_SIT_TERMINAL_TRANSLATION")
 
-    def test_the_declared_female_boundary_is_the_verified_optimum(self) -> None:
-        best_first_tail, best_off = self._search("female")
-        declared_tail = 4  # ver LIE_TO_SIT_STABLE_TAIL_FRAMES en tools/generate_frin_pack.py
-        declared_first_tail = 25 - declared_tail
+    def test_the_declared_female_k_is_the_verified_optimum(self) -> None:
+        best_k, _best_off = self._search("female")
+        declared_k = generate_frin_pack.LIE_TO_SIT_TERMINAL_TRANSLATION["female"]["right"][0]
         self.assertEqual(
-            declared_first_tail, best_first_tail,
-            "the declared female cut point is no longer the verified optimum -- source art changed, "
-            "re-run the search and update LIE_TO_SIT_STABLE_TAIL_FRAMES")
+            declared_k, best_k,
+            "the declared female cut point K is no longer the verified optimum -- source art changed, "
+            "re-run the search and update LIE_TO_SIT_TERMINAL_TRANSLATION")
 
     def test_search_is_deterministic(self) -> None:
         self.assertEqual(self._search("male"), self._search("male"))
