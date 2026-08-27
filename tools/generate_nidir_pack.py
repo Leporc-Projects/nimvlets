@@ -217,7 +217,7 @@ def main() -> int:
     _, working_width, working_height, _, _ = normalization_plan["idle"]
     print(f"canvas de trabajo compartido (idle + click_reaction + wing_stretch, contenido alineado): {working_width}x{working_height}")
     for key, (scale, _, _, offset_x, offset_y) in normalization_plan.items():
-        print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
+        print(f"  {key}: content_scale=({scale[0]:.6f},{scale[1]:.6f}) offset=({offset_x},{offset_y})")
 
     canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
     print(

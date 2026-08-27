@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+                        #!/usr/bin/env python3
 """Genera el contenido "right" de Bunny a partir de sus frames "left"
 reales, ya importados en este repo (ver docs/BUNNY_CONTENT.md), y
 compila el pack de runtime completo con el grafo de comportamiento de
@@ -87,24 +87,24 @@ ALPHA_HIT_THRESHOLD = 128
 
 EXPORT_DURATION_SECONDS = 3.0
 
-# 12 segundos -- pasada de resolución de renderer, pedido de producto
-# explícito (ver DEC-084 en docs/DECISION_LOG.md); reemplaza el 15.0 de
-# la segunda pasada de corrección post-QA (que a su vez reemplazó el
-# 10.0 de Block 04.3). Mismo valor que Nidir -- un único intervalo de
-# producto para los dos, no un ajuste por-pet.
+                        # 12 segundos -- pasada de resolución de renderer, pedido de producto
+                        # explícito (ver DEC-084 en docs/DECISION_LOG.md); reemplaza el 15.0 de
+                        # la segunda pasada de corrección post-QA (que a su vez reemplazó el
+                        # 10.0 de Block 04.3). Mismo valor que Nidir -- un único intervalo de
+                        # producto para los dos, no un ajuste por-pet.
 AMBIENT_INTERVAL_SECONDS = 12.0
 
-# Selección ponderada 70/30 entre las DOS acciones ambient de Bunny --
-# índice 0 = idle periódico (breathing), índice 1 = groom.
+                        # Selección ponderada 70/30 entre las DOS acciones ambient de Bunny --
+                        # índice 0 = idle periódico (breathing), índice 1 = groom.
 AMBIENT_ACTION_WEIGHTS = [0.7, 0.3]
 
-# Escala visual por-pet (Block 05 -- ver content::PetDefinition::
-# visualScale). "Bunny's current size is approved" -- 1.0 preserva
-# exactamente el tamaño en pantalla que ya tenía (134x176, derivado del
-# canvas de trabajo compartido de abajo con el factor de referencia
-# global existente, sin cambios). Contraste: tools/generate_nidir_pack.py
-# usa 1.10 -- ver el informe de este bloque para el resultado exacto de
-# cada uno.
+                        # Escala visual por-pet (Block 05 -- ver content::PetDefinition::
+                        # visualScale). "Bunny's current size is approved" -- 1.0 preserva
+                        # exactamente el tamaño en pantalla que ya tenía (134x176, derivado del
+                        # canvas de trabajo compartido de abajo con el factor de referencia
+                        # global existente, sin cambios). Contraste: tools/generate_nidir_pack.py
+                        # usa 1.10 -- ver el informe de este bloque para el resultado exacto de
+                        # cada uno.
 VISUAL_SCALE = 1.0
 
 
@@ -186,56 +186,18 @@ def main() -> int:
         "groom", GROOM_CANONICAL_FRAMES_DIR, GROOM_DERIVED_FRAMES_DIR, GROOM_CANONICAL_SPRITESHEET_PATH, GROOM_DERIVED_SPRITESHEET_PATH
     )
 
-    normalization_entries = {
-        "idle": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png")),
-        "idle_right": prep_dev_sprite.read_png_rgba(os.path.join(IDLE_DERIVED_FRAMES_DIR, "frame_000.png")),
-        "click_reaction": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_CANONICAL_FRAMES_DIR, "frame_000.png")),
-        "click_reaction_right": prep_dev_sprite.read_png_rgba(os.path.join(CLICK_DERIVED_FRAMES_DIR, "frame_000.png")),
-        "groom": prep_dev_sprite.read_png_rgba(os.path.join(GROOM_CANONICAL_FRAMES_DIR, "frame_000.png")),
-        "groom_right": prep_dev_sprite.read_png_rgba(os.path.join(GROOM_DERIVED_FRAMES_DIR, "frame_000.png")),
-    }
-    normalization_groups = {
-        "idle": "idle",
-        "idle_right": "idle",
-        "click_reaction": "click_reaction",
-        "click_reaction_right": "click_reaction",
-        "groom": "groom",
-        "groom_right": "groom",
-    }
-    # Bunny tiene un solo BehaviorState ("default") -- state_of_group/
-    # base_group_of_state son triviales acá (todo bajo el mismo
-    # estado), y group_frame_paths usa las rutas REALES de frame_000
-    # de cada grupo (idle/click_reaction/groom nunca comparten archivo
-    # entre sí en Bunny, así que el union-find de
-    # compute_frame_normalization_plan no fusiona nada -- mismo
-    # resultado que antes de Block 05, segunda pasada. Ver esa función
-    # y docs/DECISION_LOG.md DEC-075 para el mecanismo completo, que
-    # solo importa de verdad para un pet con 2+ estados como Frin).
-    normalization_state_of_group = {"idle": "default", "click_reaction": "default", "groom": "default"}
-    normalization_base_group_of_state = {"default": "idle"}
-    normalization_group_frame_paths = {
-        "idle": [os.path.realpath(os.path.join(IDLE_CANONICAL_FRAMES_DIR, "frame_000.png"))],
-        "click_reaction": [os.path.realpath(os.path.join(CLICK_CANONICAL_FRAMES_DIR, "frame_000.png"))],
-        "groom": [os.path.realpath(os.path.join(GROOM_CANONICAL_FRAMES_DIR, "frame_000.png"))],
-    }
-    normalization_plan = prep_dev_sprite.compute_frame_normalization_plan(
-        normalization_entries, normalization_groups, reference_group="idle",
-        group_frame_paths=normalization_group_frame_paths, state_of_group=normalization_state_of_group,
-        base_group_of_state=normalization_base_group_of_state,
-    )
-    _, working_width, working_height, _, _ = normalization_plan["idle"]
-    print(f"canvas de trabajo compartido (idle + click_reaction + groom, contenido alineado): {working_width}x{working_height}")
-    for key, (scale, _, _, offset_x, offset_y) in normalization_plan.items():
-        print(f"  {key}: content_scale={scale:.4f} offset=({offset_x},{offset_y})")
-
-    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
-    print(
-        f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, "
-        f"referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE} x DISPLAY_SIZE_SCALE_FACTOR={prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR})"
-    )
-    print(f"visual_scale (Block 05, por-pet, runtime): {VISUAL_SCALE} -> tamaño efectivo en pantalla "
-          f"{round(canvas_width * VISUAL_SCALE)}x{round(canvas_height * VISUAL_SCALE)}")
-    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
+    # El plan de normalización lo calcula `compile_pet_pack._build_content_plan()`
+    # sobre el manifest ya armado, más abajo -- NO se reconstruye a mano acá.
+    #
+    # Antes sí se duplicaba (entries/groups/state_of_group armados a mano
+    # con las mismas rutas), y esa duplicación era un bug latente que
+    # esta pasada hizo estallar: en cuanto una acción declaró una
+    # corrección de aspecto de export, la copia local seguía calculando
+    # la escala uniforme vieja, así que el canvas lógico del manifest
+    # quedaba derivado de un canvas de trabajo que ya no era el que el
+    # compilador usaba (425x559 contra 418x563 reales). Una sola fuente
+    # de verdad lo vuelve estructuralmente imposible -- es el mismo
+    # patrón que tools/generate_frin_pack.py ya usaba.
 
     left_dir = os.path.join("animations", "idle", "left", "frames")
     right_dir = os.path.join("animations", "idle", "right", "frames")
@@ -267,8 +229,9 @@ def main() -> int:
         "id": "bunny",
         "display_name": "Bunny",
         "variant_group": "",
-        "canvas_width": canvas_width,
-        "canvas_height": canvas_height,
+        # Se sobrescriben abajo con el valor derivado del plan real.
+        "canvas_width": 0,
+        "canvas_height": 0,
         "alpha_hit_threshold": ALPHA_HIT_THRESHOLD,
         "visual_scale": VISUAL_SCALE,
         "content_version": "block05-bunny-1",
@@ -318,6 +281,14 @@ def main() -> int:
                         # informe de este bloque.
                         "first_frame_is_state_base": "default",
                         "last_frame_is_state_base": "default",
+                        # `idle_breathing` NO declara `match_aspect_to_stable_poses`,
+                        # a propósito: su frame 0 ES literalmente el archivo de la
+                        # base, así que su export ya comparte el sistema de
+                        # proporciones por construcción. Peor: su ÚLTIMO frame es el
+                        # conejo a mitad de respiración (+1.19% de aspecto medido),
+                        # que es ANIMACIÓN REAL -- derivar una corrección de ahí
+                        # corregiría el respirar, que es justo lo que no hay que
+                        # tocar.
                         "kind": "one_shot",
                         "fps": idle_playback_fps,
                         "returns_to_idle": True,
@@ -355,6 +326,21 @@ def main() -> int:
                         # informe de este bloque.
                         "first_frame_is_state_base": "default",
                         "last_frame_is_state_base": "default",
+                        # CORRECCIÓN DE ASPECTO DE EXPORT (DEC-100). Medido: el
+                        # export de esta secuencia trae al conejo con una relación
+                        # de aspecto distinta a la de la pose base -- ~1.4% de
+                        # desacuerdo entre ejes, consistente en sus DOS puntas de
+                        # reposo (que es la firma de una propiedad constante del
+                        # export, no de un cambio de pose). Con una escala
+                        # uniforme, ningún factor puede casar los dos ejes: la
+                        # secuencia entera se ve algo más ancha y algo más baja
+                        # que el conejo quieto -- exactamente el "se ve más gordo
+                        # mientras anima" que QA reportó.
+                        #
+                        # El par (scale_x, scale_y) lo DERIVA el compilador de la
+                        # correspondencia de poses estables ya declarada arriba;
+                        # no hay ningún número mágico acá.
+                        "match_aspect_to_stable_poses": True,
                         "kind": "one_shot",
                         "fps": groom_playback_fps,
                         "returns_to_idle": True,
@@ -400,6 +386,21 @@ def main() -> int:
                         # informe de este bloque.
                         "first_frame_is_state_base": "default",
                         "last_frame_is_state_base": "default",
+                        # CORRECCIÓN DE ASPECTO DE EXPORT (DEC-100). Medido: el
+                        # export de esta secuencia trae al conejo con una relación
+                        # de aspecto distinta a la de la pose base -- ~2.3% de
+                        # desacuerdo entre ejes, consistente en sus DOS puntas de
+                        # reposo (que es la firma de una propiedad constante del
+                        # export, no de un cambio de pose). Con una escala
+                        # uniforme, ningún factor puede casar los dos ejes: la
+                        # secuencia entera se ve algo más ancha y algo más baja
+                        # que el conejo quieto -- exactamente el "se ve más gordo
+                        # mientras anima" que QA reportó.
+                        #
+                        # El par (scale_x, scale_y) lo DERIVA el compilador de la
+                        # correspondencia de poses estables ya declarada arriba;
+                        # no hay ningún número mágico acá.
+                        "match_aspect_to_stable_poses": True,
                         "kind": "one_shot",
                         "fps": click_playback_fps,
                         "returns_to_idle": True,
@@ -419,6 +420,23 @@ def main() -> int:
             }
         ],
     }
+    content_plan = compile_pet_pack._build_content_plan(manifest, BUNNY_ROOT)
+    _, working_width, working_height, _, _ = content_plan.normalization["state[default].base_animation"]
+    print(f"canvas de trabajo compartido (idle + click_reaction + groom, contenido alineado): {working_width}x{working_height}")
+    for key, (scale, _w, _h, offset_x, offset_y) in sorted(content_plan.normalization.items()):
+        print(f"  {key}: content_scale=({scale[0]:.6f},{scale[1]:.6f}) offset=({offset_x},{offset_y})")
+
+    canvas_width, canvas_height = prep_dev_sprite.compute_logical_canvas_size(working_width, working_height)
+    manifest["canvas_width"] = canvas_width
+    manifest["canvas_height"] = canvas_height
+    print(
+        f"canvas lógico derivado: {canvas_width}x{canvas_height} (canvas de trabajo {working_width}x{working_height}, "
+        f"referencia {prep_dev_sprite.REFERENCE_LOGICAL_SIZE} x DISPLAY_SIZE_SCALE_FACTOR={prep_dev_sprite.DISPLAY_SIZE_SCALE_FACTOR})"
+    )
+    print(f"visual_scale (Block 05, por-pet, runtime): {VISUAL_SCALE} -> tamaño efectivo en pantalla "
+          f"{round(canvas_width * VISUAL_SCALE)}x{round(canvas_height * VISUAL_SCALE)}")
+    print(f"resolución de runtime (compilada): máximo {RUNTIME_MAX_FRAME_DIMENSION}px por lado, fuente sin tocar")
+
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")

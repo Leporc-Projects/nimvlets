@@ -103,6 +103,39 @@ REST_DELAY_SECONDS = 12.0
 # acá aplicado al trigger de click en vez de ambient.
 SEATED_CLICK_WEIGHTS = {"howl": 0.7, "tail_greet": 0.3}
 
+# Cuántos frames FINALES de `lie_to_sit` ya son la pose sentada estable
+# (ver `stable_pose_tail_frames` en tools/compile_pet_pack.py, DEC-101).
+#
+# Medido sobre el pack compilado, frame a frame: el lobo termina de
+# levantarse y después se queda QUIETO varios frames -- pasos de
+# centroide <=0.55px (macho, desde f017) y <=1.04px (hembra, desde
+# f020) -- pero quieto A ~26px (macho) / ~6px (hembra) DEL LUGAR donde
+# está la pose sentada real, porque el root-motion de este export no
+# cierra contra el de `sit_to_lie`. El resultado que QA vio: el lobo se
+# sienta, se queda inmóvil casi un segundo en el lugar equivocado, y
+# recién ahí salta a su sitio.
+#
+# Declarar esa cola deja que el compilador la reemplace por la pose
+# sentada EXACTA. No se inventa movimiento, no se toca un solo frame de
+# la animación real (la última que sobrevive es la última que todavía
+# se está moviendo), y el clip conserva sus 25 frames / 3.0s exactos.
+# Los dos valores son distintos porque los dos exports lo son.
+LIE_TO_SIT_STABLE_TAIL_FRAMES = {"male": 8, "female": 5}
+
+# `tail_greet` del MACHO viene ~2.5% más oscuro que la pose sentada YA
+# EN EL PNG FUENTE (medido sobre pixeles interiores, alpha>=250, así que
+# no es un efecto de borde ni de premultiplicado; el pipeline de
+# compilación se midió fiel a +0.15%). La hembra NO tiene el problema
+# (-0.5%, dentro del ruido), así que no se le aplica nada: corregir ahí
+# sería resamplear para nada. Ver DEC-102.
+TAIL_GREET_COLOR_MATCH = {"male": True, "female": False}
+
+# `howl` es el peor caso de desacuerdo de aspecto de export del
+# proyecto: -3.90% (macho) y -2.1% (hembra), idéntico en sus DOS puntas
+# de reposo. `tail_greet` NO se corrige: medido +0.20% (macho) y -0.74%
+# (hembra), y su geometría está explícitamente aprobada por QA -- es el
+# control negativo dentro de Frin. Ver DEC-100.
+
 # Escala visual por-pet (Block 05 -- ver content::PetDefinition::
 # visualScale). DEC-076 fijó 1.30 tras QA manual real ("Frin
 # male/female currently feel too small; visibly larger, comparable in
@@ -262,6 +295,9 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
         *,
         first_frame_is_state_base: str | None = None,
         last_frame_is_state_base: str | None = None,
+        match_aspect_to_stable_poses: bool = False,
+        match_color_to_stable_poses: bool = False,
+        stable_pose_tail_frames: int = 1,
     ) -> dict:
         """IDENTIDAD SEMÁNTICA DE POSE (DEC-099). Cada acción declara
         qué pose ESTABLE representa cada una de sus dos puntas, y el
@@ -310,6 +346,12 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
             manifest_action["first_frame_is_state_base"] = first_frame_is_state_base
         if last_frame_is_state_base is not None:
             manifest_action["last_frame_is_state_base"] = last_frame_is_state_base
+        if match_aspect_to_stable_poses:
+            manifest_action["match_aspect_to_stable_poses"] = True
+        if match_color_to_stable_poses:
+            manifest_action["match_color_to_stable_poses"] = True
+        if stable_pose_tail_frames != 1:
+            manifest_action["stable_pose_tail_frames"] = stable_pose_tail_frames
         return manifest_action
 
     # Poses base: referencian frames YA importados de sit_to_lie (frame
@@ -355,9 +397,11 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "hover_actions": [],
                 "click_actions": [
                     action("howl", SEATED_CLICK_WEIGHTS["howl"], "seated",
-                           first_frame_is_state_base="seated", last_frame_is_state_base="seated"),
+                           first_frame_is_state_base="seated", last_frame_is_state_base="seated",
+                           match_aspect_to_stable_poses=True),
                     action("tail_greet", SEATED_CLICK_WEIGHTS["tail_greet"], "seated",
-                           first_frame_is_state_base="seated", last_frame_is_state_base="seated"),
+                           first_frame_is_state_base="seated", last_frame_is_state_base="seated",
+                           match_color_to_stable_poses=TAIL_GREET_COLOR_MATCH[variant]),
                 ],
             },
             {
@@ -370,8 +414,12 @@ def _build_variant_manifest(variant: str, pet_id: str, display_name: str, canoni
                 "ambient_actions": [],  # "No random howl/tail-greet while lying"
                 "hover_uses_ambient_actions": False,
                 "hover_actions": [],
-                "click_actions": [action("lie_to_sit", 1.0, "seated",
-                           first_frame_is_state_base="lying", last_frame_is_state_base="seated")],
+                "click_actions": [
+                    action("lie_to_sit", 1.0, "seated",
+                           first_frame_is_state_base="lying", last_frame_is_state_base="seated",
+                           match_aspect_to_stable_poses=True,
+                           stable_pose_tail_frames=LIE_TO_SIT_STABLE_TAIL_FRAMES[variant])
+                ],
             },
         ],
     }

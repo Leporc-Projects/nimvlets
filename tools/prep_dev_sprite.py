@@ -507,18 +507,112 @@ def alpha_rms_radius(width: int, height: int, pixels: bytes) -> float:
     return math.sqrt(variance / total)
 
 
-def bbox_registration_point(width: int, height: int, pixels: bytes, scale: float) -> tuple[float, float]:
+def alpha_weighted_sigma(width: int, height: int, pixels: bytes) -> tuple[float, float]:
+    """Desviación estándar del contenido visible a lo largo de X y de Y,
+    ponderada por alpha -- la generalización ANISOTRÓPICA de
+    `alpha_rms_radius()` (que colapsa los dos ejes en un solo escalar).
+
+    Existe para poder responder una pregunta que el escalar no puede:
+    ¿este export trae al personaje con las MISMAS PROPORCIONES que la
+    pose base, o con una relación de aspecto distinta? Dos exports del
+    mismo personaje con el mismo `alpha_rms_radius` pueden tener sigmas
+    por eje muy distintas.
+
+    Ponderado por alpha y no por bounding box por la misma razón que
+    `alpha_rms_radius()` (DEC-088): un solo pixel de antialiasing en el
+    extremo mueve un bbox, no mueve un momento de segundo orden."""
+    total = 0.0
+    sum_x = 0.0
+    sum_y = 0.0
+    for y in range(height):
+        row = y * width
+        for x in range(width):
+            alpha = pixels[(row + x) * 4 + 3]
+            if not alpha:
+                continue
+            total += alpha
+            sum_x += alpha * x
+            sum_y += alpha * y
+    if total <= 0.0:
+        return (0.0, 0.0)
+    mean_x = sum_x / total
+    mean_y = sum_y / total
+    var_x = 0.0
+    var_y = 0.0
+    for y in range(height):
+        row = y * width
+        for x in range(width):
+            alpha = pixels[(row + x) * 4 + 3]
+            if not alpha:
+                continue
+            var_x += alpha * (x - mean_x) ** 2
+            var_y += alpha * (y - mean_y) ** 2
+    return (math.sqrt(var_x / total), math.sqrt(var_y / total))
+
+
+def interior_mean_rgb(width: int, height: int, pixels: bytes,
+                      alpha_min: int = 250) -> tuple[float, float, float] | None:
+    """Media de R/G/B sobre los pixeles INTERIORES (alpha >= alpha_min).
+
+    Deliberadamente ignora el borde antialiaseado: dos exports de la
+    misma pose a resoluciones nativas distintas tienen distinta
+    proporción de pixeles de borde, y esos pixeles arrastran la media
+    aunque el color del personaje sea idéntico. Medir solo el interior
+    hace la comparación entre exports honesta -- y de paso vuelve la
+    medición inmune a si el borde está premultiplicado o no.
+
+    Devuelve None si el frame no tiene ningún pixel suficientemente
+    opaco (caso degenerado, nunca alcanzado por contenido real)."""
+    count = 0
+    sum_r = sum_g = sum_b = 0
+    for index in range(width * height):
+        offset = index * 4
+        if pixels[offset + 3] >= alpha_min:
+            sum_r += pixels[offset]
+            sum_g += pixels[offset + 1]
+            sum_b += pixels[offset + 2]
+            count += 1
+    if count == 0:
+        return None
+    return (sum_r / count, sum_g / count, sum_b / count)
+
+
+def apply_rgb_gain(width: int, height: int, pixels: bytes,
+                   gain: tuple[float, float, float]) -> bytes:
+    """Multiplica R/G/B por una ganancia constante, con clamp a 0-255.
+    ALPHA NO SE TOCA -- ni se lee ni se escribe.
+
+    No premultiplica ni desmultiplica: los packs de este proyecto se
+    compilan y suben como RGBA recto (ver src/graphics), así que el
+    color de un pixel es independiente de su alpha y una ganancia
+    escalar es exactamente la operación correcta."""
+    if len(pixels) != width * height * 4:
+        raise ValueError("apply_rgb_gain: pixel buffer size does not match width*height*4")
+    gr, gg, gb = gain
+    out = bytearray(pixels)
+    for index in range(width * height):
+        offset = index * 4
+        out[offset] = min(255, max(0, round(out[offset] * gr)))
+        out[offset + 1] = min(255, max(0, round(out[offset + 1] * gg)))
+        out[offset + 2] = min(255, max(0, round(out[offset + 2] * gb)))
+    return bytes(out)
+
+
+def bbox_registration_point(width: int, height: int, pixels: bytes,
+                            scale: tuple[float, float]) -> tuple[float, float]:
     """Centro del bounding box de contenido de un frame, YA escalado --
-    el punto de anclaje que `compute_frame_normalization_plan()` usaba
-    exclusivamente hasta DEC-093 (y que sigue usando para la colocación
-    DEFAULT de cualquier entrada sin destino de transición registrado).
-    Extraído a nivel de módulo (Block 05, pasada de continuidad de
-    frontera) para poder reusarlo desde
-    `compute_two_endpoint_frame_offsets()` sin duplicar la lógica de
-    convenio de pixel-a-centro (+1 sobre el bbox inclusivo, dividido por
-    2 -- un pixel de índice x cubre [x, x+1))."""
+    el punto de anclaje de la colocación de cada entrada.
+
+    `scale` es un par (x, y): casi siempre los dos valores son iguales
+    (escala uniforme), pero una secuencia puede declarar una corrección
+    de aspecto de export y entonces difieren -- ver
+    `aspect_scale_by_group` en compute_frame_normalization_plan().
+
+    El convenio de pixel-a-centro es +1 sobre el bbox inclusivo,
+    dividido por 2: un pixel de índice x cubre [x, x+1)."""
     minx, miny, maxx, maxy = content_bbox_or_full_frame(width, height, pixels)
-    return ((minx + maxx + 1) / 2.0 * scale, (miny + maxy + 1) / 2.0 * scale)
+    scale_x, scale_y = scale
+    return ((minx + maxx + 1) / 2.0 * scale_x, (miny + maxy + 1) / 2.0 * scale_y)
 
 
 
@@ -563,8 +657,9 @@ def compute_frame_normalization_plan(
     base_group_of_state: dict[str, str],
     entry_frame_paths: dict[str, list[str]] | None = None,
     start_base_entry: dict[str, str] | None = None,
+    aspect_scale_by_group: dict[str, tuple[float, float]] | None = None,
     scale_tolerance: float = 0.005,
-) -> dict[str, tuple[float, int, int, int, int]]:
+) -> dict[str, tuple[tuple[float, float], int, int, int, int]]:
     """Política genérica de "canvas de trabajo compartido, anclado por
     contenido" (Block 04.3 -- ver docs/NIDIR_CONTENT.md, "clipping y
     tamaño visual inconsistente entre animaciones"), extendida en Block
@@ -724,6 +819,29 @@ def compute_frame_normalization_plan(
     se inflaba de 657 a 767px de alto -- encogiendo a Frin ~14% en
     pantalla. Ver el informe de este bloque.
 
+    `aspect_scale_by_group` (opcional): group_key -> (scale_x, scale_y)
+    constante para TODA esa secuencia. Existe para un caso concreto y
+    demostrable: un export de Ludo que trae al personaje con una
+    RELACIÓN DE ASPECTO distinta a la de la pose base, de modo que
+    ninguna escala uniforme puede hacer coincidir los dos ejes a la vez
+    -- con una uniforme la secuencia entera se ve, por ejemplo, ~2%
+    más ancha y ~2% más baja que la pose estable, que es exactamente el
+    "se ve más gordo mientras anima" que QA reportó.
+
+    Requisitos duros (ver DEC-100): es UN par constante para toda la
+    secuencia, nunca por frame, nunca interpolado, nunca progresivo.
+    No es deformación de poses: es lo contrario -- lleva la secuencia
+    AL sistema de proporciones de la pose base, del que su export se
+    había ido. El par lo deriva quien llama, de la correspondencia de
+    poses estables que el contenido ya declara, nunca de una medición
+    de frames intermedios (los frames de en medio cambian de silueta a
+    propósito, y medirlos sería confundir animación con error).
+
+    Solo se aplica donde el contenido lo declara explícitamente. Nidir
+    no lo declara en ninguna secuencia, y `tail_greet` de Frin tampoco
+    -- medido, su export ya coincide con la base dentro del 0.2%, y su
+    geometría está aprobada por QA.
+
     NO existe, y no debe reintroducirse, ningún modo que mueva o
     reescale el sprite GRADUALMENTE a lo largo de un clip para
     reconciliar dos puntas que el export no cierra: se implementó, se
@@ -809,22 +927,33 @@ def compute_frame_normalization_plan(
         resolved_scale_group_value[sg] = resolved
         return resolved
 
-    scale_by_group: dict[str, float] = {}
+    aspect_by_group = aspect_scale_by_group or {}
+    scale_by_group: dict[str, tuple[float, float]] = {}
     for group_key in set(groups.values()):
         state_id = state_of_group[group_key]
         base_group = base_group_of_state[state_id]
         state_scale = resolve_state_base_scale(state_id)
+        # Corrección de aspecto declarada por el CONTENIDO para esta
+        # secuencia (ver `aspect_scale_by_group` en el docstring): su
+        # export usa un sistema de proporciones distinto al de la pose
+        # base, y el par (x, y) que lo reconcilia ya viene derivado de
+        # la correspondencia de poses estables declarada. Reemplaza la
+        # escala uniforme derivada por RMS -- no se combinan.
+        aspect = aspect_by_group.get(group_key)
+        if aspect is not None:
+            scale_by_group[group_key] = (state_scale * aspect[0], state_scale * aspect[1])
+            continue
         if group_key == base_group:
             # El propio base_animation de un estado -- su escala ES la
             # escala resuelta de su estado, sin ninguna comparación
             # adicional (evita recompararlo contra sí mismo).
-            scale_by_group[group_key] = state_scale
+            scale_by_group[group_key] = (state_scale, state_scale)
             continue
         this_size = group_content_size(group_key)
         base_size = group_content_size(base_group)
         raw_scale = base_size / this_size if this_size > 0 else 1.0
         local_scale = 1.0 if abs(raw_scale - 1.0) <= scale_tolerance else raw_scale
-        scale_by_group[group_key] = state_scale * local_scale
+        scale_by_group[group_key] = (state_scale * local_scale, state_scale * local_scale)
 
     # --- Colocación (offset) ------------------------------------------
     #
@@ -848,9 +977,9 @@ def compute_frame_normalization_plan(
     first_anchor: dict[str, tuple[float, float]] = {}
     scaled_size: dict[str, tuple[float, float]] = {}
     for entry_key, (w, h, pixels) in entries.items():
-        scale = scale_by_group[groups[entry_key]]
+        scale_x, scale_y = scale_by_group[groups[entry_key]]
         first_anchor[entry_key] = anchor_of(entry_key, (w, h, pixels))
-        scaled_size[entry_key] = (w * scale, h * scale)
+        scaled_size[entry_key] = (w * scale_x, h * scale_y)
 
     # --- Containment: una entrada cuyos frames son un SUBCONJUNTO de los
     # de otra (el contrato first/last-frame que este proyecto ya exige:
@@ -924,7 +1053,7 @@ def compute_frame_normalization_plan(
     working_width = max(1, round(right - left))
     working_height = max(1, round(bottom - top))
 
-    plan: dict[str, tuple[float, int, int, int, int]] = {}
+    plan: dict[str, tuple[tuple[float, float], int, int, int, int]] = {}
     for entry_key in entries:
         px, py = pos[entry_key]
         plan[entry_key] = (

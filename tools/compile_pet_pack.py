@@ -85,6 +85,34 @@ WeightedActionManifest:
                                      # which is what the content actually means. Direction is
                                      # resolved per-direction: a "left" override substitutes the
                                      # target state's "left" base frame.
+      "stable_pose_tail_frames": 8,   # optional, default 1, BUILD-TIME ONLY. How many TERMINAL
+                                     # frames represent `last_frame_is_state_base`'s pose, not just
+                                     # the last one. For an export whose root motion does not close
+                                     # against the target base, those trailing frames are the
+                                     # character standing still IN THE WRONG PLACE, followed by a
+                                     # visible jump. Declaring the run lets the compiler replace it
+                                     # with the exact base frame -- no invented motion, no authored
+                                     # frame touched (the last surviving one is the last one still
+                                     # moving), and the clip keeps its exact frame count and
+                                     # duration. See DEC-101.
+      "match_aspect_to_stable_poses": false,  # optional, default false, BUILD-TIME ONLY. Derives ONE
+                                     # constant (scale_x, scale_y) for the whole sequence from the
+                                     # declared stable-pose correspondence above, replacing the
+                                     # uniform RMS-derived scale. For an export that brings the
+                                     # character at a different ASPECT RATIO than the base pose, no
+                                     # uniform factor can match both axes at once and the sequence
+                                     # reads as globally wider-and-shorter than the pet at rest.
+                                     # Constant for every frame -- never per-frame, never
+                                     # interpolated. Derived only from the two extreme endpoints:
+                                     # intermediate frames change silhouette on purpose, and
+                                     # measuring them would confuse animation with error. See
+                                     # DEC-100.
+      "match_color_to_stable_poses": false,   # optional, default false, BUILD-TIME ONLY. Derives ONE
+                                     # constant per-channel RGB gain the same way, for an export
+                                     # that is globally darker/lighter than the base pose. Alpha is
+                                     # never touched, the gain never varies frame-to-frame (no auto
+                                     # exposure), and substituted boundary frames never receive it
+                                     # -- they already ARE the base pixels. See DEC-102.
       ...AnimationManifest...,
       "direction_overrides": [ {"direction": "left", ...AnimationManifest...}, ... ]  # optional
     }
@@ -187,8 +215,9 @@ class ContentPlan:
     índice se compila desde el archivo Y con la transforma de esa base,
     así que sale idéntico byte a byte al frame compilado de la base."""
 
-    normalization: dict[str, tuple[float, int, int, int, int]]
+    normalization: dict[str, tuple[tuple[float, float], int, int, int, int]]
     boundary_base_frames: dict[str, dict[int, tuple[dict, str]]]
+    color_gain: dict[str, tuple[float, float, float]] = dataclasses.field(default_factory=dict)
 
     def normalization_for(self, context: str) -> tuple[float, int, int, int, int] | None:
         return self.normalization.get(context)
@@ -196,13 +225,17 @@ class ContentPlan:
     def boundary_for(self, context: str) -> dict[int, tuple[dict, str]]:
         return self.boundary_base_frames.get(context, {})
 
+    def color_gain_for(self, context: str) -> tuple[float, float, float] | None:
+        return self.color_gain.get(context)
+
 
 def _compile_frame(
     frame_manifest: dict,
     manifest_dir: str,
     context: str,
     runtime_max_frame_dimension: int | None,
-    normalization: tuple[float, int, int, int, int] | None,
+    normalization: tuple[tuple[float, float], int, int, int, int] | None,
+    color_gain: tuple[float, float, float] | None = None,
 ) -> tuple[int, int, bytes]:
     source = _require(frame_manifest, "source", context)
     path = os.path.join(manifest_dir, source)
@@ -212,6 +245,13 @@ def _compile_frame(
     width, height, pixels = prep_dev_sprite.read_png_rgba(path)
     if len(pixels) != width * height * 4:
         raise PackCompileError(f"{context}: decoded pixel data size mismatch for {path}")
+
+    # Ganancia de color constante de secuencia (ver
+    # `match_color_to_stable_poses`), ANTES de cualquier reescalado: se
+    # aplica sobre los pixeles nativos, donde todavía hay toda la
+    # información. Alpha nunca se toca.
+    if color_gain is not None:
+        pixels = prep_dev_sprite.apply_rgb_gain(width, height, pixels, color_gain)
 
     # Normalización de escala/encuadre por contenido, opcional (ver el
     # docstring del módulo y prep_dev_sprite.compute_frame_normalization_plan()),
@@ -229,22 +269,27 @@ def _compile_frame(
     # nunca se toca de ninguna forma, solo estos bytes que van directo
     # al pack compilado.
     if normalization is not None:
-        content_scale, working_width, working_height, offset_x, offset_y = normalization
+        (content_scale_x, content_scale_y), working_width, working_height, offset_x, offset_y = normalization
 
         runtime_ratio = 1.0
         if runtime_max_frame_dimension is not None and max(working_width, working_height) > runtime_max_frame_dimension:
             runtime_ratio = runtime_max_frame_dimension / max(working_width, working_height)
 
-        combined_scale = content_scale * runtime_ratio
+        combined_scale_x = content_scale_x * runtime_ratio
+        combined_scale_y = content_scale_y * runtime_ratio
         final_working_width = max(1, round(working_width * runtime_ratio))
         final_working_height = max(1, round(working_height * runtime_ratio))
         final_offset_x = round(offset_x * runtime_ratio)
         final_offset_y = round(offset_y * runtime_ratio)
 
-        if abs(combined_scale - 1.0) > 1e-9:
-            target_w = max(1, round(width * combined_scale))
-            target_h = max(1, round(height * combined_scale))
-            resize_fn = prep_dev_sprite.resize_rgba_area_average if combined_scale < 1.0 else prep_dev_sprite.resize_rgba_nearest
+        if abs(combined_scale_x - 1.0) > 1e-9 or abs(combined_scale_y - 1.0) > 1e-9:
+            target_w = max(1, round(width * combined_scale_x))
+            target_h = max(1, round(height * combined_scale_y))
+            # El filtro se elige por el eje que MÁS reduce: un area-average
+            # preserva mucho mejor el contenido cuando se achica, y no
+            # perjudica al otro eje si ese apenas cambia.
+            shrinking = combined_scale_x < 1.0 or combined_scale_y < 1.0
+            resize_fn = prep_dev_sprite.resize_rgba_area_average if shrinking else prep_dev_sprite.resize_rgba_nearest
             pixels = resize_fn(width, height, pixels, target_w, target_h)
             width, height = target_w, target_h
 
@@ -320,6 +365,7 @@ def _compile_animation(
 
     normalization = content_plan.normalization_for(context) if content_plan is not None else None
     boundary = content_plan.boundary_for(context) if content_plan is not None else {}
+    color_gain = content_plan.color_gain_for(context) if content_plan is not None else None
 
     # UNA sola `normalization` (escala + canvas + offset) para TODOS los
     # frames de esta animación -- nunca por-frame. Ver DEC-097: la
@@ -339,6 +385,7 @@ def _compile_animation(
     for i, fm in enumerate(frame_manifests):
         substitution = boundary.get(i)
         frame_normalization = normalization
+        frame_color_gain = color_gain
         if substitution is not None:
             base_frame_manifest, base_context = substitution
             # Se conserva el `duration_ms` autorado por ESTA animación
@@ -348,8 +395,14 @@ def _compile_animation(
             frame_normalization = (
                 content_plan.normalization_for(base_context) if content_plan is not None else None
             )
+            # Una punta sustituida ES la pose base: sus pixeles ya son
+            # los correctos, así que NUNCA se le aplica la ganancia de
+            # color de la secuencia -- aplicarla la sacaría del color de
+            # la base, que es justamente lo que la ganancia corrige.
+            frame_color_gain = None
         w, h, blob = _compile_frame(
-            fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension, frame_normalization)
+            fm, manifest_dir, f"{full_context} frame {i}", runtime_max_frame_dimension,
+            frame_normalization, frame_color_gain)
         if first_dims is None:
             first_dims = (w, h)
         elif (w, h) != first_dims:
@@ -479,6 +532,27 @@ def _validate_target_state_ids(states: list[dict]) -> None:
                     )
 
 
+def _frame_pixels_at(anim_manifest: dict, manifest_dir: str, context: str, index: int) -> tuple[int, int, bytes]:
+    """Decodifica UN frame puntual por índice. Usado solo para DERIVAR
+    las correcciones que el contenido declara (aspecto de export y
+    ganancia de color) a partir de la correspondencia de poses estables.
+
+    Esto NO es el `_nth_frame_pixels()` que DEC-099 eliminó: aquel leía
+    el último frame para MEDIR qué tan lejos había quedado de una base y
+    corregir esa distancia. Acá el contenido ya afirma que ese frame ES
+    esa pose; lo único que se mide es en qué sistema de proporciones (o
+    de exposición) la trae su export."""
+    frame_manifests = _require(anim_manifest, "frames", context)
+    if not frame_manifests:
+        raise PackCompileError(f"{context}: must have at least one frame")
+    resolved = index if index >= 0 else len(frame_manifests) + index
+    source = _require(frame_manifests[resolved], "source", f"{context} frame {resolved}")
+    path = os.path.join(manifest_dir, source)
+    if not os.path.isfile(path):
+        raise PackCompileError(f"{context} frame {resolved}: source frame not found: {path}")
+    return prep_dev_sprite.read_png_rgba(path)
+
+
 def _first_frame_pixels(anim_manifest: dict, manifest_dir: str, context: str) -> tuple[int, int, bytes]:
     """Decodifica el PRIMER frame de una animación -- usado
     exclusivamente por el pre-pass de _build_content_plan(), que nunca
@@ -540,11 +614,12 @@ def _grow_working_canvas_for_runtime_rounding(
             ratio = runtime_max_frame_dimension / max(working_width, working_height)
         need_w = 0
         need_h = 0
-        for entry_key, (content_scale, _w, _h, offset_x, offset_y) in plan.items():
+        for entry_key, ((content_scale_x, content_scale_y), _w, _h, offset_x, offset_y) in plan.items():
             native_w, native_h = native_sizes[entry_key]
-            combined = content_scale * ratio
-            frame_w = native_w if abs(combined - 1.0) <= 1e-9 else max(1, round(native_w * combined))
-            frame_h = native_h if abs(combined - 1.0) <= 1e-9 else max(1, round(native_h * combined))
+            combined_x = content_scale_x * ratio
+            combined_y = content_scale_y * ratio
+            frame_w = native_w if abs(combined_x - 1.0) <= 1e-9 else max(1, round(native_w * combined_x))
+            frame_h = native_h if abs(combined_y - 1.0) <= 1e-9 else max(1, round(native_h * combined_y))
             need_w = max(need_w, round(offset_x * ratio) + frame_w)
             need_h = max(need_h, round(offset_y * ratio) + frame_h)
         have_w = max(1, round(working_width * ratio))
@@ -635,6 +710,13 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
     base_frame_manifest_of_entry: dict[str, dict] = {}
     # entry_key -> {índice de frame absoluto: (state_id, direction)}
     pending_boundary: dict[str, dict[int, tuple[str, str | None]]] = {}
+    # Acciones que declararon querer una corrección derivada de su
+    # correspondencia de poses estables. El aspecto es por GRUPO (las
+    # dos direcciones son espejo, así que comparten sigmas y deben
+    # compartir escala); el color es por ENTRADA, porque se aplica
+    # frame a frame en la compilación.
+    aspect_requests: list[tuple[str, str, dict]] = []
+    color_requests: list[tuple[str, dict]] = []
 
     states = _require(manifest, "states", "manifest")
     if not states:
@@ -658,7 +740,7 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
         entry_frame_paths[context] = own
 
     def mark_boundaries(anim_manifest: dict, context: str, first_base: str | None,
-                        last_base: str | None, direction: str | None) -> None:
+                        last_base: str | None, direction: str | None, tail_count: int = 1) -> None:
         """`first_frame_is_state_base`/`last_frame_is_state_base` son
         propiedades de la ACCIÓN (misma familia que `target_state_id`,
         que tampoco se re-lee por-dirección), pero se RESUELVEN por
@@ -671,7 +753,18 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
         if first_base is not None:
             marks[0] = (first_base, direction)
         if last_base is not None:
-            marks[len(frame_manifests) - 1] = (last_base, direction)
+            # `stable_pose_tail_frames` (default 1): cuántos frames
+            # FINALES representan esa pose estable, no solo el último.
+            # Existe porque un export puede quedarse quieto en la pose
+            # de llegada durante varios frames -- si su root-motion no
+            # cierra contra la base, esos frames son el personaje
+            # INMÓVIL EN EL LUGAR EQUIVOCADO, y después un salto. Que el
+            # contenido declare cuántos son deja que el compilador los
+            # reemplace por la base exacta: sin inventar movimiento y
+            # sin tocar un solo frame de la animación real. Ver DEC-101.
+            first_tail = max(1, len(frame_manifests) - tail_count)
+            for index in range(first_tail, len(frame_manifests)):
+                marks[index] = (last_base, direction)
 
     def add_actions(action_manifests: list[dict], state_id: str, trigger_name: str) -> None:
         for am in action_manifests:
@@ -681,11 +774,22 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
             add_animation(am, context, group, state_id)
             first_base = am.get("first_frame_is_state_base")
             last_base = am.get("last_frame_is_state_base")
-            mark_boundaries(am, context, first_base, last_base, None)
+            tail_count = int(am.get("stable_pose_tail_frames", 1))
+            if tail_count < 1:
+                raise PackCompileError(f"{context}: stable_pose_tail_frames must be >= 1")
+            wants_aspect = bool(am.get("match_aspect_to_stable_poses", False))
+            wants_color = bool(am.get("match_color_to_stable_poses", False))
+            mark_boundaries(am, context, first_base, last_base, None, tail_count)
+            if wants_aspect:
+                aspect_requests.append((context, group, am))
+            if wants_color:
+                color_requests.append((context, am))
             for i, om in enumerate(am.get("direction_overrides", [])):
                 override_context = f"{context}_direction_overrides[{i}]"
                 add_animation(om, override_context, group, state_id)  # right/left share content_scale
-                mark_boundaries(om, override_context, first_base, last_base, om.get("direction"))
+                mark_boundaries(om, override_context, first_base, last_base, om.get("direction"), tail_count)
+                if wants_color:
+                    color_requests.append((override_context, om))
 
     for state in states:
         state_id = state["id"]
@@ -736,6 +840,73 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
                                    & set(entry_frame_paths.get(base_entry, ()))):
                 start_base_entry[entry_key] = base_entry
 
+    def _base_pixels(frame_manifest: dict, context: str) -> tuple[int, int, bytes]:
+        source = _require(frame_manifest, "source", context)
+        path = os.path.join(manifest_dir, source)
+        if not os.path.isfile(path):
+            raise PackCompileError(f"{context}: source frame not found: {path}")
+        return prep_dev_sprite.read_png_rgba(path)
+
+    def _stable_correspondences(entry_key: str, anim_manifest: dict):
+        """Los pares (frame autorado de ESTA secuencia, frame de la pose
+        base que ese frame DECLARA ser) en las dos puntas extremas.
+
+        Solo las puntas: los frames de en medio cambian de silueta y de
+        sombreado a propósito, y derivar una corrección de ellos sería
+        confundir animación con error -- medido en `tail_greet` de Frin,
+        cuya aspecto por frame oscila hasta 21% mientras sus dos puntas
+        coinciden con la base dentro del 0.2%."""
+        marks = boundary_base_frames.get(entry_key, {})
+        frame_count = len(anim_manifest.get("frames", []))
+        out = []
+        for index in (0, frame_count - 1):
+            if index not in marks:
+                continue
+            base_frame_manifest, _base_context = marks[index]
+            out.append((_frame_pixels_at(anim_manifest, manifest_dir, entry_key, index),
+                        _base_pixels(base_frame_manifest, f"{entry_key} stable-pose base for frame {index}")))
+        return out
+
+    # --- Corrección de ASPECTO de export (DEC-100) --------------------
+    aspect_scale_by_group: dict[str, tuple[float, float]] = {}
+    for entry_key, group_key, anim_manifest in aspect_requests:
+        pairs = _stable_correspondences(entry_key, anim_manifest)
+        if not pairs:
+            raise PackCompileError(
+                f"{entry_key}: match_aspect_to_stable_poses needs at least one declared stable-pose "
+                "endpoint (first_frame_is_state_base / last_frame_is_state_base)")
+        ratios_x: list[float] = []
+        ratios_y: list[float] = []
+        for (aw, ah, apx), (bw, bh, bpx) in pairs:
+            a_sigma = prep_dev_sprite.alpha_weighted_sigma(aw, ah, apx)
+            b_sigma = prep_dev_sprite.alpha_weighted_sigma(bw, bh, bpx)
+            if a_sigma[0] <= 0.0 or a_sigma[1] <= 0.0:
+                continue
+            ratios_x.append(b_sigma[0] / a_sigma[0])
+            ratios_y.append(b_sigma[1] / a_sigma[1])
+        if ratios_x:
+            aspect_scale_by_group[group_key] = (sum(ratios_x) / len(ratios_x),
+                                                sum(ratios_y) / len(ratios_y))
+
+    # --- Ganancia de COLOR de secuencia (DEC-102) ---------------------
+    color_gain_by_entry: dict[str, tuple[float, float, float]] = {}
+    for entry_key, anim_manifest in color_requests:
+        pairs = _stable_correspondences(entry_key, anim_manifest)
+        if not pairs:
+            raise PackCompileError(
+                f"{entry_key}: match_color_to_stable_poses needs at least one declared stable-pose "
+                "endpoint (first_frame_is_state_base / last_frame_is_state_base)")
+        channels: list[tuple[float, float, float]] = []
+        for (aw, ah, apx), (bw, bh, bpx) in pairs:
+            a_rgb = prep_dev_sprite.interior_mean_rgb(aw, ah, apx)
+            b_rgb = prep_dev_sprite.interior_mean_rgb(bw, bh, bpx)
+            if a_rgb is None or b_rgb is None or min(a_rgb) <= 0.0:
+                continue
+            channels.append((b_rgb[0] / a_rgb[0], b_rgb[1] / a_rgb[1], b_rgb[2] / a_rgb[2]))
+        if channels:
+            color_gain_by_entry[entry_key] = tuple(
+                sum(c[i] for c in channels) / len(channels) for i in range(3))
+
     plan: dict[str, tuple[float, int, int, int, int]] = {}
     if normalize:
         plan = prep_dev_sprite.compute_frame_normalization_plan(
@@ -747,6 +918,7 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
             base_group_of_state=base_group_of_state,
             entry_frame_paths=entry_frame_paths,
             start_base_entry=start_base_entry,
+            aspect_scale_by_group=aspect_scale_by_group,
         )
         runtime_max_frame_dimension = manifest.get("runtime_max_frame_dimension")
         if runtime_max_frame_dimension is not None:
@@ -754,7 +926,8 @@ def _build_content_plan(manifest: dict, manifest_dir: str) -> ContentPlan:
                 plan, {key: (w, h) for key, (w, h, _px) in entries.items()}, int(runtime_max_frame_dimension)
             )
 
-    return ContentPlan(normalization=plan, boundary_base_frames=boundary_base_frames)
+    return ContentPlan(normalization=plan, boundary_base_frames=boundary_base_frames,
+                       color_gain=color_gain_by_entry)
 
 
 def compile_pack(manifest_path: str, output_path: str) -> tuple[str, int]:

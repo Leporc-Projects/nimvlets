@@ -478,9 +478,9 @@ class RigidTransformOnlyTest(unittest.TestCase):
             seen = []
             original = compile_pet_pack._compile_frame
 
-            def spy(frame_manifest, manifest_dir, context, rmax, normalization):
+            def spy(frame_manifest, manifest_dir, context, rmax, normalization, color_gain=None):
                 seen.append(normalization)
-                return original(frame_manifest, manifest_dir, context, rmax, normalization)
+                return original(frame_manifest, manifest_dir, context, rmax, normalization, color_gain)
 
             compile_pet_pack._compile_frame = spy
             try:
@@ -488,13 +488,13 @@ class RigidTransformOnlyTest(unittest.TestCase):
                     {"id": "a", "kind": "one_shot", "frames": frames},
                     tmpdir, "ctx", None,
                     compile_pet_pack.ContentPlan(
-                        normalization={"ctx": (1.0, 60, 60, 5, 7)}, boundary_base_frames={}))
+                        normalization={"ctx": ((1.0, 1.0), 60, 60, 5, 7)}, boundary_base_frames={}))
             finally:
                 compile_pet_pack._compile_frame = original
 
             self.assertEqual(len(seen), 4)
             self.assertEqual(len(set(seen)), 1, f"per-frame normalization leaked back in: {seen}")
-            self.assertEqual(seen[0], (1.0, 60, 60, 5, 7))
+            self.assertEqual(seen[0], ((1.0, 1.0), 60, 60, 5, 7))
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -659,7 +659,9 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         }
         groups = {"idle": "idle", "click": "click"}
         plan = self._plan(entries, groups, reference_group="idle")
-        self.assertEqual(plan["idle"][0], 1.0)
+        # La escala es un par (x, y): uniforme salvo que el contenido
+        # declare una corrección de aspecto de export (DEC-100).
+        self.assertEqual(plan["idle"][0], (1.0, 1.0))
 
     def test_matching_content_size_yields_no_rescale(self) -> None:
         # Mismo tamaño de contenido (10x10) en frames nativos de
@@ -671,7 +673,8 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         }
         groups = {"idle": "idle", "click": "click"}
         plan = self._plan(entries, groups, reference_group="idle")
-        self.assertAlmostEqual(plan["click"][0], 1.0, places=6)
+        self.assertAlmostEqual(plan["click"][0][0], 1.0, places=6)
+        self.assertAlmostEqual(plan["click"][0][1], 1.0, places=6)
 
     def test_different_content_size_yields_real_rescale(self) -> None:
         entries = {
@@ -680,7 +683,8 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         }
         groups = {"idle": "idle", "click": "click"}
         plan = self._plan(entries, groups, reference_group="idle")
-        content_scale = plan["click"][0]
+        content_scale = plan["click"][0][0]
+        self.assertEqual(plan["click"][0][0], plan["click"][0][1], "uniform unless aspect-corrected")
         self.assertGreater(content_scale, 1.0)  # el contenido "click" es más chico -> hay que agrandarlo
 
         # El factor exacto sale de `alpha_rms_radius`, no del lado más
@@ -738,7 +742,7 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         groups = {"base": "base", "action": "action"}
         plan = self._plan(entries, groups, reference_group="base")
         # Y el plan real no aplasta la pose autorada.
-        self.assertLess(abs(plan["action"][0] - 1.0), 0.02)
+        self.assertLess(abs(plan["action"][0][0] - 1.0), 0.02)
 
     def test_all_entries_share_the_same_working_canvas_dimensions(self) -> None:
         entries = {
@@ -769,10 +773,10 @@ class FrameNormalizationPlanTest(unittest.TestCase):
         }
         groups = {"idle": "idle", "click": "click"}
         plan = self._plan(entries, groups, reference_group="idle")
-        for key, (scale, working_w, working_h, offset_x, offset_y) in plan.items():
+        for key, ((scale_x, scale_y), working_w, working_h, offset_x, offset_y) in plan.items():
             w, h, _ = entries[key]
-            scaled_w = round(w * scale)
-            scaled_h = round(h * scale)
+            scaled_w = round(w * scale_x)
+            scaled_h = round(h * scale_y)
             self.assertGreaterEqual(offset_x, -0.001, f"{key}: el frame no debería empezar antes del canvas")
             self.assertGreaterEqual(offset_y, -0.001, f"{key}: el frame no debería empezar antes del canvas")
             self.assertLessEqual(offset_x + scaled_w, working_w + 1, f"{key}: el frame no debería exceder el canvas en X")
@@ -1136,129 +1140,329 @@ class CanonicalPetGeometryTest(unittest.TestCase):
                     self.assertEqual(len({(f["width"], f["height"]) for f in anim["frames"]}), 1)
 
 
-class LieToSitInternalResidualTest(unittest.TestCase):
-    """Dónde quedó el desajuste de `lie_to_sit`, medido -- y la prueba
-    de que el compilador no inventó movimiento para disimularlo.
+class LieToSitBoundaryRepairTest(unittest.TestCase):
+    """El defecto que QA reportó en `lie_to_sit`, y la reparación de
+    CONTENIDO que lo resuelve (DEC-101).
 
-    Con las dos puntas ya exactas (CompiledExactPoseContractTest), el
-    desajuste real del export no desapareció: se absorbió DENTRO del
-    clip. La pregunta que importa no es "¿cuánto se mueve el lobo entre
-    frames?" -- eso es velocidad AUTORADA y varía legítimamente -- sino
-    "¿cuánto se mueve DE MÁS respecto de lo que el arte ya decía?".
+    Perfilando el pack compilado frame a frame quedó claro qué veía el
+    owner: el lobo termina de levantarse y después se queda QUIETO
+    varios frames -- pasos de centroide <=0.55px (macho, desde f017) --
+    pero quieto a ~26px DEL LUGAR donde está la pose sentada real,
+    porque el root-motion de este export no cierra contra el de
+    `sit_to_lie`. Recién al final saltaba a su sitio. Un salto en medio
+    del movimiento se disimula; un salto después de casi un segundo de
+    inmovilidad no.
 
-    Así que cada par de frames consecutivos del pack compilado se
-    compara contra el MISMO par en los PNG nativos, escalado por la
-    escala que el compilador aplicó. Un compilador que no inventa
-    root-motion deja esa diferencia en cero para todos los pares
-    interiores."""
+    La reparación no inventa movimiento ni toca un frame autorado que
+    todavía se esté moviendo: el contenido declara cuántos frames
+    FINALES ya son la pose estable, y esos se compilan desde el archivo
+    de la base. Lo que queda es UN solo paso, y ocurre mientras el lobo
+    todavía está en movimiento."""
 
-    VARIANTS = (("male", "assets/dev/frin_male_pack.nvpack"),
-                ("female", "assets/dev/frin_female_pack.nvpack"))
-
-    # `Direction::kRight` del runtime lee la carpeta física "left" --
-    # ver FrinRuntimeDirectionInversionTest y DEC-091.
+    VARIANTS = (("male", "assets/dev/frin_male_pack.nvpack",
+                 "assets/source/nimvlets/frin/male/pack_manifest.json"),
+                ("female", "assets/dev/frin_female_pack.nvpack",
+                 "assets/source/nimvlets/frin/female/pack_manifest.json"))
+    DIRECTIONS = ("right", "left")
     RUNTIME_RIGHT_SOURCE_DIR = "left"
-
-    # Movimiento inyectado tolerado en el interior del clip: puro
-    # redondeo de resampleo. Medido hoy: 0.050px (macho), 0.040px
-    # (hembra).
     MAX_INJECTED_MOTION_PX = 0.5
 
-    # El arranque queda continuo -- el frame base sustituido cae
-    # prácticamente donde caía el frame 0 autorado. Medido: 0.38/0.39px.
-    MAX_START_BOUNDARY_DELTA_PX = 2.0
-
-    # DEUDA DE CONTENIDO, no objetivo de calidad: lo que el export no
-    # cierra, aterrizando en el último par de frames. Medido hoy:
-    # 24.27px (macho), 5.44px (hembra). Fijado para que una regresión
-    # falle ruidosamente, NO como "suficientemente bueno".
-    MAX_END_BOUNDARY_DEBT_PX = {"male": 30.0, "female": 8.0}
-
-    def _compiled_clip(self, rel: str):
+    def _clip(self, rel: str, direction: str = "right"):
         pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
         state = read_pet_pack.find_state(pack, "lying")
         action = read_pet_pack.find_action(state, "click_actions", "lie_to_sit")
         return read_pet_pack.resolve_animation(
-            action["animation"], action["direction_overrides"], "right")["frames"]
+            action["animation"], action["direction_overrides"], direction)["frames"]
 
-    def _authored(self, variant: str, count: int):
-        base = os.path.join(_REPO_ROOT, "assets/source/nimvlets/frin", variant,
-                            "animations/lie_to_sit", self.RUNTIME_RIGHT_SOURCE_DIR, "frames")
-        out = []
-        for index in range(count):
-            w, h, pixels = prep_dev_sprite.read_png_rgba(os.path.join(base, f"frame_{index:03d}.png"))
-            out.append((prep_dev_sprite.alpha_weighted_centroid(w, h, pixels),
-                        prep_dev_sprite.alpha_rms_radius(w, h, pixels)))
-        return out
+    def _seated_base(self, rel: str, direction: str = "right"):
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+        state = read_pet_pack.find_state(pack, "seated")
+        return read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], direction)["frames"][0]
+
+    def _declared_tail(self, manifest_rel: str) -> int:
+        with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        for state in manifest["states"]:
+            for action in state.get("click_actions", []):
+                if action["id"] == "lie_to_sit":
+                    return int(action.get("stable_pose_tail_frames", 1))
+        raise AssertionError("lie_to_sit not found")
 
     @staticmethod
     def _travel(a, b) -> float:
         return math.hypot(b[0] - a[0], b[1] - a[1])
 
-    def _measure(self, variant: str, rel: str):
-        frames = self._compiled_clip(rel)
-        compiled = [read_pet_pack.content_alpha_centroid(f) for f in frames]
-        authored = self._authored(variant, len(frames))
-        # La escala aplicada se mide sobre un frame INTERIOR (uno que no
-        # fue sustituido), no sobre el tamaño del canvas: el canvas de
-        # trabajo compartido no tiene relación con el tamaño nativo.
-        mid = len(frames) // 2
-        scale = (prep_dev_sprite.alpha_rms_radius(
-            frames[mid]["width"], frames[mid]["height"], frames[mid]["pixels"]) / authored[mid][1])
-        return compiled, authored, scale
+    def test_the_declared_terminal_run_is_exactly_the_seated_base(self) -> None:
+        for variant, rel, manifest_rel in self.VARIANTS:
+            tail = self._declared_tail(manifest_rel)
+            self.assertGreater(tail, 1, f"{variant}: expected a declared stable tail")
+            for direction in self.DIRECTIONS:
+                frames = self._clip(rel, direction)
+                base = self._seated_base(rel, direction)
+                for index in range(len(frames) - tail, len(frames)):
+                    with self.subTest(variant=variant, direction=direction, frame=index):
+                        self.assertEqual(frames[index]["pixels"], base["pixels"])
 
-    def test_no_compiler_injected_motion_inside_the_clip(self) -> None:
-        for variant, rel in self.VARIANTS:
-            compiled, authored, scale = self._measure(variant, rel)
-            for index in range(1, len(compiled) - 2):
+    def test_once_seated_the_wolf_never_moves_again(self) -> None:
+        """EL invariante que faltaba en d96239b. Allí el lobo llegaba a
+        la pose sentada, se quedaba inmóvil ~0.84s en el lugar
+        equivocado y recién entonces se teletransportaba 25.85px. Acá se
+        exige que, a partir del momento en que muestra la pose sentada,
+        no haya NINGÚN desplazamiento posterior."""
+        for variant, rel, manifest_rel in self.VARIANTS:
+            tail = self._declared_tail(manifest_rel)
+            for direction in self.DIRECTIONS:
+                frames = self._clip(rel, direction)
+                centroids = [read_pet_pack.content_alpha_centroid(f)
+                             for f in frames[len(frames) - tail:]]
+                moved = max(self._travel(a, b) for a, b in zip(centroids, centroids[1:]))
+                with self.subTest(variant=variant, direction=direction):
+                    self.assertEqual(
+                        moved, 0.0,
+                        f"{variant}/{direction}: the wolf still shifts {moved:.2f}px after it has "
+                        "settled into the seated pose -- that is the teleport QA reported")
+
+    def test_the_single_residual_step_happens_while_still_moving(self) -> None:
+        """El desajuste del export no desapareció -- se reubicó. Queda
+        UN paso, en la frontera de sustitución, y el frame anterior
+        todavía se estaba moviendo (su propio paso autorado es > 0), que
+        es lo que hace que se lea como parte del movimiento."""
+        for variant, rel, manifest_rel in self.VARIANTS:
+            tail = self._declared_tail(manifest_rel)
+            for direction in self.DIRECTIONS:
+                frames = self._clip(rel, direction)
+                centroids = [read_pet_pack.content_alpha_centroid(f) for f in frames]
+                boundary = len(frames) - tail
+                approach = self._travel(centroids[boundary - 2], centroids[boundary - 1])
+                with self.subTest(variant=variant, direction=direction):
+                    self.assertGreater(
+                        approach, 0.5,
+                        f"{variant}/{direction}: the frame before the substitution boundary is "
+                        "stationary -- the residual would read as a teleport, not as motion")
+
+    def test_no_compiler_injected_motion_in_the_authored_range(self) -> None:
+        """Sobre los frames que SIGUEN siendo animación autorada, el
+        recorrido compilado debe coincidir con el de los PNG nativos: el
+        compilador no inventa root-motion (DEC-097)."""
+        for variant, rel, manifest_rel in self.VARIANTS:
+            tail = self._declared_tail(manifest_rel)
+            frames = self._clip(rel)
+            compiled = [read_pet_pack.content_alpha_centroid(f) for f in frames]
+            base_dir = os.path.join(_REPO_ROOT, "assets/source/nimvlets/frin", variant,
+                                    "animations/lie_to_sit", self.RUNTIME_RIGHT_SOURCE_DIR, "frames")
+            authored = []
+            for index in range(len(frames)):
+                w, h, pixels = prep_dev_sprite.read_png_rgba(
+                    os.path.join(base_dir, f"frame_{index:03d}.png"))
+                authored.append((prep_dev_sprite.alpha_weighted_centroid(w, h, pixels),
+                                 prep_dev_sprite.alpha_rms_radius(w, h, pixels)))
+            mid = (len(frames) - tail) // 2
+            scale = (prep_dev_sprite.alpha_rms_radius(
+                frames[mid]["width"], frames[mid]["height"], frames[mid]["pixels"]) / authored[mid][1])
+            last_authored = len(frames) - tail - 1
+            for index in range(1, last_authored):
                 with self.subTest(variant=variant, pair=f"{index}->{index + 1}"):
                     injected = abs(self._travel(compiled[index], compiled[index + 1])
                                    - self._travel(authored[index][0], authored[index + 1][0]) * scale)
-                    self.assertLess(
-                        injected, self.MAX_INJECTED_MOTION_PX,
-                        f"{variant}: frames {index}->{index + 1} travel {injected:.2f}px more than the "
-                        "authored art does -- the compiler is inventing root motion (DEC-097)")
+                    self.assertLess(injected, self.MAX_INJECTED_MOTION_PX)
 
-    def test_the_start_boundary_is_continuous(self) -> None:
-        for variant, rel in self.VARIANTS:
-            compiled, authored, scale = self._measure(variant, rel)
+    def test_the_authored_middle_is_still_there(self) -> None:
+        """Control negativo: la reparación no puede degenerar en borrar
+        la animación."""
+        for variant, rel, manifest_rel in self.VARIANTS:
+            tail = self._declared_tail(manifest_rel)
+            frames = self._clip(rel)
+            distinct = len({f["pixels"] for f in frames[1:len(frames) - tail]})
             with self.subTest(variant=variant):
-                delta = abs(self._travel(compiled[0], compiled[1])
-                            - self._travel(authored[0][0], authored[1][0]) * scale)
-                self.assertLess(delta, self.MAX_START_BOUNDARY_DELTA_PX)
+                self.assertGreaterEqual(distinct, 12)
 
-    def test_the_export_mismatch_lands_on_the_final_pair_as_known_debt(self) -> None:
-        """El desajuste se PONE acá a propósito: en el último par de
-        frames, mientras el lobo todavía se está moviendo. Después de
-        ese frame el runtime muestra la pose sentada base y NO cambia
-        nada, porque ese frame final YA ES la base exacta."""
-        for variant, rel in self.VARIANTS:
-            compiled, authored, scale = self._measure(variant, rel)
-            last = len(compiled) - 1
-            with self.subTest(variant=variant):
-                debt = abs(self._travel(compiled[last - 1], compiled[last])
-                           - self._travel(authored[last - 1][0], authored[last][0]) * scale)
-                self.assertLess(
-                    debt, self.MAX_END_BOUNDARY_DEBT_PX[variant],
-                    f"{variant}: lie_to_sit end-boundary debt grew to {debt:.2f}px -- known content "
-                    "debt from an export that does not close geometrically, but it must not get WORSE")
-
-    def test_both_runtime_directions_carry_the_same_geometry(self) -> None:
-        """Las dos direcciones son espejo la una de la otra, así que su
-        recorrido total debe coincidir -- si no, una de las dos recibió
-        una transforma distinta."""
-        for variant, rel in self.VARIANTS:
+    def test_frame_count_and_timing_are_untouched(self) -> None:
+        for variant, rel, _m in self.VARIANTS:
             pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
             state = read_pet_pack.find_state(pack, "lying")
             action = read_pet_pack.find_action(state, "click_actions", "lie_to_sit")
-            totals = []
-            for direction in ("right", "left"):
-                frames = read_pet_pack.resolve_animation(
-                    action["animation"], action["direction_overrides"], direction)["frames"]
-                centroids = [read_pet_pack.content_alpha_centroid(f) for f in frames]
-                totals.append(sum(self._travel(a, b) for a, b in zip(centroids, centroids[1:])))
             with self.subTest(variant=variant):
-                self.assertAlmostEqual(totals[0], totals[1], delta=1.5)
+                self.assertEqual(len(action["animation"]["frames"]), 25)
+                self.assertAlmostEqual(action["animation"]["fps"], 25 / 3.0, places=6)
+
+
+class SequenceAspectCorrectionTest(unittest.TestCase):
+    """Corrección de aspecto de export, constante por secuencia
+    (DEC-100).
+
+    Se fija lo que el owner ve: cuánto más ancho-relativo-a-alto se
+    muestra un frame de animación comparado con la pose base estable.
+    Positivo = "se ve más gordo". El control es Nidir, aprobado como
+    perfecto: sus propias animaciones llegan a +2.3%/+2.7% en su frame
+    más parecido al reposo, así que ESA es la banda que el owner ya
+    acepta -- no un umbral inventado acá."""
+
+    @staticmethod
+    def _aspect_error(frame, base_sigma) -> float:
+        sigma = prep_dev_sprite.alpha_weighted_sigma(
+            frame["width"], frame["height"], frame["pixels"])
+        return (sigma[0] / base_sigma[0]) / (sigma[1] / base_sigma[1]) - 1.0
+
+    def _base_sigma(self, pack: dict, state_id: str, direction: str = "right"):
+        state = read_pet_pack.find_state(pack, state_id)
+        base = read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], direction)["frames"][0]
+        return prep_dev_sprite.alpha_weighted_sigma(base["width"], base["height"], base["pixels"])
+
+    def _first_authored(self, pack: dict, state_id: str, trigger: str, action_id: str):
+        state = read_pet_pack.find_state(pack, state_id)
+        action = read_pet_pack.find_action(state, trigger, action_id)
+        return read_pet_pack.resolve_animation(
+            action["animation"], action["direction_overrides"], "right")["frames"][1]
+
+    def test_corrected_sequences_start_in_the_pets_own_size_system(self) -> None:
+        """El primer frame AUTORADO (el 0 es la base exacta) es el
+        instante en que el owner ve arrancar la animación: es ahí donde
+        un cambio de sistema de escala se lee como "de golpe es más
+        gordo"."""
+        cases = (("assets/dev/bunny_pack.nvpack", "default", "ambient_actions", "groom", 0.025),
+                 ("assets/dev/bunny_pack.nvpack", "default", "click_actions", "click", 0.025),
+                 ("assets/dev/frin_male_pack.nvpack", "seated", "click_actions", "howl", 0.025),
+                 ("assets/dev/frin_female_pack.nvpack", "seated", "click_actions", "howl", 0.025))
+        for rel, state_id, trigger, action_id, ceiling in cases:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            error = self._aspect_error(
+                self._first_authored(pack, state_id, trigger, action_id),
+                self._base_sigma(pack, state_id))
+            with self.subTest(pack=os.path.basename(rel), action=action_id):
+                self.assertLess(
+                    abs(error), ceiling,
+                    f"{action_id} starts {error * 100:+.2f}% off the pet's own aspect -- an export "
+                    "aspect mismatch is back")
+
+    def test_tail_greet_geometry_is_preserved_untouched(self) -> None:
+        """`tail_greet` es el CONTROL NEGATIVO dentro de Frin: QA aprobó
+        su geometría explícitamente, y medido su export ya coincide con
+        la pose sentada. No debe recibir ninguna corrección de aspecto
+        -- su escala tiene que seguir siendo perfectamente uniforme."""
+        for rel, manifest_rel in (
+                ("assets/dev/frin_male_pack.nvpack", "assets/source/nimvlets/frin/male/pack_manifest.json"),
+                ("assets/dev/frin_female_pack.nvpack", "assets/source/nimvlets/frin/female/pack_manifest.json")):
+            with open(os.path.join(_REPO_ROOT, manifest_rel), "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            declared = [a for st in manifest["states"] for a in st.get("click_actions", [])
+                        if a["id"] == "tail_greet"]
+            self.assertEqual(len(declared), 1)
+            with self.subTest(pack=os.path.basename(rel)):
+                self.assertNotIn("match_aspect_to_stable_poses", declared[0])
+                pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+                error = self._aspect_error(
+                    self._first_authored(pack, "seated", "click_actions", "tail_greet"),
+                    self._base_sigma(pack, "seated"))
+                # Su silueta SÍ cambia mucho (la cola se abre); lo que se
+                # fija es que arranque alineado con la pose sentada.
+                self.assertLess(abs(error), 0.10)
+
+    def test_nidir_declares_no_aspect_correction_anywhere(self) -> None:
+        with open(os.path.join(_REPO_ROOT, "assets/source/nimvlets/nidir/pack_manifest.json"),
+                  "r", encoding="utf-8") as f:
+            self.assertNotIn("match_aspect_to_stable_poses", json.dumps(json.load(f)))
+
+    def test_the_correction_is_one_constant_pair_for_the_whole_sequence(self) -> None:
+        """Constante por secuencia, nunca por frame: se observa en que
+        todos los frames de una animación comparten dimensiones
+        compiladas exactas."""
+        for rel in ("assets/dev/bunny_pack.nvpack", "assets/dev/frin_male_pack.nvpack",
+                    "assets/dev/frin_female_pack.nvpack"):
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            for state in pack["states"]:
+                for trigger in ("ambient_actions", "click_actions"):
+                    for action in state[trigger]:
+                        frames = action["animation"]["frames"]
+                        with self.subTest(pack=os.path.basename(rel), action=action["id"]):
+                            self.assertEqual(len({(f["width"], f["height"]) for f in frames}), 1)
+
+
+class SequenceColorCorrectionTest(unittest.TestCase):
+    """Ganancia de color constante por secuencia (DEC-102).
+
+    Diagnóstico previo, medido: `tail_greet` del MACHO viene ~2.5% más
+    oscuro que la pose sentada YA EN EL PNG FUENTE (medido sobre
+    pixeles interiores, alpha>=250, así que no es un efecto de borde ni
+    de premultiplicado), y el pipeline de compilación se midió fiel a
+    +0.15%. O sea: la causa es el export, no el compilador ni el
+    renderer -- por eso la corrección vive en el contenido y no hay un
+    solo cambio bajo src/."""
+
+    def test_apply_rgb_gain_never_touches_alpha(self) -> None:
+        pixels = bytes([10, 20, 30, 0, 200, 210, 220, 128, 250, 251, 252, 255])
+        out = prep_dev_sprite.apply_rgb_gain(3, 1, pixels, (1.5, 1.5, 1.5))
+        self.assertEqual([out[3], out[7], out[11]], [0, 128, 255])
+
+    def test_apply_rgb_gain_clamps_instead_of_wrapping(self) -> None:
+        out = prep_dev_sprite.apply_rgb_gain(1, 1, bytes([250, 250, 250, 255]), (2.0, 2.0, 2.0))
+        self.assertEqual(list(out), [255, 255, 255, 255])
+
+    def test_compile_pipeline_does_not_darken_on_its_own(self) -> None:
+        """Sin ganancia declarada, el color interior que sale compilado
+        tiene que ser el del PNG fuente. Si esto falla, el problema NO
+        es de contenido y la corrección de color estaría tapando un bug
+        del compilador."""
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        state = read_pet_pack.find_state(pack, "seated")
+        action = read_pet_pack.find_action(state, "click_actions", "howl")  # sin ganancia declarada
+        frame = read_pet_pack.resolve_animation(
+            action["animation"], action["direction_overrides"], "right")["frames"][12]
+        compiled = prep_dev_sprite.interior_mean_rgb(frame["width"], frame["height"], frame["pixels"])
+        w, h, pixels = prep_dev_sprite.read_png_rgba(os.path.join(
+            _REPO_ROOT, "assets/source/nimvlets/frin/male/animations/howl/left/frames/frame_012.png"))
+        source = prep_dev_sprite.interior_mean_rgb(w, h, pixels)
+        for channel in range(3):
+            self.assertLess(abs(compiled[channel] / source[channel] - 1.0), 0.01)
+
+    def test_male_tail_greet_rest_frames_now_match_the_seated_base(self) -> None:
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        state = read_pet_pack.find_state(pack, "seated")
+        base = read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], "right")["frames"][0]
+        base_rgb = prep_dev_sprite.interior_mean_rgb(base["width"], base["height"], base["pixels"])
+        action = read_pet_pack.find_action(state, "click_actions", "tail_greet")
+        frames = read_pet_pack.resolve_animation(
+            action["animation"], action["direction_overrides"], "right")["frames"]
+        for index in (1, len(frames) - 2):
+            rgb = prep_dev_sprite.interior_mean_rgb(
+                frames[index]["width"], frames[index]["height"], frames[index]["pixels"])
+            for channel in range(3):
+                with self.subTest(frame=index, channel="RGB"[channel]):
+                    self.assertLess(abs(rgb[channel] / base_rgb[channel] - 1.0), 0.01)
+
+    def test_the_gain_is_constant_not_per_frame_auto_exposure(self) -> None:
+        """Una normalización por frame se delataría porque TODOS los
+        frames quedarían igual de brillantes que la base. La ganancia
+        constante deja intacta la variación de sombreado autorada del
+        medio del clip -- que es contenido, no error."""
+        pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, "assets/dev/frin_male_pack.nvpack"))
+        state = read_pet_pack.find_state(pack, "seated")
+        base = read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], "right")["frames"][0]
+        base_rgb = prep_dev_sprite.interior_mean_rgb(base["width"], base["height"], base["pixels"])
+        action = read_pet_pack.find_action(state, "click_actions", "tail_greet")
+        frames = read_pet_pack.resolve_animation(
+            action["animation"], action["direction_overrides"], "right")["frames"]
+        mid = prep_dev_sprite.interior_mean_rgb(
+            frames[12]["width"], frames[12]["height"], frames[12]["pixels"])
+        self.assertGreater(abs(mid[1] / base_rgb[1] - 1.0), 0.005,
+                           "mid-clip shading was flattened -- that is auto-exposure, not a constant gain")
+
+    def test_only_male_tail_greet_declares_a_color_gain(self) -> None:
+        """La hembra NO se corrige: medido -0.5%, dentro del ruido.
+        Corregir ahí sería resamplear para nada."""
+        expected = {"male": True, "female": False}
+        for variant, declared in expected.items():
+            with open(os.path.join(_REPO_ROOT, f"assets/source/nimvlets/frin/{variant}/pack_manifest.json"),
+                      "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            found = {a["id"] for st in manifest["states"]
+                     for t in ("ambient_actions", "hover_actions", "click_actions")
+                     for a in st.get(t, []) if a.get("match_color_to_stable_poses")}
+            with self.subTest(variant=variant):
+                self.assertEqual(found, {"tail_greet"} if declared else set())
 
 
 class NidirGoldenControlTest(unittest.TestCase):
@@ -1609,7 +1813,7 @@ class MultiStateNormalizationPlanTest(unittest.TestCase):
             group_frame_paths=group_frame_paths, state_of_group=state_of_group,
             base_group_of_state=base_group_of_state,
         )
-        self.assertEqual(plan["state[lying].base_animation"][0], 1.0)
+        self.assertEqual(plan["state[lying].base_animation"][0], (1.0, 1.0))
 
     def test_action_of_unlinked_state_compares_against_its_own_state_base_not_the_pet_reference(self) -> None:
         # "lying" NO está vinculado por archivo a "seated" en este
@@ -1656,7 +1860,8 @@ class MultiStateNormalizationPlanTest(unittest.TestCase):
         # el fallback de bounding box cross-estado, documentado como
         # límite honesto -- lo que este test verifica es que
         # lie_to_sit NO se recalibra por separado contra seated).
-        self.assertAlmostEqual(plan["state[lying].click_actions.lie_to_sit"][0], plan["state[lying].base_animation"][0], places=6)
+        self.assertAlmostEqual(plan["state[lying].click_actions.lie_to_sit"][0][0],
+                               plan["state[lying].base_animation"][0][0], places=6)
 
 
 class FrameSequenceValidationTest(unittest.TestCase):
