@@ -132,10 +132,10 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
         // — arte + nombre + estado — con un poco de aire, NO toda la
         // columna (block brief §8: sin cards fuertes alrededor de cada
         // pet).
-        const float cellW = std::min(colW - 12.0f, art + 44.0f);
+        const float cellW = std::min(colW - 12.0f, art + 40.0f);
         const float cellX = colX + (colW - cellW) * 0.5f;
-        const float cellH = art + kArtToName + kNameH + kNameToStatus + kStatusH + 22.0f;
-        box.cell = UiRect{cellX, cellY - 8.0f, cellW, cellH};
+        const float cellH = art + kArtToName + kNameH + kNameToStatus + kStatusH + 16.0f;
+        box.cell = UiRect{cellX, cellY - 10.0f, cellW, cellH};
 
         box.art = UiRect{colX + (colW - art) * 0.5f, cellY, art, art};
         box.name = UiRect{colX, box.art.Bottom() + kArtToName, colW, kNameH};
