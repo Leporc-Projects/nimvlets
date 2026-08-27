@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "platform/TransparentWindowSupport.h"
 #include "productui/UiPaint.h"
 
 namespace nimvlets::productui {
@@ -61,7 +62,10 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     pendingExpose_ = true;
     FocusWindow();
 
-    SDL_Log("nimvlets: Product UI window opened (%dx%d logical, scale %.2f)", kDefaultW, kDefaultH,
+    int wx = 0;
+    int wy = 0;
+    SDL_GetWindowPosition(window_, &wx, &wy);
+    SDL_Log("nimvlets: Product UI window opened (%dx%d logical at (%d,%d), scale %.2f)", kDefaultW, kDefaultH, wx, wy,
             static_cast<double>(scale_));
     return true;
 }
@@ -93,6 +97,10 @@ void ProductWindow::FocusWindow() {
     if (window_ == nullptr) {
         return;
     }
+    // Nimvlets corre como accessory app para el pet; activar la app hace
+    // que esta ventana normal reciba teclado y clicks de contenido sin
+    // el "primer click solo activa" del sistema (block brief §6/§23).
+    platform::BringApplicationToForeground();
     SDL_ShowWindow(window_);
     SDL_RaiseWindow(window_);
 }

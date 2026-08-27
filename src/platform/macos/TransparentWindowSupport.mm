@@ -104,6 +104,15 @@ void ApplyOwnedIgnoresMouseEvents(NSWindow* nsWindow, BOOL value) {
 
 }  // namespace
 
+void BringApplicationToForeground() {
+    // activateIgnoringOtherApps: alcanza para que la ventana de producto
+    // se vuelva key y reciba teclado/clicks; NO se cambia la activation
+    // policy (sigue siendo accessory: sin ícono en el Dock), lo que
+    // mantiene el pet como un companion discreto cuando la Collection
+    // está cerrada.
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
 void ConfigureCompanionWindow(SDL_Window* window) {
     NSWindow* nsWindow = CocoaWindowFor(window);
     if (nsWindow == nil) {

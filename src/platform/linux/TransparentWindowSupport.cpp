@@ -28,6 +28,13 @@
 
 namespace nimvlets::platform {
 
+void BringApplicationToForeground() {
+    // No-op por ahora: el Product UI de Block 06 solo se valida en macOS
+    // (block brief 24). Una implementacion real usaria el protocolo de
+    // activacion del compositor (Wayland xdg-activation / X11). Ver
+    // docs/PRODUCT_UI.md y docs/LINUX_PLATFORM.md.
+}
+
 namespace {
 
 LinuxVideoBackend DetectBackend() {

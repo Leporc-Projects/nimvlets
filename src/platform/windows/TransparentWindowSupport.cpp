@@ -30,6 +30,12 @@
 
 namespace nimvlets::platform {
 
+void BringApplicationToForeground() {
+    // No-op por ahora: el Product UI de Block 06 solo se valida en macOS
+    // (block brief 24). Una implementacion real usaria SetForegroundWindow.
+    // Ver docs/PRODUCT_UI.md.
+}
+
 #if defined(_WIN32)
 
 namespace {

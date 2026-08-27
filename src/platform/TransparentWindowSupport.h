@@ -13,6 +13,16 @@ struct SDL_Window;
 
 namespace nimvlets::platform {
 
+// Trae la aplicación al frente y le da el foco de teclado (macOS:
+// -[NSApplication activateIgnoringOtherApps:]). Nimvlets corre como
+// accessory app (sin ícono en el Dock) para el pet; cuando se abre la
+// ventana de producto (block brief §6: "a normal focusable application
+// window") hay que activar la app para que esa ventana reciba teclado
+// y clicks de contenido sin el "primer click activa" del sistema.
+// Windows/Linux: no-op declarado por ahora (el Product UI solo se
+// valida en macOS este bloque — ver docs/PRODUCT_UI.md §9).
+void BringApplicationToForeground();
+
 // Configures `window` (already created with SDL_WINDOW_TRANSPARENT |
 // SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_UTILITY |
 // SDL_WINDOW_NOT_FOCUSABLE) for the desktop-companion presentation: no

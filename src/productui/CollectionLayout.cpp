@@ -162,7 +162,11 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             d.panel = UiRect{kMargin, panelY, contentW, kDetailArt + 8.0f};
             d.art = UiRect{kMargin, panelY, kDetailArt, kDetailArt};
 
-            const float rightX = d.art.Right() + 30.0f;
+            // Un pet locked no muestra arte (block brief §9), así que el
+            // texto arranca en el borde del panel, no después de una
+            // columna de arte vacía.
+            const bool hasArt = item->status != OwnershipStatus::kLocked;
+            const float rightX = hasArt ? d.art.Right() + 30.0f : kMargin;
             const float rightW = std::max(120.0f, kMargin + contentW - rightX);
             d.nameAnchor = UiRect{rightX, panelY + 2.0f, rightW, kDetailNameH};
 

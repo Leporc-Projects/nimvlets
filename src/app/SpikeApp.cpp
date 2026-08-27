@@ -1452,6 +1452,44 @@ int SpikeApp::Run() {
         SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_HIDE_PET (pet window hidden at startup)");
     }
 
+    // Mecanismo solo-DEV (Block 06): dispara una activación desde la
+    // Collection sin un click real ("petId" o "petId/variantId"), para
+    // smoke-testear el switch en vivo (misma ruta que el botón "Use"):
+    // CanActivate -> TrySwitchActivePet -> refresco de preview/modelo/
+    // menú. Ausente/vacía: no-op. Ver README.md y docs/PRODUCT_UI.md.
+    // Mecanismo solo-DEV (Block 06): abre y cierra la ventana de
+    // Collection N veces seguidas, para smoke-testear que el ciclo de
+    // vida (crear/soltar todos los recursos de GPU, reabrir) es correcto
+    // y no filtra ni crashea, y que el runtime del pet lo sobrevive
+    // (block brief §18/§27). Ausente/vacía: no-op.
+    if (const char* cyclesEnv = std::getenv("NIMVLETS_DEV_COLLECTION_CYCLES");
+        cyclesEnv != nullptr && cyclesEnv[0] != '\0') {
+        char* end = nullptr;
+        const long n = std::strtol(cyclesEnv, &end, 10);
+        if (end != cyclesEnv && n > 0) {
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_COLLECTION_CYCLES=%ld", n);
+            for (long i = 0; i < n; ++i) {
+                OpenProductWindow();
+                productWindow_.RenderIfNeeded();
+                productWindow_.Close();
+            }
+            SDL_Log(
+                "nimvlets: DEV collection cycles complete — %ld open/close pair(s), pet '%s' still active, "
+                "renderer alive=%s",
+                n, pet_.id.c_str(), renderer_ != nullptr ? "yes" : "no");
+        }
+    }
+
+    if (const char* act = std::getenv("NIMVLETS_DEV_ACTIVATE"); act != nullptr && act[0] != '\0') {
+        const std::string spec(act);
+        const std::size_t slash = spec.find('/');
+        productui::ActivateRequest req;
+        req.petId = slash == std::string::npos ? spec : spec.substr(0, slash);
+        req.variantId = slash == std::string::npos ? std::string() : spec.substr(slash + 1);
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ACTIVATE='%s'", act);
+        HandleActivateRequest(req);
+    }
+
     bool running = true;
 
     SDL_Event event;
