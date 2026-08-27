@@ -48,6 +48,24 @@ bool TestMediumScaleFactorIsExactlyOne() {
     return true;
 }
 
+// Block 06.1 (DEC-114): Small 0.80, Medium 1.00, Large 1.15 exactos.
+// Cambiar Large NO afecta a los otros dos ni al contenido del pet.
+bool TestSizeFactorsAreTheBlock061Presets() {
+    NIMVLETS_CHECK(AboutEqual(PetSizeScaleFactor(PetSizeChoice::kSmall), 0.80));
+    NIMVLETS_CHECK(AboutEqual(PetSizeScaleFactor(PetSizeChoice::kMedium), 1.00));
+    NIMVLETS_CHECK(AboutEqual(PetSizeScaleFactor(PetSizeChoice::kLarge), 1.15));
+    return true;
+}
+
+// Una preferencia persistida "large" (de Block 06, cuando valía 1.30)
+// se re-interpreta sola al nuevo factor: sigue parseando a kLarge, y
+// kLarge ahora es 1.15. Sin migración.
+bool TestPersistedLargeResolvesToNewFactor() {
+    NIMVLETS_CHECK(ParsePetSizeChoice("large") == PetSizeChoice::kLarge);
+    NIMVLETS_CHECK(AboutEqual(PetSizeScaleFactor(ParsePetSizeChoice("large")), 1.15));
+    return true;
+}
+
 bool TestOpacityNormalizesToNearestChoice() {
     NIMVLETS_CHECK(NormalizeOpacityPercent(100) == 100);
     NIMVLETS_CHECK(NormalizeOpacityPercent(0) == 55);     // el piso
@@ -79,6 +97,8 @@ void RegisterDisplayControlsTests(testing::TestRunner& runner) {
     runner.Add("DisplayControls/SizeChoiceRoundTripsThroughString", TestSizeChoiceRoundTripsThroughString);
     runner.Add("DisplayControls/UnknownSizeChoiceIsMedium", TestUnknownSizeChoiceIsMedium);
     runner.Add("DisplayControls/MediumScaleFactorIsExactlyOne", TestMediumScaleFactorIsExactlyOne);
+    runner.Add("DisplayControls/SizeFactorsAreTheBlock061Presets", TestSizeFactorsAreTheBlock061Presets);
+    runner.Add("DisplayControls/PersistedLargeResolvesToNewFactor", TestPersistedLargeResolvesToNewFactor);
     runner.Add("DisplayControls/OpacityNormalizesToNearestChoice", TestOpacityNormalizesToNearestChoice);
     runner.Add("DisplayControls/OpacityFractionClamps", TestOpacityFractionClamps);
     runner.Add("DisplayControls/DragAllowedTracksLock", TestDragAllowedTracksLock);

@@ -46,7 +46,9 @@ PetSizeChoice ParsePetSizeChoice(std::string_view id);
 // Valores deliberados y documentados (docs/PRODUCT_UI.md §7):
 //   kSmall  = 0.80  — cuatro quintos, "se aparta un poco"
 //   kMedium = 1.00  — exactamente el tamaño que declara el contenido
-//   kLarge  = 1.30  — un tercio más grande, todavía una ventana chica
+//   kLarge  = 1.15  — un poco más grande (bajado de 1.30 en Block 06.1
+//                     tras QA del owner: 1.30 estiraba los sprites
+//                     detallados — DEC-114)
 double PetSizeScaleFactor(PetSizeChoice choice);
 
 // --- Opacidad -------------------------------------------------------

@@ -35,7 +35,12 @@ double PetSizeScaleFactor(PetSizeChoice choice) {
         case PetSizeChoice::kMedium:
             return 1.00;
         case PetSizeChoice::kLarge:
-            return 1.30;
+            // Block 06.1: bajado de 1.30 a 1.15 — QA del owner: 1.30
+            // agranda demasiado los sprites detallados. El id persistido
+            // "large" sigue resolviendo acá, así que una preferencia
+            // guardada se re-interpreta sola al nuevo factor (sin
+            // migración). Ver DEC-114.
+            return 1.15;
     }
     return 1.00;
 }

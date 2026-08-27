@@ -11,6 +11,7 @@
 #include "DisplayControlsTest.h"
 #include "FocusListTest.h"
 #include "FormatTest.h"
+#include "LocalizationTest.h"
 #include "QuickMenuModelTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
@@ -56,6 +57,7 @@ int main() {
     nimvlets::tests::RegisterClickThroughPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
     nimvlets::tests::RegisterDisplayControlsTests(runner);
+    nimvlets::tests::RegisterLocalizationTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 
     return runner.RunAll();

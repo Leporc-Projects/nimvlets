@@ -1,0 +1,62 @@
+#include "core/Localization.h"
+
+#include <cstddef>
+
+namespace nimvlets::core {
+
+namespace {
+
+// Tabla [clave][idioma]. Índice de idioma: 0 = kEn, 1 = kEs. El orden
+// de filas DEBE seguir el de StringKey. `kCount` filas.
+//
+// Reglas del brief §4/§16: los nombres propios de pet y "Nimvlets"/
+// "Nimvlet" nunca aparecen acá. "clicks" nunca se vuelve "monedas".
+constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] = {
+    // {en, es}
+    /* kCollection */         {"Collection", "Colección"},
+    /* kYourCompanions */      {"Your companions", "Tus compañeros"},
+    /* kOnDesktop */           {"On desktop", "En el escritorio"},
+    /* kUse */                 {"Use", "Usar"},
+    /* kUsePetPrefix */        {"Use ", "Usar "},
+    /* kNotInCollection */     {"Not in your collection", "No está en tu colección"},
+    /* kMale */                {"Male", "Macho"},
+    /* kFemale */              {"Female", "Hembra"},
+    /* kClickSingular */       {"click", "clic"},
+    /* kClickPlural */         {"clicks", "clics"},
+
+    /* kShowNimvlet */         {"Show Nimvlet", "Mostrar Nimvlet"},
+    /* kHideNimvlet */         {"Hide Nimvlet", "Ocultar Nimvlet"},
+    /* kCollectionMenuItem */  {"Collection…", "Colección…"},
+    /* kSize */                {"Size", "Tamaño"},
+    /* kSizeSmall */           {"Small", "Pequeño"},
+    /* kSizeMedium */          {"Medium", "Mediano"},
+    /* kSizeLarge */           {"Large", "Grande"},
+    /* kOpacity */             {"Opacity", "Opacidad"},
+    /* kLockPosition */        {"Lock Position", "Bloquear posición"},
+    /* kLanguage */            {"Language", "Idioma"},
+    /* kQuitNimvlets */        {"Quit Nimvlets", "Salir de Nimvlets"},
+};
+
+}  // namespace
+
+const char* LanguageId(Language lang) {
+    return lang == Language::kEs ? "es" : "en";
+}
+
+Language ParseLanguage(std::string_view id) {
+    return id == "es" ? Language::kEs : Language::kEn;  // desconocido/vacío -> en
+}
+
+const char* LanguageEndonym(Language lang) {
+    return lang == Language::kEs ? "Español" : "English";
+}
+
+const char* Localized(StringKey key, Language lang) {
+    const auto row = static_cast<std::size_t>(key);
+    if (row >= static_cast<std::size_t>(StringKey::kCount)) {
+        return "";
+    }
+    return kStrings[row][lang == Language::kEs ? 1 : 0];
+}
+
+}  // namespace nimvlets::core

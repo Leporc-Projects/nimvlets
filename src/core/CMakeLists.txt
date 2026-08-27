@@ -9,6 +9,8 @@ add_library(nimvlets_core STATIC
   FrameScheduler.cpp
   DisplayControls.h
   DisplayControls.cpp
+  Localization.h
+  Localization.cpp
   Silhouette.h
   Silhouette.cpp
   AlphaMask.h
