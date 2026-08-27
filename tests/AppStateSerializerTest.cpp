@@ -82,6 +82,25 @@ std::vector<std::uint8_t> BuildValidBuffer(
     return buf;
 }
 
+// Un archivo v2 completo y válido (magic + version 2 + cuerpo Block 03
+// + bloque v2), SIN el bloque v3 (`language`). Para el test de
+// migración v2 -> v3.
+std::vector<std::uint8_t> BuildValidV2Buffer(
+    std::uint64_t clickBalance, const std::string& petId, bool ownershipSeeded,
+    const std::vector<std::string>& ownedPetIds, bool lockPosition, const std::string& sizeChoice,
+    std::uint32_t opacityPercent) {
+    std::vector<std::uint8_t> buf = BuildValidBuffer(2, clickBalance, petId, "", false, 0, 0);
+    AppendUint8(buf, ownershipSeeded ? 1 : 0);
+    AppendUint32(buf, static_cast<std::uint32_t>(ownedPetIds.size()));
+    for (const std::string& id : ownedPetIds) {
+        AppendString(buf, id);
+    }
+    AppendUint8(buf, lockPosition ? 1 : 0);
+    AppendString(buf, sizeChoice);
+    AppendUint32(buf, opacityPercent);
+    return buf;
+}
+
 bool TestDefaultAppStateRoundTrips() {
     const AppState original;  // todo default: version=actual, balance=0, ids vacíos, sin posición
     const std::vector<std::uint8_t> bytes = SerializeAppState(original);
@@ -230,8 +249,66 @@ bool TestV1BufferMigratesForward() {
     NIMVLETS_CHECK(!decoded.lockPosition);
     NIMVLETS_CHECK(decoded.sizeChoice.empty());
     NIMVLETS_CHECK(decoded.opacityPercent == 0);
-    // Marcado como schema actual -> el próximo Save() escribe v2.
+    // Campo v3 en su default.
+    NIMVLETS_CHECK(decoded.language.empty());
+    // Marcado como schema actual -> el próximo Save() escribe el formato actual.
     NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    return true;
+}
+
+// --- Block 06.1: schema v3 (language) + migración desde v2 ---------
+
+// Un archivo v2 (Block 06) se sigue leyendo: propiedad, tamaño,
+// opacidad y todo lo anterior sobreviven; `language` queda "" (src/app
+// lo resolverá desde el locale del OS), y el schema queda marcado como
+// el actual para que el próximo Save() lo reescriba como v3.
+bool TestV2BufferMigratesForward() {
+    const std::vector<std::uint8_t> buf =
+        BuildValidV2Buffer(/*clickBalance=*/500, "nidir", /*ownershipSeeded=*/true,
+                           {"bunny", "frin"}, /*lockPosition=*/true, "large", 70);
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK(decoded.clickBalance == 500);
+    NIMVLETS_CHECK(decoded.activePetId == "nidir");
+    NIMVLETS_CHECK(decoded.ownershipSeeded);
+    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin"}));
+    NIMVLETS_CHECK(decoded.lockPosition);
+    NIMVLETS_CHECK(decoded.sizeChoice == "large");
+    NIMVLETS_CHECK(decoded.opacityPercent == 70);
+    // Campo v3 en su default -> "sin preferencia explícita".
+    NIMVLETS_CHECK(decoded.language.empty());
+    NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    return true;
+}
+
+bool TestV3LanguageRoundTrips() {
+    AppState original;
+    original.clickBalance = 77;
+    original.activePetId = "frin";
+    original.activeVariantId = "female";
+    original.ownershipSeeded = true;
+    original.ownedPetIds = {"bunny", "frin"};
+    original.sizeChoice = "medium";
+    original.opacityPercent = 100;
+    original.language = "es";
+
+    const std::vector<std::uint8_t> bytes = SerializeAppState(original);
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK(decoded.language == "es");
+    NIMVLETS_CHECK(decoded == original);
+
+    // "" (sin preferencia) también hace round-trip.
+    original.language.clear();
+    const std::vector<std::uint8_t> bytes2 = SerializeAppState(original);
+    AppState decoded2;
+    NIMVLETS_CHECK(DeserializeAppState(bytes2.data(), bytes2.size(), decoded2, error));
+    NIMVLETS_CHECK(decoded2.language.empty());
+    NIMVLETS_CHECK(decoded2 == original);
     return true;
 }
 
@@ -297,6 +374,8 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/V1BufferMigratesForward", TestV1BufferMigratesForward);
     runner.Add("AppStateSerializer/V2FieldsRoundTrip", TestV2FieldsRoundTrip);
     runner.Add("AppStateSerializer/OwnedPetIdsNormalizedOnSerialize", TestOwnedPetIdsNormalizedOnSerialize);
+    runner.Add("AppStateSerializer/V2BufferMigratesForward", TestV2BufferMigratesForward);
+    runner.Add("AppStateSerializer/V3LanguageRoundTrips", TestV3LanguageRoundTrips);
 }
 
 }  // namespace nimvlets::tests

@@ -9,10 +9,15 @@ namespace nimvlets::persistence {
 namespace {
 
 // "NVSTATE1", exactamente 8 bytes — ver docs/PERSISTENCE.md. El magic
-// NO cambió con el schema v2: la versión vive en el uint32 que sigue,
+// NO cambia entre schemas: la versión vive en el uint32 que sigue,
 // justamente para que subir de schema no invalide el reconocimiento de
 // archivo.
 constexpr char kMagic[8] = {'N', 'V', 'S', 'T', 'A', 'T', 'E', '1'};
+
+// La versión más vieja que este build todavía sabe leer (con migración
+// hacia adelante). Todo en [kOldestReadableSchema, kCurrentSchemaVersion]
+// se acepta; fuera de ese rango se trata como dato inutilizable.
+constexpr std::uint32_t kOldestReadableSchema = 1;
 
 void AppendUint8(std::vector<std::uint8_t>& out, std::uint8_t v) {
     out.push_back(v);
@@ -162,6 +167,9 @@ std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
     AppendString(out, state.sizeChoice);
     AppendUint32(out, state.opacityPercent);
 
+    // --- Añadido de v3 (Block 06.1) ---
+    AppendString(out, state.language);
+
     return out;
 }
 
@@ -183,20 +191,20 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
         outError = reader.Error();
         return false;
     }
-    // v1 y v2 son las únicas versiones legibles. Cualquier otra (una
-    // build más nueva que escribió v3, o basura) se trata como "no se
-    // puede usar este dato", igual que antes.
-    if (schemaVersion != 1 && schemaVersion != AppState::kCurrentSchemaVersion) {
+    // Todo en [1, kCurrentSchemaVersion] es legible con migración hacia
+    // adelante. Fuera de ese rango (una build más nueva que escribió v4,
+    // o basura) se trata como "no se puede usar este dato".
+    if (schemaVersion < kOldestReadableSchema || schemaVersion > AppState::kCurrentSchemaVersion) {
         outError = "app-state schema version " + std::to_string(schemaVersion) +
-                   " is not a readable version (this build understands 1 and " +
-                   std::to_string(AppState::kCurrentSchemaVersion) + ")";
+                   " is not a readable version (this build reads " + std::to_string(kOldestReadableSchema) +
+                   " through " + std::to_string(AppState::kCurrentSchemaVersion) + ")";
         return false;
     }
 
     AppState state;
-    // Siempre queda marcado como el schema actual: un v1 recién leído
-    // se re-escribe como v2 en el próximo Save() (migración hacia
-    // adelante, una sola vez, sin lógica de conversión más allá de
+    // Siempre queda marcado como el schema actual: un archivo más viejo
+    // se re-escribe con el schema actual en el próximo Save() (migración
+    // hacia adelante, una sola vez, sin lógica de conversión más allá de
     // "los campos nuevos arrancan en su default").
     state.schemaVersion = AppState::kCurrentSchemaVersion;
 
@@ -205,7 +213,8 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
         return false;
     }
 
-    if (schemaVersion == AppState::kCurrentSchemaVersion) {
+    // Bloque v2 (Block 06): propiedad + preferencias del menú rápido.
+    if (schemaVersion >= 2) {
         std::uint8_t seeded = 0;
         std::uint32_t ownedCount = 0;
         if (!reader.ReadUint8(seeded) || !reader.ReadUint32(ownedCount)) {
@@ -231,10 +240,18 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
         state.lockPosition = locked != 0;
         NormalizeOwnedPetIds(state.ownedPetIds);
     }
-    // schemaVersion == 1: los campos v2 quedan en su default
-    // (ownershipSeeded=false, ownedPetIds vacío, lockPosition=false,
-    // sizeChoice="", opacityPercent=0). src/app siembra la propiedad
-    // en el primer arranque tras la migración.
+
+    // Bloque v3 (Block 06.1): idioma del Product UI.
+    if (schemaVersion >= 3) {
+        if (!reader.ReadString(state.language)) {
+            outError = reader.Error();
+            return false;
+        }
+    }
+
+    // schemaVersion == 1: los campos v2/v3 quedan en su default.
+    // schemaVersion == 2: `language` queda "" (src/app lo resuelve
+    // desde el locale del OS en el próximo arranque).
 
     outState = std::move(state);
     outError.clear();

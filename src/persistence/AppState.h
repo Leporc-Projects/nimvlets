@@ -40,13 +40,16 @@ struct AppState {
     // v1 (Block 03): clickBalance + activePetId/Variant + windowPos.
     // v2 (Block 06): agrega el estado de propiedad (ownedPetIds +
     //   ownershipSeeded) y las preferencias del menú rápido
-    //   (lockPosition, sizeChoice, opacityPercent). A diferencia de
-    //   Block 03/04, esta subida SÍ trae una migración hacia adelante
-    //   mínima: un archivo v1 se lee con su layout viejo y los campos
-    //   nuevos quedan en su default, en vez de descartarse entero — así
-    //   el click balance del owner sobrevive la actualización. Ver
-    //   docs/PERSISTENCE.md §3 y DEC-107.
-    static constexpr std::uint32_t kCurrentSchemaVersion = 2;
+    //   (lockPosition, sizeChoice, opacityPercent).
+    // v3 (Block 06.1): agrega `language` ("en"/"es").
+    //
+    // Cada subida trae una migración hacia adelante mínima: un archivo
+    // más viejo se lee con su layout, los campos nuevos quedan en su
+    // default, y `schemaVersion` se marca como el actual para que el
+    // próximo Save() lo reescriba — así el click balance, la posición,
+    // la propiedad y las preferencias del owner sobreviven cada
+    // actualización. Ver docs/PERSISTENCE.md §3 y DEC-109/DEC-116.
+    static constexpr std::uint32_t kCurrentSchemaVersion = 3;
 
     std::uint32_t schemaVersion = kCurrentSchemaVersion;
 
@@ -123,6 +126,17 @@ struct AppState {
     // (core::NormalizeOpacityPercent).
     std::uint32_t opacityPercent = 0;
 
+    // --- Idioma del Product UI (Block 06.1) -------------------------
+    //
+    // "" = el owner nunca eligió idioma explícitamente. En ese caso
+    // src/app resuelve el inicial desde el locale del OS (en/es), pero
+    // NO lo persiste — así "el owner eligió inglés" y "adivinamos
+    // inglés" siguen siendo distinguibles. Una vez que elige desde el
+    // menú Language, se escribe "en"/"es" acá y su preferencia gana
+    // siempre (brief §5). Un valor desconocido se interpreta como "en"
+    // al leer (core::ParseLanguage). Ver docs/PRODUCT_UI.md §16.
+    std::string language;
+
     friend bool operator==(const AppState& a, const AppState& b) {
         return a.schemaVersion == b.schemaVersion &&
                a.clickBalance == b.clickBalance &&
@@ -133,7 +147,8 @@ struct AppState {
                a.ownershipSeeded == b.ownershipSeeded &&
                a.lockPosition == b.lockPosition &&
                a.sizeChoice == b.sizeChoice &&
-               a.opacityPercent == b.opacityPercent;
+               a.opacityPercent == b.opacityPercent &&
+               a.language == b.language;
     }
 };
 

@@ -32,14 +32,15 @@ void NormalizeOwnedPetIds(std::vector<std::string>& ids);
 
 // Falla ruidosamente (retorna false, `outError` con un mensaje
 // específico) ante un magic inválido, datos truncados, o un
-// schemaVersion que esta build no sabe leer. Block 06 amplió lo
-// legible de "exactamente la versión actual" a "1 o 2": un archivo v1
-// (Block 03/04/05) se lee con su layout viejo y los campos nuevos de
-// v2 quedan en su default — `outState.schemaVersion` se fija a la
-// versión actual, así que el próximo Save() lo reescribe como v2. Una
-// versión más nueva desconocida (o basura) sigue tratándose como "no
-// se puede usar este dato". `outState` queda en un estado no
-// especificado si falla; siempre verificar el valor de retorno.
+// schemaVersion que esta build no sabe leer. Con migración hacia
+// adelante lee cualquier versión en [1, kCurrentSchemaVersion] (hoy
+// 1, 2 y 3): un archivo más viejo se lee con su layout, los campos de
+// versiones posteriores quedan en su default, y `outState.schemaVersion`
+// se fija a la versión actual, así que el próximo Save() lo reescribe
+// al formato actual. Una versión más nueva desconocida (o basura) sigue
+// tratándose como "no se puede usar este dato". `outState` queda en un
+// estado no especificado si falla; siempre verificar el valor de
+// retorno.
 bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError);
 
 }  // namespace nimvlets::persistence
