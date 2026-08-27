@@ -55,6 +55,8 @@ add_executable(nimvlets_tests
   CollectionLayoutTest.cpp
   FocusListTest.h
   FocusListTest.cpp
+  FormatTest.h
+  FormatTest.cpp
   DisplayControlsTest.h
   DisplayControlsTest.cpp
   DirectionTest.h
