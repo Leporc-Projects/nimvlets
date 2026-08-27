@@ -5,7 +5,9 @@
 #include "AppStateStoreTest.h"
 #include "ClickAccountingTest.h"
 #include "ClickThroughPolicyTest.h"
+#include "CollectionModelTest.h"
 #include "DirectionTest.h"
+#include "DisplayControlsTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
 #include "HoverDwellTrackerTest.h"
@@ -39,11 +41,13 @@ int main() {
     nimvlets::tests::RegisterPetIdentityTests(runner);
     nimvlets::tests::RegisterPetCatalogLoaderTests(runner);
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
+    nimvlets::tests::RegisterCollectionModelTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);
     nimvlets::tests::RegisterLinuxBackendPolicyTests(runner);
     nimvlets::tests::RegisterRendererPolicyTests(runner);
     nimvlets::tests::RegisterClickThroughPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
+    nimvlets::tests::RegisterDisplayControlsTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 
     return runner.RunAll();

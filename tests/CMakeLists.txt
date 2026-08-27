@@ -49,6 +49,10 @@ add_executable(nimvlets_tests
   RendererPolicyTest.cpp
   ClickThroughPolicyTest.h
   ClickThroughPolicyTest.cpp
+  CollectionModelTest.h
+  CollectionModelTest.cpp
+  DisplayControlsTest.h
+  DisplayControlsTest.cpp
   DirectionTest.h
   DirectionTest.cpp
   main.cpp

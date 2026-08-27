@@ -6,6 +6,8 @@ add_library(nimvlets_catalog STATIC
   PetCatalogLoader.cpp
   ActivePetResolution.h
   ActivePetResolution.cpp
+  CollectionModel.h
+  CollectionModel.cpp
 )
 
 target_include_directories(nimvlets_catalog PUBLIC ${CMAKE_SOURCE_DIR}/src)
