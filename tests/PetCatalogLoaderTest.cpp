@@ -43,6 +43,10 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
+// Schema actual del formato "NVCATLG1" — Block 06 lo subió a 2
+// (agrega el byte `initiallyOwned` por entrada).
+constexpr std::uint32_t kSchema = 2;
+
 void AppendHeader(std::vector<std::uint8_t>& buf, std::uint32_t schemaVersion, std::uint32_t entryCount) {
     AppendMagic(buf);
     AppendUint32(buf, schemaVersion);
@@ -55,18 +59,20 @@ void AppendEntry(
     const std::string& variantId,
     const std::string& displayName,
     const std::string& packPath,
-    bool isDefault) {
+    bool isDefault,
+    bool initiallyOwned = false) {
     AppendString(buf, petId);
     AppendString(buf, variantId);
     AppendString(buf, displayName);
     AppendString(buf, packPath);
     AppendUint8(buf, isDefault ? 1 : 0);
+    AppendUint8(buf, initiallyOwned ? 1 : 0);
 }
 
 std::vector<std::uint8_t> BuildSingleEntryCatalog() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 1);
-    AppendEntry(buf, "bunny_dev", "", "Bunny (dev fixture)", "assets/dev/bunny_pack.nvpack", true);
+    AppendHeader(buf, kSchema, 1);
+    AppendEntry(buf, "bunny_dev", "", "Bunny (dev fixture)", "assets/dev/bunny_pack.nvpack", true, true);
     return buf;
 }
 
@@ -88,7 +94,7 @@ bool TestValidSingleEntryCatalogLoadsSuccessfully() {
 // duplicado.
 bool TestSamePetIdDifferentVariantsBothLoad() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 2);
+    AppendHeader(buf, kSchema, 2);
     AppendEntry(buf, "frin", "male", "Frin (male)", "assets/dev/frin_male.nvpack", true);
     AppendEntry(buf, "frin", "female", "Frin (female)", "assets/dev/frin_female.nvpack", false);
 
@@ -101,9 +107,29 @@ bool TestSamePetIdDifferentVariantsBothLoad() {
     return true;
 }
 
+// El byte `initiallyOwned` (schema v2, Block 06) hace round-trip por
+// entrada, independiente de `isDefault`.
+bool TestInitiallyOwnedFlagRoundTrips() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 3);
+    AppendEntry(buf, "owned_default", "", "A", "a.nvpack", /*isDefault=*/true, /*initiallyOwned=*/true);
+    AppendEntry(buf, "locked", "", "B", "b.nvpack", /*isDefault=*/false, /*initiallyOwned=*/false);
+    AppendEntry(buf, "owned_not_default", "", "C", "c.nvpack", /*isDefault=*/false, /*initiallyOwned=*/true);
+
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(catalog.Entries().size() == 3);
+    NIMVLETS_CHECK(catalog.Entries()[0].initiallyOwned);
+    NIMVLETS_CHECK(!catalog.Entries()[1].initiallyOwned);
+    NIMVLETS_CHECK(catalog.Entries()[2].initiallyOwned);
+    NIMVLETS_CHECK(!catalog.Entries()[2].isDefault);
+    return true;
+}
+
 bool TestEntriesLoadInDeterministicOrder() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 3);
+    AppendHeader(buf, kSchema, 3);
     AppendEntry(buf, "a", "", "A", "a.nvpack", false);
     AppendEntry(buf, "b", "", "B", "b.nvpack", true);
     AppendEntry(buf, "c", "", "C", "c.nvpack", false);
@@ -159,7 +185,7 @@ bool TestUnsupportedSchemaVersionIsRejected() {
 
 bool TestZeroEntriesIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 0);
+    AppendHeader(buf, kSchema, 0);
     PetCatalog catalog;
     std::string error;
     NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
@@ -169,7 +195,7 @@ bool TestZeroEntriesIsRejected() {
 
 bool TestEmptyPetIdIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 1);
+    AppendHeader(buf, kSchema, 1);
     AppendEntry(buf, "", "", "Nameless", "p.nvpack", true);
     PetCatalog catalog;
     std::string error;
@@ -180,7 +206,7 @@ bool TestEmptyPetIdIsRejected() {
 
 bool TestEmptyPackPathIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 1);
+    AppendHeader(buf, kSchema, 1);
     AppendEntry(buf, "p", "", "P", "", true);
     PetCatalog catalog;
     std::string error;
@@ -191,7 +217,7 @@ bool TestEmptyPackPathIsRejected() {
 
 bool TestDuplicateIdentityIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 2);
+    AppendHeader(buf, kSchema, 2);
     AppendEntry(buf, "bunny_dev", "", "Bunny", "a.nvpack", true);
     AppendEntry(buf, "bunny_dev", "", "Bunny again", "b.nvpack", false);
     PetCatalog catalog;
@@ -203,7 +229,7 @@ bool TestDuplicateIdentityIsRejected() {
 
 bool TestNoDefaultIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 2);
+    AppendHeader(buf, kSchema, 2);
     AppendEntry(buf, "a", "", "A", "a.nvpack", false);
     AppendEntry(buf, "b", "", "B", "b.nvpack", false);
     PetCatalog catalog;
@@ -215,7 +241,7 @@ bool TestNoDefaultIsRejected() {
 
 bool TestMultipleDefaultsIsRejected() {
     std::vector<std::uint8_t> buf;
-    AppendHeader(buf, 1, 2);
+    AppendHeader(buf, kSchema, 2);
     AppendEntry(buf, "a", "", "A", "a.nvpack", true);
     AppendEntry(buf, "b", "", "B", "b.nvpack", true);
     PetCatalog catalog;
@@ -230,6 +256,7 @@ bool TestMultipleDefaultsIsRejected() {
 void RegisterPetCatalogLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetCatalogLoader/ValidSingleEntryCatalogLoadsSuccessfully", TestValidSingleEntryCatalogLoadsSuccessfully);
     runner.Add("PetCatalogLoader/SamePetIdDifferentVariantsBothLoad", TestSamePetIdDifferentVariantsBothLoad);
+    runner.Add("PetCatalogLoader/InitiallyOwnedFlagRoundTrips", TestInitiallyOwnedFlagRoundTrips);
     runner.Add("PetCatalogLoader/EntriesLoadInDeterministicOrder", TestEntriesLoadInDeterministicOrder);
     runner.Add("PetCatalogLoader/BadMagicIsRejected", TestBadMagicIsRejected);
     runner.Add("PetCatalogLoader/EmptyBufferIsRejected", TestEmptyBufferIsRejected);

@@ -1,33 +1,37 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "entries": [
     {
       "pet_id": "bunny",
       "variant_id": "",
       "display_name": "Bunny",
       "pack_path": "assets/dev/bunny_pack.nvpack",
-      "is_default": true
+      "is_default": true,
+      "initially_owned": true
     },
     {
       "pet_id": "nidir",
       "variant_id": "",
       "display_name": "Nidir",
       "pack_path": "assets/dev/nidir_pack.nvpack",
-      "is_default": false
+      "is_default": false,
+      "initially_owned": false
     },
     {
       "pet_id": "frin",
       "variant_id": "male",
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_male_pack.nvpack",
-      "is_default": false
+      "is_default": false,
+      "initially_owned": true
     },
     {
       "pet_id": "frin",
       "variant_id": "female",
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_female_pack.nvpack",
-      "is_default": false
+      "is_default": false,
+      "initially_owned": true
     }
   ]
 }

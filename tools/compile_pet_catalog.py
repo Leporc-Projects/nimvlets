@@ -12,17 +12,24 @@ así que no hay nada de prep_dev_sprite.py que compartir aquí).
 
 Esquema del manifest (JSON):
     {
-      "schema_version": 1,                    # opcional, default 1
+      "schema_version": 2,                    # opcional, default 2
       "entries": [
         {
           "pet_id": "bunny_dev",
           "variant_id": "",                   # opcional, default ""
           "display_name": "Bunny (dev fixture)",
           "pack_path": "assets/dev/bunny_pack.nvpack",
-          "is_default": true                  # opcional, default false
+          "is_default": true,                 # opcional, default false
+          "initially_owned": true             # opcional, default false
         }
       ]
     }
+
+`initially_owned` (Block 06, schema v2) es la SEMILLA de propiedad de
+desarrollo/default: el runtime la usa una sola vez, cuando el archivo
+de estado todavía no pasó por la inicialización de propiedad, para
+poblar `ownedPetIds`. No es autoridad de runtime — ver docs/CATALOG.md
+§11 y docs/PRODUCT_UI.md §5.
 
 `pack_path` se guarda tal cual en el binario compilado — a diferencia
 de los `source` de frames en compile_pet_pack.py (resueltos relativos
@@ -58,7 +65,7 @@ import struct
 import sys
 
 _MAGIC = b"NVCATLG1"
-_CURRENT_SCHEMA_VERSION = 1
+_CURRENT_SCHEMA_VERSION = 2
 
 
 class CatalogCompileError(Exception):
@@ -94,6 +101,7 @@ def _compile_entry(entry_manifest: dict, index: int) -> tuple[bytes, str, str, b
         )
 
     is_default = bool(entry_manifest.get("is_default", False))
+    initially_owned = bool(entry_manifest.get("initially_owned", False))
 
     out = bytearray()
     out += _pack_string(pet_id)
@@ -101,6 +109,7 @@ def _compile_entry(entry_manifest: dict, index: int) -> tuple[bytes, str, str, b
     out += _pack_string(display_name)
     out += _pack_string(pack_path)
     out += struct.pack("<B", 1 if is_default else 0)
+    out += struct.pack("<B", 1 if initially_owned else 0)
     return bytes(out), pet_id, variant_id, is_default
 
 

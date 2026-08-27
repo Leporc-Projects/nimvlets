@@ -7,6 +7,8 @@ add_library(nimvlets_core STATIC
   ClickThroughPolicy.cpp
   FrameScheduler.h
   FrameScheduler.cpp
+  DisplayControls.h
+  DisplayControls.cpp
   Silhouette.h
   Silhouette.cpp
   AlphaMask.h

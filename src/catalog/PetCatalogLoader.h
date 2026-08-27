@@ -9,10 +9,17 @@
 namespace nimvlets::catalog {
 
 // Versión de esquema actual del formato de catálogo binario
-// "NVCATLG1" — ver docs/CATALOG.md para el layout exacto. Igual que
-// persistence::AppState::kCurrentSchemaVersion, no hay lógica de
-// migración en este bloque: cualquier versión distinta se rechaza.
-constexpr std::uint32_t kCurrentCatalogSchemaVersion = 1;
+// "NVCATLG1" — ver docs/CATALOG.md para el layout exacto. No hay
+// lógica de migración: cualquier versión distinta se rechaza. Esto es
+// aceptable acá (a diferencia de persistence::AppState, que sí migra
+// v1->v2 en Block 06) porque el .nvcat es un artefacto de build que se
+// recompila desde su manifest en el mismo commit, nunca datos del
+// usuario.
+//
+// v1 (Block 04): petId, variantId, displayName, packPath, isDefault.
+// v2 (Block 06): agrega `initiallyOwned` (u8) por entrada — la semilla
+//   de propiedad de desarrollo. Ver docs/CATALOG.md §3.
+constexpr std::uint32_t kCurrentCatalogSchemaVersion = 2;
 
 // Parsea un catálogo compilado (ver tools/compile_pet_catalog.py para
 // el productor) desde un buffer de bytes en memoria. Parseo puro — sin

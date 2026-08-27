@@ -20,6 +20,19 @@ struct CatalogEntry {
     std::string displayName;
     std::string packPath;
     bool isDefault = false;
+
+    // SEMILLA de propiedad para desarrollo/default (Block 06, schema
+    // "NVCATLG1" v2). NO es autoridad de runtime: solo se consulta una
+    // vez, cuando persistence::AppState::ownershipSeeded todavía es
+    // false, para poblar `ownedPetIds`. A partir de ahí el archivo de
+    // estado manda y este campo se ignora. Un bloque futuro de
+    // onboarding (Block 09) reemplaza la siembra sin tocar el catálogo.
+    // Ver docs/CATALOG.md §11 y docs/PRODUCT_UI.md §5.
+    //
+    // Para dos entradas que comparten petId (las dos variantes de
+    // Frin), la propiedad es del petId: alcanza con que UNA lo marque,
+    // pero el manifest de dev las marca a las dos por claridad.
+    bool initiallyOwned = false;
 };
 
 // Un catálogo de pets ya validado y listo para consultarse: sin ids

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace nimvlets::persistence {
 
@@ -34,15 +35,25 @@ struct WindowPosition {
 struct AppState {
     // Solo se incrementa cuando la forma en disco de este struct
     // cambia de manera no retrocompatible. Ver AppStateSerializer.cpp
-    // para cómo se maneja un desajuste (defaults seguros, nunca un
-    // crash, sin lógica de migración en este bloque).
-    static constexpr std::uint32_t kCurrentSchemaVersion = 1;
+    // para cómo se maneja un desajuste.
+    //
+    // v1 (Block 03): clickBalance + activePetId/Variant + windowPos.
+    // v2 (Block 06): agrega el estado de propiedad (ownedPetIds +
+    //   ownershipSeeded) y las preferencias del menú rápido
+    //   (lockPosition, sizeChoice, opacityPercent). A diferencia de
+    //   Block 03/04, esta subida SÍ trae una migración hacia adelante
+    //   mínima: un archivo v1 se lee con su layout viejo y los campos
+    //   nuevos quedan en su default, en vez de descartarse entero — así
+    //   el click balance del owner sobrevive la actualización. Ver
+    //   docs/PERSISTENCE.md §3 y DEC-107.
+    static constexpr std::uint32_t kCurrentSchemaVersion = 2;
 
     std::uint32_t schemaVersion = kCurrentSchemaVersion;
 
     // La única moneda — ver AGENTS.md §2. Empieza en 0; solo se
-    // incrementa por un click real. uint64 para que nunca desborde de
-    // forma realista.
+    // incrementa por un click real. Block 06 la MUESTRA dentro del
+    // Product UI pero sigue sin poder gastarla (no hay Shop todavía).
+    // uint64 para que nunca desborde de forma realista.
     std::uint64_t clickBalance = 0;
 
     // Qué pet está activo actualmente. String vacío = sin save aún /
@@ -65,12 +76,64 @@ struct AppState {
     // centrado al iniciar).
     std::optional<WindowPosition> lastWindowPosition;
 
+    // --- Estado de propiedad (Block 06) ------------------------------
+    //
+    // Qué Nimvlets posee el owner, por `petId` (nunca por variante —
+    // Frin es UN Nimvlet lógico: poseer "frin" da acceso a macho y
+    // hembra). Orden canónico: ordenado ascendente y sin duplicados,
+    // impuesto por el serializer y por src/app al mutar — así el
+    // archivo es determinista y dos AppState con el mismo conjunto
+    // siempre comparan igual.
+    //
+    // Autoridad una vez escrito; NO se deriva del catálogo en cada
+    // arranque. El catálogo solo aporta la SEMILLA de desarrollo (ver
+    // catalog::CatalogEntry::initiallyOwned) y solo cuando
+    // `ownershipSeeded` todavía es false — ver más abajo.
+    std::vector<std::string> ownedPetIds;
+
+    // false = este estado nunca pasó por la inicialización de
+    // propiedad. En ese caso src/app siembra `ownedPetIds` desde las
+    // entradas `initiallyOwned` del catálogo y pone esto en true. Un
+    // bloque futuro de onboarding (Block 09) reemplaza esa siembra por
+    // la elección real de starter del jugador SIN un cambio de schema:
+    // solo escribe `ownedPetIds` + `ownershipSeeded = true` con su
+    // propia lógica. "Poseer cero Nimvlets" (todo bloqueado) y "nunca
+    // se inicializó" son estados distintos precisamente por este flag.
+    bool ownershipSeeded = false;
+
+    // --- Preferencias del menú rápido (Block 06) -------------------
+    //
+    // Ver docs/PRODUCT_UI.md §7 y core::DisplayControls, que traduce
+    // estos a comportamiento genérico de runtime (ninguna rama por
+    // pet).
+
+    // Si true, la ventana del pet no se puede arrastrar (click / hover
+    // / click-through / animaciones siguen intactos — block brief §16).
+    bool lockPosition = false;
+
+    // Tamaño de usuario, MULTIPLICADOR encima de visualScale. String
+    // legible ("small"/"medium"/"large"); un valor desconocido se
+    // interpreta como "medium" al leer (core::ParsePetSizeChoice).
+    // Vacío se trata igual que "medium".
+    std::string sizeChoice;
+
+    // Opacidad de la ventana del pet, porcentaje. 0 = "sin preferencia
+    // guardada" -> se trata como 100 (totalmente opaco) al aplicar;
+    // cualquier otro valor se ajusta al conjunto finito del menú
+    // (core::NormalizeOpacityPercent).
+    std::uint32_t opacityPercent = 0;
+
     friend bool operator==(const AppState& a, const AppState& b) {
         return a.schemaVersion == b.schemaVersion &&
                a.clickBalance == b.clickBalance &&
                a.activePetId == b.activePetId &&
                a.activeVariantId == b.activeVariantId &&
-               a.lastWindowPosition == b.lastWindowPosition;
+               a.lastWindowPosition == b.lastWindowPosition &&
+               a.ownedPetIds == b.ownedPetIds &&
+               a.ownershipSeeded == b.ownershipSeeded &&
+               a.lockPosition == b.lockPosition &&
+               a.sizeChoice == b.sizeChoice &&
+               a.opacityPercent == b.opacityPercent;
     }
 };
 

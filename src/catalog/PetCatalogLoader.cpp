@@ -112,13 +112,15 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
     for (std::uint32_t i = 0; i < entryCount; ++i) {
         CatalogEntry entry;
         std::uint8_t isDefaultByte = 0;
+        std::uint8_t initiallyOwnedByte = 0;
         if (!reader.ReadString(entry.identity.petId) || !reader.ReadString(entry.identity.variantId) ||
             !reader.ReadString(entry.displayName) || !reader.ReadString(entry.packPath) ||
-            !reader.ReadUint8(isDefaultByte)) {
+            !reader.ReadUint8(isDefaultByte) || !reader.ReadUint8(initiallyOwnedByte)) {
             outError = reader.Error();
             return false;
         }
         entry.isDefault = isDefaultByte != 0;
+        entry.initiallyOwned = initiallyOwnedByte != 0;
 
         if (entry.identity.petId.empty()) {
             outError = "catalog entry " + std::to_string(i) + ": pet id must not be empty";

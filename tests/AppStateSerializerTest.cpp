@@ -55,10 +55,13 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
-// Un buffer válido y completo con los campos dados — refleja
-// exactamente lo que SerializeAppState() produciría para un AppState
-// con estos valores, pero construido de forma independiente para que
-// el test no termine verificando el serializador contra sí mismo.
+// Un buffer con el layout que v1 y v2 comparten (magic + schemaVersion
+// + cuerpo de Block 03). Con `schemaVersion == 1` es un archivo v1
+// completo y válido; con `schemaVersion == 2` está deliberadamente
+// truncado (le faltan los campos v2) — útil solo para los tests de
+// rechazo, no para un round-trip exitoso. Construido de forma
+// independiente para que el test no termine verificando el
+// serializador contra sí mismo.
 std::vector<std::uint8_t> BuildValidBuffer(
     std::uint32_t schemaVersion,
     std::uint64_t clickBalance,
@@ -202,6 +205,82 @@ bool TestUnsupportedSchemaVersionIsRejected() {
     return true;
 }
 
+// --- Block 06: schema v2 + migración hacia adelante desde v1 -------
+
+// Un archivo v1 real (Block 03/04/05) se sigue leyendo: el balance y
+// el pet activo sobreviven, los campos v2 quedan en su default, y el
+// schema queda marcado como el actual para que el próximo Save() lo
+// reescriba como v2.
+bool TestV1BufferMigratesForward() {
+    std::vector<std::uint8_t> buf =
+        BuildValidBuffer(/*schemaVersion=*/1, /*clickBalance=*/999, "frin", "male", /*hasPosition=*/true, 7, 9);
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK(decoded.clickBalance == 999);
+    NIMVLETS_CHECK(decoded.activePetId == "frin");
+    NIMVLETS_CHECK(decoded.activeVariantId == "male");
+    NIMVLETS_CHECK(decoded.lastWindowPosition.has_value());
+    NIMVLETS_CHECK(decoded.lastWindowPosition->x == 7 && decoded.lastWindowPosition->y == 9);
+    // Campos v2 en su default.
+    NIMVLETS_CHECK(!decoded.ownershipSeeded);
+    NIMVLETS_CHECK(decoded.ownedPetIds.empty());
+    NIMVLETS_CHECK(!decoded.lockPosition);
+    NIMVLETS_CHECK(decoded.sizeChoice.empty());
+    NIMVLETS_CHECK(decoded.opacityPercent == 0);
+    // Marcado como schema actual -> el próximo Save() escribe v2.
+    NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    return true;
+}
+
+bool TestV2FieldsRoundTrip() {
+    AppState original;
+    original.clickBalance = 4242;
+    original.activePetId = "bunny";
+    original.ownershipSeeded = true;
+    original.ownedPetIds = {"frin", "bunny"};  // desordenado a propósito
+    original.lockPosition = true;
+    original.sizeChoice = "large";
+    original.opacityPercent = 70;
+
+    const std::vector<std::uint8_t> bytes = SerializeAppState(original);
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK(decoded.ownershipSeeded);
+    // Normalizado: ordenado ascendente, sin duplicados.
+    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin"}));
+    NIMVLETS_CHECK(decoded.lockPosition);
+    NIMVLETS_CHECK(decoded.sizeChoice == "large");
+    NIMVLETS_CHECK(decoded.opacityPercent == 70);
+    // operator== compara ownedPetIds -- original está desordenado, así
+    // que hay que normalizarlo antes de comparar el struct entero.
+    original.ownedPetIds = {"bunny", "frin"};
+    NIMVLETS_CHECK(decoded == original);
+    return true;
+}
+
+// ownedPetIds sale siempre en orden canónico y sin string vacío,
+// venga como venga en el AppState en memoria -> el formato sigue
+// siendo determinista byte a byte.
+bool TestOwnedPetIdsNormalizedOnSerialize() {
+    AppState a;
+    a.ownedPetIds = {"nidir", "bunny", "bunny", "", "frin"};
+    AppState b;
+    b.ownedPetIds = {"frin", "nidir", "bunny"};
+
+    NIMVLETS_CHECK(SerializeAppState(a) == SerializeAppState(b));
+
+    AppState decoded;
+    std::string error;
+    const std::vector<std::uint8_t> bytes = SerializeAppState(a);
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin", "nidir"}));
+    return true;
+}
+
 }  // namespace
 
 void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
@@ -215,6 +294,9 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/TruncatedHeaderIsRejected", TestTruncatedHeaderIsRejected);
     runner.Add("AppStateSerializer/TruncatedMidStringIsRejected", TestTruncatedMidStringIsRejected);
     runner.Add("AppStateSerializer/UnsupportedSchemaVersionIsRejected", TestUnsupportedSchemaVersionIsRejected);
+    runner.Add("AppStateSerializer/V1BufferMigratesForward", TestV1BufferMigratesForward);
+    runner.Add("AppStateSerializer/V2FieldsRoundTrip", TestV2FieldsRoundTrip);
+    runner.Add("AppStateSerializer/OwnedPetIdsNormalizedOnSerialize", TestOwnedPetIdsNormalizedOnSerialize);
 }
 
 }  // namespace nimvlets::tests
