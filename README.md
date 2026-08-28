@@ -5,8 +5,11 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 06 — Product Shell + Collection +
-Native Quick Menu** (ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)),
+Este repositorio está en **Block 06.1 — Collection Visual Polish +
+EN/ES Localization** (composición hero + gallery, acento de identidad
+por pet, idioma inglés/español; ver
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)), sobre **Block 06 —
+Product Shell + Collection + Native Quick Menu**,
 construido sobre Block 05 (Behavior Runtime + Frin Vertical Slice),
 Block 04.3 (corrección post-QA de Nidir/Bunny), Block 04.2 (assets
 reales + pipeline
@@ -149,21 +152,28 @@ Combiná `NIMVLETS_DEV_SELECT_PET` con `NIMVLETS_DEV_APPDATA_DIR` para
 probar cualquier pet sin arriesgar tu estado persistido real — ver
 "Owner manual QA" más abajo para la lista completa de comandos.
 
-### Product UI (Block 06)
+### Product UI (Block 06 / 06.1)
 
 El menú de la barra de macOS (icono monocromo arriba a la derecha)
-abre la **Collection**: un álbum de tus Nimvlets con estados
-poseído/activo/bloqueado, panel de detalle, variantes de Frin, switch
-de pet en vivo, y el click balance (visible SOLO acá). El mismo menú
-tiene Show/Hide, Lock Position, Size (Small/Medium/Large), Opacity
-(100/85/70/55 %) y Quit. Cerrar la Collection NO termina la app. Ver
-[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
+abre la **Collection**: un álbum de tus Nimvlets con una composición
+**hero + gallery** — el Nimvlet seleccionado es el protagonista, con su
+arte grande sobre una forma de acento sutil, su especie, estado,
+selector tipográfico de variante (Frin) y una acción; los demás en una
+gallery discreta. Switch de pet en vivo. El click balance (visible SOLO
+acá). El mismo menú tiene Show/Hide, Lock Position, Size
+(Small/Medium/Large — Large = 1.15), Opacity (100/85/70/55 %),
+**Language ▸ (English / Español)** y Quit. Cambiar de idioma actualiza
+todo al instante, sin reiniciar. Cerrar la Collection NO termina la
+app. Ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
 
 ```bash
 # QA / capturas: abrir la Collection al arrancar (sin clickear el menú).
-# "1" solo la abre; un petId además abre su panel de detalle.
-NIMVLETS_DEV_OPEN_COLLECTION=1     ./build/macos-debug/src/app/nimvlets_spike
-NIMVLETS_DEV_OPEN_COLLECTION=frin  ./build/macos-debug/src/app/nimvlets_spike
+# "1" solo la abre; "petId" o "petId/variantId" además elige el hero.
+NIMVLETS_DEV_OPEN_COLLECTION=1            ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_OPEN_COLLECTION=frin/female  ./build/macos-debug/src/app/nimvlets_spike
+
+# QA: fuerza el idioma de la sesión sin persistir ("en" / "es").
+NIMVLETS_DEV_LANGUAGE=es NIMVLETS_DEV_OPEN_COLLECTION=1 ./build/macos-debug/src/app/nimvlets_spike
 
 # QA: arrancar con el pet oculto (equivale a "Hide Nimvlet"), para
 # capturar la Collection sin la ventana always-on-top del pet.

@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Quick Menu (Block 06)
+# Nimvlets — Product Shell + Collection + Quick Menu (Block 06 / 06.1)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -8,9 +8,26 @@ posición, tamaño, opacidad). Es el primer bloque en el que Nimvlets se
 siente como una aplicación de escritorio coherente y no solo un runtime
 de pet.
 
-Ver `docs/DECISION_LOG.md` DEC-106 en adelante para por qué se tomó
-cada decisión, `docs/CATALOG.md` §11 para el modelo de propiedad,
-`docs/PERSISTENCE.md` §3 para el schema v2 del archivo de estado, y
+**Actualización Block 06.1 (pase de identidad visual + localización).**
+La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
+el owner; 06.1 solo refina la dirección visual y el idioma:
+
+- la Collection pasa de un grid uniforme a una composición **hero +
+  gallery** (el Nimvlet seleccionado es el protagonista) — ver §6;
+- **acento de identidad por pet** sutil (forma del hero, foco, variante
+  seleccionada) — ver §6.2;
+- **localización EN/ES** de todo el texto de interfaz y del menú, con
+  submenú `Language ▸`, cambio inmediato y persistido — ver §16;
+- preset de tamaño **Large 1.30 → 1.15**;
+- ventana **760×540 → 800×560**.
+
+Lo que dice este documento vale para el estado ACTUAL (06.1); los
+detalles de Block 06 que 06.1 reemplaza están marcados
+*(superseded 06.1)*.
+
+Ver `docs/DECISION_LOG.md` DEC-106..DEC-118 para por qué se tomó cada
+decisión, `docs/CATALOG.md` §11 para el modelo de propiedad,
+`docs/PERSISTENCE.md` §3 para el schema v3 del archivo de estado, y
 `docs/PERFORMANCE_BUDGETS.md` para las mediciones.
 
 ## 1. Alcance de Block 06
@@ -167,69 +184,105 @@ Ver `docs/CATALOG.md` §11 para el detalle. En resumen:
 catálogo por `petId` lógico (las dos entradas de Frin colapsan a una
 con dos variantes), y calcula el estado de cada una.
 
-## 6. La Collection (estructura visual)
+## 6. La Collection — composición hero + gallery (06.1)
 
-Tamaño de contenido objetivo: ~760 × 540 pt, redimensionable.
+Tamaño de contenido objetivo: **~800 × 560 pt**, redimensionable
+*(superseded 06.1: Block 06 usaba 760×540 y un grid uniforme)*.
 
 ```
 Nimvlets                                          1 248 clicks   <- cabecera discreta
+Collection                                                        <- título de sección
+Your companions                                                   <- subtítulo
 
-Collection                                                        <- etiqueta de sección
-
-     [art]              [art]              [art]                   <- grid: arte flotando,
-     Bunny              Nidir              Frin                        sin cards fuertes
-     On desktop         Not in your        Male · Female
-                        collection
-  ---------------------------------------------------------------  <- hairline (solo con detalle)
-     [art grande]   Frin
-                    [ Male ] [ Female ]                            <- panel de detalle expandido
-                    [ Use Frin ]                                      (composición, no modal)
+  ╭ forma de acento (muy tenue) ╮
+  │        [ ARTE GRANDE ]      │   Bunny                          <- HERO: el Nimvlet
+  │        del Nimvlet          │   Rabbit                            seleccionado, protagonista
+  │        seleccionado         │   On desktop
+  ╰────────────────────────────╯   Male · Female   (solo Frin)
+                                   [ Use Frin ]   /  On desktop
+  ─────────────────────────────────────────────────────────────  <- hairline
+              [art]          [art]                                <- GALLERY: los demás,
+              Nidir          Frin                                    cluster centrado y discreto
+              Not in your    Use
+              collection
 ```
 
-Principios visuales aplicados (brief §2/§3/§8/§22):
+Jerarquía (brief 06.1 §7):
 
-- fondo blanco hueso cálido (`#F6F3EE`), texto casi-negro (`#26221E`),
-  no negro puro;
-- **el arte del Nimvlet domina cada entrada** — flota sobre una caja
-  de fondo apenas insinuada (`kArtBed`), nunca una card con borde
-  fuerte;
-- texto de estado **humano** ("On desktop" / "Use" / "Not in your
-  collection"), nunca badges "ACTIVE"/"LOCKED";
-- un único acento (terracota `#B46E3C`): el anillo de foco de teclado,
-  la variante seleccionada, y el hint "Use" bajo un pet poseído-
-  inactivo;
-- animación de UI mínima: emphasis de hover instantáneo (un wash
-  sutil), sin fades decorativos, sin transiciones de página, sin
-  gradientes animados. El arte del pet aporta la vida;
-- sin sidebar permanente, sin toolbar gigante, sin cabecera
-  sobredimensionada, sin dashboard, sin "Welcome back", sin
-  estadísticas.
+1. producto / cabecera
+2. título + contexto de la Collection
+3. **el Nimvlet seleccionado como HERO** — la razón por la que existe
+   la pantalla
+4. la gallery restante
 
-### Estados de propiedad en el grid
+Un click (o Enter) sobre una entrada de la gallery la **promueve a
+hero**; el que era hero baja a la gallery. Siempre hay un hero — por
+defecto, el pet activo. No hay un "panel de detalle" separado: el hero
+ES el detalle.
 
-| Estado | Sub-línea bajo el arte | Arte |
+### 6.1 Principios visuales (brief 06 §2/§3 + 06.1 §17)
+
+- fondo blanco hueso cálido (`#F6F3EE`), texto casi-negro (`#26221E`);
+- **el arte del Nimvlet domina** — el hero flota sobre una forma
+  orgánica MUY tenue (§6.2), la gallery sobre una caja apenas
+  insinuada; nunca una card con borde fuerte;
+- texto de estado **humano y localizado** ("On desktop" / "Use" / "Not
+  in your collection" — "En el escritorio" / "Usar" / "No está en tu
+  colección"), nunca badges "ACTIVE"/"LOCKED";
+- jerarquía por **tamaño / peso / espacio**, no por más contenedores:
+  el nombre del hero es grande, la especie y el estado son líneas
+  chicas, el bloque de texto se centra verticalmente contra el arte;
+- animación de UI mínima: micro-lift de hover **instantáneo** (2pt) +
+  wash + más contraste, sin tween temporizado — ver DEC-118 y §11;
+- el anillo de foco solo aparece tras la primera navegación por teclado
+  o un click que enfoca (focus-visible);
+- sin sidebar, sin toolbar gigante, sin cabecera sobredimensionada, sin
+  dashboard, sin "Welcome back", sin barras de progreso / logros /
+  rachas / métricas.
+
+### 6.2 Acento de identidad por pet (`productui::PetAccent`, 06.1 §9)
+
+Cada Nimvlet lógico tiene un tono de identidad restringido. Se usa
+**solo** para: la forma orgánica detrás del arte del hero, la línea de
+foco/selección, y el subrayado de la variante seleccionada. **Nunca**
+recolorea el resto de la UI, sin gradientes.
+
+| Pet | Tono | Forma del hero |
+|---|---|---|
+| Bunny | apricot / crema cálida | óvalo |
+| Nidir | violeta apagado | round-rect apenas más angular |
+| Frin | azul hielo / neutro frío | óvalo |
+| Rato · Rin Rin · Artu · Kyubi · Sweetie | apricot · verde bosque · marrón/oro · violeta oscuro · naranja quemado | (ids TENTATIVOS — sin arte todavía) |
+| desconocido | terracota neutro | óvalo |
+
+La forma se dibuja a alpha muy bajo (~52/255 sobre un tinte ya pálido)
+— apoya el arte, no compite (brief §10).
+
+### 6.3 Estados de propiedad
+
+**Gallery** (sub-línea bajo el arte):
+
+| Estado | Sub-línea | Arte |
 |---|---|---|
 | poseído + activo | `On desktop` | sí |
-| poseído + inactivo, sin variantes | `Use` (en acento) | sí |
-| poseído + inactivo, con variantes (Frin) | `Male · Female` | sí |
-| bloqueado | `Not in your collection` (tenue) | no — solo una caja muy tenue mantiene el ritmo de columnas (brief §8/§9) |
+| poseído + inactivo (sin variantes) | `Use` (en el tono del pet) | sí |
+| poseído + inactivo (Frin) | `Use` | sí (variante por defecto) |
+| bloqueado | `Not in your collection` (tenue) | **sí, más callado** (alpha 150) — visible, no destruido (brief §12) |
 
-### Panel de detalle
+**Hero** (etiqueta del botón de acción):
 
-Se abre al hacer click (o Enter) sobre una entrada. Composición
-expandida DEBAJO del grid, no un modal (brief §10). Arte grande a la
-izquierda (salvo bloqueado: sin arte), nombre, y:
-
-| Estado del pet en detalle | Botón de acción |
+| Estado del hero | Botón |
 |---|---|
 | activo, sin variantes | `On desktop` — deshabilitado (contorno tenue) |
-| activo, con variantes, variante mostrada == la activa | `On desktop` — deshabilitado |
-| activo, con variantes, variante mostrada != la activa | `Use <name>` — **habilitado** (re-activa con la otra variante) |
+| activo (Frin), variante mostrada == la activa | `On desktop` — deshabilitado |
+| activo (Frin), variante mostrada != la activa | `Use <name>` — **habilitado** (re-activa con la otra variante) |
 | poseído-inactivo | `Use <name>` — habilitado |
-| bloqueado | `Not in your collection` — sin acción, **sin botón de compra** (brief §9) |
+| bloqueado | `Not in your collection` — sin acción, **sin botón de compra ni precio** (brief §12) |
 
-Cerrar el detalle: `Esc`, o click en el vacío. `Esc` sin detalle
-abierto cierra la ventana.
+`<name>` es el nombre propio del pet, **nunca traducido** ("Use Frin" /
+"Usar Frin").
+
+`Esc` cierra la ventana.
 
 ## 7. Frin: presentación de variantes
 
@@ -238,16 +291,16 @@ hembra) — nunca dos entradas no relacionadas en la Collection (brief
 §11). El modelo colapsa `{"frin","male"}` y `{"frin","female"}` en un
 `CollectionItem` con `variants = [male, female]`.
 
-- **Grid**: una fila "Frin", sub-línea `Male · Female`.
-- **Detalle**: chips `Male` / `Female`; el seleccionado tiene relleno
-  suave + contorno terracota. Cambiar de chip actualiza la preview y
-  la etiqueta del botón. `Use Frin` activa `{petId:"frin",
-  variantId:<chip seleccionado>}`.
+- **Gallery**: una entrada "Frin".
+- **Hero**: selector **tipográfico** `Male · Female` (`Macho · Hembra`
+  en español) con un subrayado del acento de Frin bajo la variante
+  seleccionada — NO dos botones (brief 06.1 §13). Cambiar de variante
+  actualiza la preview y la etiqueta del botón de inmediato. `Use Frin`
+  activa `{petId:"frin", variantId:<variante seleccionada>}`.
 - **Persistencia**: la variante ACTIVA persiste en
   `AppState::activeVariantId` vía `TrySwitchActivePet()` — al reabrir la
   app, Frin vuelve con la variante que estaba en el escritorio. La
-  variante "hovering" en un detalle sin activar es efímera (no se
-  persiste).
+  variante mostrada en el hero sin activar es efímera (no se persiste).
 
 Sin ramas de runtime especiales: se usa la infraestructura de
 variante/catálogo que ya existía (Block 04/05).
@@ -271,7 +324,7 @@ tamaño en pantalla = canvasW · visualScale · factor_de_usuario
 |---|---|---|
 | Small  | 0.80 | cuatro quintos, "se aparta un poco" |
 | **Medium** | **1.00** | exactamente el tamaño que declara el contenido — un owner que nunca toca el control ve el pet igual que antes de Block 06 |
-| Large  | 1.30 | un tercio más grande, todavía una ventana chica |
+| Large  | **1.15** | un poco más grande (06.1: bajado de 1.30 tras QA del owner — 1.30 estiraba los sprites detallados; DEC-114). El id persistido `"large"` se re-interpreta solo al nuevo factor, sin migración. |
 
 `SpikeApp::EffectiveCanvasWidth()/Height()` doblan este factor; cambiar
 el tamaño re-aplica `SDL_SetWindowSize` + presentación lógica + hit-mask
@@ -302,25 +355,32 @@ del sistema. Windows/Linux: un adapter **no-op** (`Install()` devuelve
 false; la bandeja de Windows y el StatusNotifierItem de Linux son
 trabajo futuro — NO se finge una implementación, brief §24).
 
-### Estructura del menú (block brief §14)
+### Estructura del menú (block brief 06 §14 + 06.1 §2/§5)
 
 ```
-Bunny                    <- header, deshabilitado (nombre del pet activo)
+Bunny                    <- header, deshabilitado (nombre del pet activo, NO traducido)
 --------
-Hide Nimvlet             <- o "Show Nimvlet" según el estado
-Collection…
+Hide Nimvlet             <- o "Show Nimvlet" según el estado  (Ocultar/Mostrar Nimvlet)
+Collection…                                                    (Colección…)
 --------
-Size      ▸  Small · Medium · Large      (checkable, exactamente uno)
-Opacity   ▸  100% · 85% · 70% · 55%      (checkable)
-Lock Position                            (checkable)
+Size      ▸  Small · Medium · Large      (checkable, exactamente uno)   (Tamaño · Pequeño/Mediano/Grande)
+Opacity   ▸  100% · 85% · 70% · 55%      (checkable — los % no se traducen)   (Opacidad)
+Lock Position                            (checkable)                          (Bloquear posición)
+Language  ▸  English · Español           (checkable, exactamente uno)         (Idioma)
 --------
-Quit Nimvlets
+Quit Nimvlets                                                  (Salir de Nimvlets)
 ```
+
+Entre paréntesis, la etiqueta en español. `Language ▸` es la única
+expansión de estructura de 06.1; el resto es re-etiquetado.
 
 El `NSMenu` real se construye a partir de `platform::
 BuildQuickMenuModel(ShellState)` — un modelo PURO que
-`tests/QuickMenuModelTest.cpp` cubre etiqueta por etiqueta, así que el
-test verifica exactamente la estructura que se envía.
+`tests/QuickMenuModelTest.cpp` cubre etiqueta por etiqueta (EN y ES),
+así que el test verifica exactamente la estructura que se envía. Toda
+etiqueta traducible sale de `core::Localized(clave, state.language)`;
+el nombre del pet y los porcentajes de opacidad no. Los endónimos
+("English"/"Español") van siempre en su propio idioma.
 
 ### Cómo llegan las acciones al runtime
 
@@ -369,13 +429,20 @@ chicas — NO presupuestos finales):
   ≈ 0 %, RSS en la misma banda que un arranque pet-only fresco — sin
   acumulación. `Close()` libera el renderer + todas las texturas +
   caches.
-- **Costo transitorio al abrir la Collection**: se carga el pack del
-  pet poseído-inactivo (Frin, ~72 MB) para extraer su frame de preview;
-  el `PetDefinition` se descarta de inmediato, solo queda una textura
-  chica. Pagado una sola vez mientras la Collection está abierta. Con
-  muchos pets poseídos esto escalaría — un bloque futuro usaría un
-  thumbnail precompilado o un loader en background; se registra como
-  limitación.
+- **Costo transitorio al abrir la Collection**: se carga el pack de
+  cada pet NO activo visible para extraer su frame de preview; el
+  `PetDefinition` se descarta de inmediato, solo queda una textura
+  chica. Desde 06.1 esto incluye a los pets **locked** (su arte ahora
+  se muestra, más callada — §6.3), así que el dev-set carga dos packs
+  (Nidir ~61 MB + Frin ~72 MB) en vez de uno. Pagado una sola vez
+  mientras la Collection está abierta; liberado en `Close()`. Con
+  muchos pets poseídos/visibles esto escalaría — un thumbnail
+  precompilado o un loader en background sería el fix; se registra como
+  limitación (DEC-113/DEC-117).
+- **Microinteracción de hover (06.1)**: el micro-lift + wash es un
+  cambio de estado **instantáneo**, sin tween temporizado — no agrega
+  ningún deadline de render (DEC-118). El modelo event-driven de Block
+  06 queda intacto.
 
 ## 12. Alcance de plataforma
 
@@ -391,18 +458,49 @@ chicas — NO presupuestos finales):
 
 ## 13. Privacidad
 
-Block 06 **no introduce ningún permiso nuevo** (brief §20). Ver
+Block 06 / 06.1 **no introduce ningún permiso nuevo** (brief §20). Ver
 `docs/PRIVACY_SECURITY.md`. En concreto: un `NSStatusItem` y un `NSMenu`
 son UI de nuestra propia app; Core Text dibuja en memoria propia;
-`activateIgnoringOtherApps:` no requiere TCC. Sin cuenta, sin telemetría,
-sin red, sin captura de pantalla en el producto, sin hooks de input
-globales, sin conteo global de clicks.
+`activateIgnoringOtherApps:` no requiere TCC; `SDL_GetPreferredLocales()`
+(06.1, para el idioma inicial) es una consulta de configuración del OS,
+sin diálogo. Sin cuenta, sin telemetría, sin red, sin captura de
+pantalla en el producto, sin hooks de input globales, sin conteo global
+de clicks.
 
 Las capturas de pantalla de QA de este bloque son diagnóstico de
 DESARROLLO de nuestra propia ventana (AGENTS.md §5) — nunca se
 comitean, nunca son comportamiento del producto.
 
-## 14. Intencionalmente diferido
+## 14. Localización EN/ES (06.1)
+
+Contrato de idioma de producto — ver DEC-115/DEC-116.
+
+- **`core::Localization`** (puro, `src/core`): `Language {kEn, kEs}`,
+  ids persistidos `"en"`/`"es"`, `enum class StringKey` con una entrada
+  por string traducible, `Localized(key, lang) -> const char*`. Sin
+  framework tipo ICU. La UI y el menú piden claves semánticas, nunca
+  contienen copy inglés hard-codeado.
+- **Nunca se traduce**: nombres propios de Nimvlet (Bunny, Nidir, Frin,
+  Artu, Rato, Rin Rin, Kyubi, Sweetie), "Nimvlets"/"Nimvlet",
+  porcentajes de opacidad. **`clicks` → `clics`**, nunca "coins"/
+  "monedas". Endónimos ("English"/"Español") siempre en su propio
+  idioma.
+- **Persistencia**: `AppState::language` (schema v3). `""` = nunca
+  elegido → `SpikeApp` resuelve el inicial de `SDL_GetPreferredLocales()`
+  (solo distingue es/en) **sin persistirlo**. Una elección explícita
+  desde `Language ▸` se persiste y gana desde ese momento.
+- **Cambio inmediato, sin reinicio**: elegir idioma re-empuja
+  `ShellState` (el shell reconstruye el `NSMenu`) y
+  `ProductWindow::SetLanguage` (la vista redibuja). El id del widget con
+  foco es semántico, así que el foco se conserva si ese widget sigue
+  existiendo (brief §21).
+- **Copy editorial** (`productui::PetEditorial`): `ProvisionalSpecies`
+  da una etiqueta de especie de una palabra (Rabbit/Black dragon/Wolf ·
+  Conejo/Dragón negro/Lobo), tomada de la prosa de PRD_V1 §3 y marcada
+  **PROVISIONAL**. `ShortDescription` (línea de personalidad) NO se
+  escribe en este bloque: siempre `""`. El hero reserva el espacio.
+
+## 15. Intencionalmente diferido
 
 | Feature | Bloque |
 |---|---|
@@ -414,6 +512,10 @@ comitean, nunca son comportamiento del producto.
 | Conteo global de clicks, permiso de input global | futuro, opt-in explícito (AGENTS.md §14) |
 | Preferencia de fullscreen, launch-at-login, dark mode | futuro |
 | Corrección visual de `lie_to_sit` de Frin | deuda conocida, congelada (brief §21) |
+| Idiomas más allá de EN/ES | futuro (el catálogo de claves está listo; agregar un idioma es una columna más) |
+| Personalidades/lore por Nimvlet | futuro con dirección de contenido — 06.1 solo dejó `ProvisionalSpecies` y espacio reservado |
+| Menú `Language` en Windows/Linux | con el System Shell nativo de esas plataformas (futuro) |
+| Microanimación de hover temporizada (120–160 ms) | descartada a propósito (DEC-118) — la performance manda |
 
 Nada de lo anterior está implementado ni insinuado en el código de
-Block 06.
+Block 06 / 06.1.

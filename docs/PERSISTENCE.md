@@ -28,7 +28,7 @@ Persistido, con significado real en el runtime hoy:
   actualiza cada vez que termina un drag; se usa para reabrir la
   ventana donde el usuario la dejó (ver §7).
 
-**Agregado en Block 06 (schema v2 — ver §3):**
+**Agregado en Block 06 (schema v2) y Block 06.1 (schema v3) — ver §3:**
 
 - **Propiedad** (`AppState::ownedPetIds`, `AppState::ownershipSeeded`) —
   qué Nimvlets posee el owner, por `petId`. `ownershipSeeded` distingue
@@ -39,6 +39,11 @@ Persistido, con significado real en el runtime hoy:
   `sizeChoice`, `opacityPercent`) — controles de usuario expuestos por
   el menú de la barra (`docs/PRODUCT_UI.md` §8). `core::DisplayControls`
   (puro) los traduce a comportamiento genérico de runtime.
+- **Idioma del Product UI** (`AppState::language`, schema v3 — Block
+  06.1). `""` = el owner nunca eligió; en ese caso `SpikeApp` resuelve
+  el inicial del locale del OS (en/es) SIN persistirlo. Una elección
+  explícita desde el menú `Language ▸` sí se persiste y gana desde ese
+  momento. Ver `docs/PRODUCT_UI.md` §14 y DEC-115/DEC-116.
 - **NO** persistido: la visibilidad del pet ("Hide Nimvlet"). Al
   relanzar la app el pet siempre arranca visible (esconder ≠ salir,
   brief §17).
@@ -105,9 +110,9 @@ x86_64, arm64 — es little-endian; no se implementa byte-swapping,
 igual que todo otro formato en disco de este repositorio).
 
 ```
-magic             : 8 bytes, "NVSTATE1"   (el magic NO cambió con v2)
-schemaVersion     : uint32                (2 desde Block 06)
--- cuerpo compartido v1/v2 (Block 03):
+magic             : 8 bytes, "NVSTATE1"   (el magic NO cambia entre schemas)
+schemaVersion     : uint32                (3 desde Block 06.1)
+-- cuerpo compartido v1/v2/v3 (Block 03):
 clickBalance      : uint64
 activePetId       : string   (uint32 byte-length + UTF-8 bytes)
 activeVariantId   : string
@@ -121,6 +126,8 @@ ownedPetIds       : string[ownedPetIdCount]   (ordenados, sin duplicados)
 lockPosition      : uint8   (0/1)
 sizeChoice        : string  ("small"/"medium"/"large"; "" => "medium")
 opacityPercent    : uint32  (0 => sin preferencia => 100)
+-- añadido de v3 (Block 06.1):
+language          : string  ("en"/"es"; "" => nunca elegido => se resuelve del locale del OS, sin persistir)
 ```
 
 **Determinista:** serializar el mismo `AppState` dos veces produce una
@@ -128,17 +135,20 @@ salida idéntica byte a byte — sin timestamps, sin padding, sin orden de
 iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
-**Versionado + migración hacia adelante v1→v2 (Block 06, DEC-109):**
-`DeserializeAppState` lee **v1 O v2**. Un archivo v1 (Block 03/04/05) se
-lee con su layout viejo (el "cuerpo compartido" de arriba) y los campos
-v2 quedan en su default; `outState.schemaVersion` se fija a la versión
-actual, así que el próximo `Save()` lo reescribe como v2. Migración de
-una sola vez, sin lógica de conversión más allá de "los campos nuevos
-arrancan en su default" — el click balance y la posición de ventana del
-owner **sobreviven** la actualización. Una versión más nueva desconocida
-(v3+) o basura sigue tratándose como datos corruptos (ver §5), nunca se
-adivina. La costura sigue siendo limpia: `schemaVersion` se lee y
-verifica primero.
+**Versionado + migración hacia adelante (Block 06 DEC-109, Block 06.1
+DEC-116):** `DeserializeAppState` lee cualquier versión en
+`[1, kCurrentSchemaVersion]` — hoy **1, 2 y 3**. Un archivo más viejo se
+lee con su layout (el "cuerpo compartido" + los bloques v2 que
+correspondan) y los campos de versiones posteriores quedan en su
+default (`language = ""`); `outState.schemaVersion` se fija a la versión
+actual, así que el próximo `Save()` lo reescribe al formato actual.
+Migración de una sola vez, sin lógica de conversión más allá de "los
+campos nuevos arrancan en su default" — el click balance, la posición
+de ventana, la propiedad y las preferencias de tamaño/opacidad/lock del
+owner **sobreviven** cada actualización. Una versión más nueva
+desconocida (v4+) o basura sigue tratándose como datos corruptos (ver
+§5), nunca se adivina. La costura sigue siendo limpia: `schemaVersion`
+se lee y verifica primero.
 
 ## 4. Comportamiento de escritura atómica
 

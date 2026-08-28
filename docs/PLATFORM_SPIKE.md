@@ -617,3 +617,39 @@ click real: `HitTest` → `OpenDetail` / `CanActivate` →
 de input real está cubierta por tests puros
 (`CollectionLayout::HitTest`, `FocusList`) y es idéntica en estructura
 a la de la ventana del pet, que sí funciona con input real.
+
+### 12.4 Adenda Block 06.1 (hero + gallery, localización)
+
+Sin cambios de plataforma: 06.1 es un pase visual + de idioma sobre la
+misma arquitectura macOS-única. El estado de 12.1 sigue vigente
+(Windows/Linux: compilan, stubs honestos).
+
+Añadidos al checklist de QA manual del owner (12.2):
+
+11. **Composición hero + gallery**: al abrir, el pet activo es el
+    HERO (arte grande, forma de acento sutil, nombre grande, especie,
+    estado, botón); los demás en la gallery. Click en un pet de la
+    gallery → pasa a hero.
+12. **Selector de variante de Frin**: con Frin como hero, "Male ·
+    Female" tipográfico con subrayado del acento bajo la seleccionada;
+    cambiar actualiza la preview y el botón al instante.
+13. **Locked (Nidir)**: su arte se ve, más callado; sin botón de
+    compra ni precio.
+14. **Acento por pet**: la forma detrás del hero y la línea de foco
+    tienen el tono del pet (Bunny apricot, Nidir violeta, Frin azul);
+    el resto de la UI no cambia de color.
+15. **`Language ▸`** en el menú: English / Español, uno marcado.
+    Elegir el otro → el menú entero y la Collection abierta cambian de
+    idioma **al instante**, sin reiniciar. "clicks" → "clics", nunca
+    "monedas"; "Bunny"/"Nidir"/"Frin" y "Nimvlets" no cambian.
+    Persiste: cerrar y reabrir la app mantiene el idioma elegido.
+16. **`Size ▸ Large`** ahora es 1.15 (antes 1.30): más chico que en
+    Block 06; una preferencia "large" guardada se ve al nuevo tamaño
+    sin más.
+
+El límite del harness de captura (12.3) sigue igual — las capturas del
+hero por estado y del idioma se generaron con
+`NIMVLETS_DEV_OPEN_COLLECTION=<petId[/variant]>` +
+`NIMVLETS_DEV_LANGUAGE=<en|es>` (misma ruta de código que un click /
+una elección de menú reales); el `NSMenu` en español no se capturó por
+harness — verificación manual del owner.

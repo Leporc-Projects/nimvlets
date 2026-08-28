@@ -4112,3 +4112,145 @@ thumbnail es caro (brief §19).
 `Clear()` libera todas las texturas al cerrar la ventana. Con muchos
 pets poseídos esto escalaría — un thumbnail precompilado o un loader en
 background sería el fix; se registra como limitación conocida.
+
+---
+
+### DEC-114 — Tamaño "Large": 1.30 -> 1.15
+**Status:** DECIDIDO · Block 06.1.
+
+**Contexto.** QA del owner sobre Block 06: el preset Large (1.30 encima
+de `visualScale`) agranda demasiado los sprites detallados; se ve
+estirado.
+
+**Decisión.** `core::PetSizeScaleFactor(kLarge)` pasa de 1.30 a **1.15**.
+Small (0.80) y Medium (1.00 exacto — sigue siendo el tamaño canónico
+del contenido) no cambian. El id persistido `"large"` no cambia: una
+preferencia guardada de Block 06 se re-interpreta sola al nuevo factor
+la próxima vez que se lee, sin migración de datos. No se toca ningún
+`visualScale` por-pet, ni los assets, ni la normalización de contenido.
+El hit-test y el tamaño de ventana siguen la nueva dimensión efectiva
+como cualquier otro cambio de tamaño (misma ruta que Block 06).
+
+---
+
+### DEC-115 — Localización EN/ES: catálogo de claves semánticas, pura, en src/core
+**Status:** DECIDIDO · Block 06.1.
+
+**Contexto.** El brief pide inglés + español para el texto de interfaz,
+persistido, con cambio inmediato, sin `if (lang == es)` desperdigado
+por el render, y "Do NOT build a general ICU-like localization
+framework".
+
+**Decisión.** `core::Localization` (puro, sin SDL):
+- `Language { kEn, kEs }`, ids persistidos `"en"`/`"es"` (nunca
+  traducidos — AGENTS.md §17), `ParseLanguage` con fallback a `kEn`
+  ("Otherwise default to English", brief §5).
+- `enum class StringKey` — una entrada por string traducible de la UI y
+  el menú. `Localized(key, lang)` devuelve un `const char*` de una
+  tabla estática 2D. Sin plurales gramaticales complejos, sin
+  interpolación: donde hace falta un nombre propio se concatena
+  (`kUsePetPrefix` + displayName).
+- Vive en `src/core` (no en productui ni platform) para que tanto
+  `platform::BuildQuickMenuModel` (nimvlets_platform_policy) como
+  `CollectionLayout` (nimvlets_productui_core) la consuman, y para que
+  los tests corran en cualquier host.
+
+**Qué NO se traduce** (brief §4/§16): los nombres propios de Nimvlet
+(Bunny, Nidir, Frin, ...), los términos de marca "Nimvlets"/"Nimvlet",
+y "clicks"/"clics" NUNCA se vuelve "coins"/"monedas". Los endónimos de
+idioma ("English"/"Español") se muestran siempre en su propio idioma.
+
+**Idioma inicial** cuando el owner nunca eligió: `SpikeApp` mira
+`SDL_GetPreferredLocales()` (ya disponible, sin maquinaria nueva) y
+distingue solo es/en; el resultado NO se persiste. Una elección
+explícita desde el menú Language sí se persiste y gana desde ese
+momento. `AppState::language == ""` es justamente "nunca elegido".
+
+**Cambio inmediato:** elegir idioma en el menú actualiza `language_`,
+persiste la elección, y re-empuja `ShellState` (el shell reconstruye el
+NSMenu) + `ProductWindow::SetLanguage` (la vista redibuja). Sin
+reinicio. El id del widget con foco es semántico, así que el foco
+sobrevive el re-etiquetado.
+
+---
+
+### DEC-116 — AppState schema v3: idioma persistido
+**Status:** DECIDIDO · Block 06.1. Extiende DEC-109.
+
+**Decisión.** `kCurrentSchemaVersion` 2 -> 3; se agrega
+`AppState::language` (string, `""` = nunca elegido). `DeserializeAppState`
+generaliza la migración hacia adelante de DEC-109: lee cualquier versión
+en `[1, kCurrentSchemaVersion]` (hoy 1, 2 y 3). Un archivo v1 o v2 se
+lee con su layout, los campos de versiones posteriores quedan en su
+default (`language = ""`), y `schemaVersion` se marca como el actual
+para que el próximo `Save()` lo reescriba como v3. El click balance, la
+posición de ventana, la propiedad y las preferencias de tamaño/opacidad/
+lock **sobreviven** la actualización intactas. Una versión más nueva
+desconocida (v4+) o basura sigue tratándose como dato inutilizable.
+
+---
+
+### DEC-117 — Collection: composición HERO + GALLERY, con acento de identidad por pet
+**Status:** DECIDIDO · Block 06.1. Supersede la parte VISUAL de DEC-113
+y el layout de grid uniforme de Block 06 (la funcionalidad de Block 06
+—propiedad, switching, variantes, ciclo de vida— NO cambia).
+
+**Contexto.** QA del owner: la Collection de Block 06 funciona bien pero
+se ve "como una primera versión funcional, no un producto Nimvlets
+distintivo" — un grid plano y uniforme con PNGs insertados.
+
+**Decisión.** El Nimvlet seleccionado se vuelve el PROTAGONISTA visual:
+
+- **Hero**: arte grande a la izquierda sobre una forma orgánica muy
+  tenue teñida con el acento del pet (óvalo; round-rect apenas más
+  angular para Nidir), nombre grande, etiqueta de especie PROVISIONAL
+  (`ProvisionalSpecies` — "Rabbit"/"Black dragon"/"Wolf" tomadas de la
+  prosa de PRD_V1 §3, EN+ES; NINGUNA personalidad autorada, brief §14),
+  estado, selector de variante TIPOGRÁFICO ("Male · Female" con
+  subrayado de acento, no dos botones — brief §13), y una sola acción.
+- **Gallery**: los demás Nimvlets en un cluster centrado y discreto —
+  arte chico, nombre, estado conciso. Un click promueve a hero.
+- **Acento por pet** (`productui::PetAccent`, puro): SOLO tiñe la forma
+  del hero, la línea de foco/selección, y el subrayado de variante.
+  Bunny apricot, Nidir violeta apagado, Frin azul hielo (brief §9); el
+  resto de Nimvlets con ids TENTATIVOS. NUNCA recolorea toda la UI, sin
+  gradientes.
+- **Locked**: su arte se muestra más callado (alpha 150), NO grayscale
+  agresivo ni destruido (brief §12). `PetPreviewCache` ahora carga
+  también los packs de pets locked. Sin acción de compra, sin precio.
+- Ventana 760x540 -> **800x560** (brief §18); el contenido cabe sin
+  scroll.
+- Jerarquía por tamaño/peso/espacio, no por más contenedores
+  (brief §7/§17). El bloque de texto del hero se centra verticalmente
+  contra el arte para no quedar "pesado arriba".
+
+Todo el layout sigue siendo puro y testeable (`CollectionLayout` +
+`CollectionLayoutTest`).
+
+---
+
+### DEC-118 — Microinteracción de hover: instantánea, no animación temporizada
+**Status:** DECIDIDO · Block 06.1.
+
+**Contexto.** El brief §11 pide un micro-lift de hover de ~2-3pt y una
+transición de ~120-160ms, PERO explícitamente condicionado: "if the
+current event-driven rendering architecture can support it without
+creating a permanent render loop" y "Performance architecture outranks
+decorative motion".
+
+**Decisión.** El hover sobre una entrada de la gallery aplica de
+inmediato: un lift de 2pt (el layout desplaza `art`/`name`/`status` de
+esa entrada hacia arriba cuando `in.hoverPetId` coincide), un wash de
+fondo sutil, y más contraste en nombre/estado. **Sin tween temporizado.**
+
+Se DESCARTÓ la animación de 120-160ms: implementarla requeriría un
+deadline de render en el loop del pet (o un tick propio de la ventana
+de producto) activo mientras dura cada animación de hover. Aunque sea
+un deadline acotado y no un loop permanente, agrega estado y superficie
+de riesgo a un pase que es de pulido visual, para un beneficio
+puramente decorativo que el brief mismo subordina a la arquitectura de
+performance. El cambio de estado instantáneo + sutil es la opción que
+el brief nombra como preferible en ese caso. El modelo event-driven de
+Block 06 (DEC-112) queda intacto: `ProductWindow::RenderIfNeeded()`
+sigue siendo un no-op salvo `dirty_`/`EXPOSED`, sin término de deadline
+nuevo.

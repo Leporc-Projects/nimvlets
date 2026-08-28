@@ -342,4 +342,4 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/NIDIR_CONTENT.md` | Real asset source convention, import/normalization/mirror pipeline, and the directional content model (Block 04.2). |
 | `docs/BUNNY_CONTENT.md` | Bunny's migration to real production art, canonical-direction inversion, and the QA-driven downscale-quality/70-30-hover/rest-of-size corrections (Block 04.3). |
 | `docs/FRIN_CONTENT.md` | Frin's real male/female import and the named-state behavior graph (seated/lying transitions) it introduced (Block 05). |
-| `docs/PRODUCT_UI.md` | Product shell: the Collection window, ownership model, native quick menu, size/opacity/lock/hide controls, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope (Block 06). |
+| `docs/PRODUCT_UI.md` | Product shell: the Collection window (hero + gallery composition, per-pet accent identity), ownership model, native quick menu, size/opacity/lock/hide controls, EN/ES localization contract, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope (Block 06 / 06.1). |

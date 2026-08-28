@@ -677,3 +677,45 @@ No es una regresión de Block 06: la ventana de producto en reposo mide
 tiene su textura de frame residente). Precalcular/liberar la máscara de
 alpha sigue siendo la siguiente ganancia grande de memoria y sigue
 fuera de alcance.
+
+## Mediciones reales de Block 06.1 (hero + gallery, arte de locked, localización)
+
+macOS Release, Apple Silicon nativo, una máquina, muestras chicas
+(`top -l 5 -s 1`) — **NO presupuestos finales**, misma honestidad que
+el resto del documento. Directorio de app-data aislado.
+
+| Escenario | Idle CPU | RSS |
+|---|---|---|
+| Pet-only en reposo (Bunny), asentado | **≈0–1%** (ruido de 1 s) | ≈121 MB |
+| Collection ABIERTA, en reposo (pet oculto) | **≈0.0%** | ≈206 MB |
+| Pet-only en reposo tras 2 / 6 / 14 ciclos open/close de la Collection | **≈0.0%** | ≈332 / 279 / 227 MB |
+
+### Lo que estas cifras SÍ dicen
+
+- **No hay loop de render oculto** (invariante de DEC-112, sin cambios):
+  Collection abierta y sin interacción → CPU ≈0%. La composición
+  hero + gallery no agrega ningún deadline de render; el micro-lift de
+  hover es un cambio de estado instantáneo (DEC-118), no un tween.
+- **No hay leak.** El RSS tras 2/6/14 ciclos open/close **no crece con
+  la cantidad de ciclos** — de hecho el run de 14 midió *menos* (227 MB)
+  que el de 2 (332 MB). La dispersión es ruido del allocator/driver,
+  no acumulación. `ProductWindow::Close()` sigue liberando el renderer,
+  todas las texturas y los dos caches (verificado por
+  `NIMVLETS_DEV_COLLECTION_CYCLES`; el pet y su renderer quedan vivos).
+
+### El costo transitorio subió respecto de Block 06
+
+Block 06 cargaba UN pack de preview (Frin, el único poseído-inactivo).
+Block 06.1 muestra también el arte de los pets **locked** (más callado
+— brief §12), así que al abrir la Collection se cargan **dos** packs
+(Nidir ~61 MB + Frin ~72 MB) para extraer sus frames. Los
+`PetDefinition` se descartan de inmediato (solo quedan dos texturas
+chicas), pero el high-water mark de RSS de los buffers de decodificación
+transitorios no vuelve del todo al allocator — de ahí que la banda
+absoluta de RSS con la Collection abierta (~200–330 MB) esté por encima
+de la de Block 06 (~103–166 MB). Es un costo pagado una vez por apertura,
+liberado en `Close()`, y sigue siendo la misma limitación conocida
+(DEC-113/DEC-117): un thumbnail precompilado o un loader en background
+lo resolvería. El término dominante de fondo (`FrameDefinition::pixels`
+residente por `core::AlphaMask`) sigue pendiente, igual que desde Block
+05.
