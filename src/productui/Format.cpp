@@ -1,6 +1,24 @@
 #include "productui/Format.h"
 
+#include <string>
+
 namespace nimvlets::productui {
+
+namespace {
+
+// Sustituye TODAS las apariciones de `token` en `s` por `value`. Los
+// tokens ("{n}", "{pet}") no se solapan con `value`, así que un solo
+// paso alcanza.
+std::string Substitute(std::string s, const std::string& token, const std::string& value) {
+    std::string::size_type pos = 0;
+    while ((pos = s.find(token, pos)) != std::string::npos) {
+        s.replace(pos, token.size(), value);
+        pos += value.size();
+    }
+    return s;
+}
+
+}  // namespace
 
 std::string FormatGroupedNumber(std::uint64_t value) {
     const std::string digits = std::to_string(value);
@@ -18,6 +36,24 @@ std::string FormatGroupedNumber(std::uint64_t value) {
 std::string FormatClickCount(std::uint64_t clicks, core::Language lang) {
     const core::StringKey word = clicks == 1 ? core::StringKey::kClickSingular : core::StringKey::kClickPlural;
     return FormatGroupedNumber(clicks) + " " + core::Localized(word, lang);
+}
+
+std::string FormatNeedMoreClicks(std::uint64_t shortBy, core::Language lang) {
+    if (shortBy == 1) {
+        return core::Localized(core::StringKey::kNeedMoreClicksOne, lang);
+    }
+    return Substitute(core::Localized(core::StringKey::kNeedMoreClicksMany, lang), "{n}",
+                      FormatGroupedNumber(shortBy));
+}
+
+std::string FormatSpendPrompt(std::uint64_t price, const std::string& petName, core::Language lang) {
+    const core::StringKey key =
+        price == 1 ? core::StringKey::kSpendPromptOne : core::StringKey::kSpendPromptMany;
+    std::string out = core::Localized(key, lang);
+    if (price != 1) {
+        out = Substitute(std::move(out), "{n}", FormatGroupedNumber(price));
+    }
+    return Substitute(std::move(out), "{pet}", petName);
 }
 
 }  // namespace nimvlets::productui

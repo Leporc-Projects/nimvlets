@@ -17,25 +17,39 @@ bool Eq(const char* a, const char* b) {
     return std::strcmp(a, b) == 0;
 }
 
-// Copy APROBADA por el owner (Block 06.2 §14/§15) — inglés.
+// Copy APROBADA por el owner (Block 07 brief §19: descripciones un poco
+// más largas, un par de frases) — inglés. Verbatim.
 bool TestApprovedEditorialEnglish() {
     NIMVLETS_CHECK(Eq(Species("bunny", Language::kEn), "Rabbit"));
-    NIMVLETS_CHECK(Eq(ShortDescription("bunny", Language::kEn), "Small, curious, and never in a hurry."));
+    NIMVLETS_CHECK(Eq(ShortDescription("bunny", Language::kEn),
+                      "Small, curious, and never in a hurry. Bunny prefers quiet corners, tiny "
+                      "adventures, and staying close while you work."));
     NIMVLETS_CHECK(Eq(Species("nidir", Language::kEn), "Black dragon"));
-    NIMVLETS_CHECK(Eq(ShortDescription("nidir", Language::kEn), "Quiet wings. Bright eyes. Fire when it matters."));
+    NIMVLETS_CHECK(Eq(ShortDescription("nidir", Language::kEn),
+                      "Quiet wings, bright eyes, and fire when it matters. Nidir watches the desktop "
+                      "like a tiny guardian, calm until something catches his attention."));
     NIMVLETS_CHECK(Eq(Species("frin", Language::kEn), "White wolf"));
-    NIMVLETS_CHECK(Eq(ShortDescription("frin", Language::kEn), "Watchful, calm, and happiest close by."));
+    NIMVLETS_CHECK(Eq(ShortDescription("frin", Language::kEn),
+                      "Watchful, calm, and happiest close by. Frin carries the patience of a quiet "
+                      "wolf, always alert without needing to make a fuss."));
     return true;
 }
 
-// Copy APROBADA — español.
+// Copy APROBADA — español. Verbatim.
 bool TestApprovedEditorialSpanish() {
     NIMVLETS_CHECK(Eq(Species("bunny", Language::kEs), "Conejo"));
-    NIMVLETS_CHECK(Eq(ShortDescription("bunny", Language::kEs), "Pequeño, curioso y sin ninguna prisa."));
+    NIMVLETS_CHECK(Eq(ShortDescription("bunny", Language::kEs),
+                      "Pequeño, curioso y sin ninguna prisa. Bunny prefiere los rincones "
+                      "tranquilos, las pequeñas aventuras y quedarse cerca mientras trabajas."));
     NIMVLETS_CHECK(Eq(Species("nidir", Language::kEs), "Dragón negro"));
-    NIMVLETS_CHECK(Eq(ShortDescription("nidir", Language::kEs), "Alas quietas. Ojos brillantes. Fuego cuando hace falta."));
+    NIMVLETS_CHECK(Eq(ShortDescription("nidir", Language::kEs),
+                      "Alas quietas, ojos brillantes y fuego cuando hace falta. Nidir vigila el "
+                      "escritorio como un pequeño guardián, tranquilo hasta que algo llama su "
+                      "atención."));
     NIMVLETS_CHECK(Eq(Species("frin", Language::kEs), "Lobo blanco"));
-    NIMVLETS_CHECK(Eq(ShortDescription("frin", Language::kEs), "Atento, tranquilo y más feliz cerca."));
+    NIMVLETS_CHECK(Eq(ShortDescription("frin", Language::kEs),
+                      "Atento, tranquilo y más feliz cerca. Frin tiene la paciencia de un lobo "
+                      "sereno, siempre alerta sin necesidad de hacer ruido."));
     return true;
 }
 
@@ -59,13 +73,24 @@ bool TestUnauthoredPetsAreEmpty() {
     return true;
 }
 
-// El nombre propio "Frin" nunca aparece dentro del copy editorial (no se
-// traduce ni se repite ahí — el hero ya lo muestra aparte).
-bool TestNoProperNameInsideCopy() {
-    for (Language lang : {Language::kEn, Language::kEs}) {
-        NIMVLETS_CHECK(std::string(ShortDescription("frin", lang)).find("Frin") == std::string::npos);
-        NIMVLETS_CHECK(std::string(ShortDescription("bunny", lang)).find("Bunny") == std::string::npos);
-        NIMVLETS_CHECK(std::string(ShortDescription("nidir", lang)).find("Nidir") == std::string::npos);
+// Block 07: la copy ahora es de un PAR de frases (brief §19) — más
+// larga que la de Block 06.2, con al menos un punto y seguido, y sin
+// mencionar a OTROS Nimvlets ni "Nimvlets". (Que un pet se nombre a sí
+// mismo en su propia descripción es la copy que el owner escribió —
+// DEC-125.)
+bool TestCopyIsTwoSentences() {
+    struct { const char* id; const char* other1; const char* other2; } pets[] = {
+        {"bunny", "Nidir", "Frin"}, {"nidir", "Bunny", "Frin"}, {"frin", "Bunny", "Nidir"}};
+    for (const auto& p : pets) {
+        for (Language lang : {Language::kEn, Language::kEs}) {
+            const std::string d = ShortDescription(p.id, lang);
+            NIMVLETS_CHECK(d.size() > 80);
+            const std::size_t dot = d.find(". ");
+            NIMVLETS_CHECK(dot != std::string::npos && dot > 0 && dot < d.size() - 2);
+            NIMVLETS_CHECK(d.find(p.other1) == std::string::npos);
+            NIMVLETS_CHECK(d.find(p.other2) == std::string::npos);
+            NIMVLETS_CHECK(d.find("Nimvlet") == std::string::npos);
+        }
     }
     return true;
 }
@@ -77,7 +102,7 @@ void RegisterPetEditorialTests(testing::TestRunner& runner) {
     runner.Add("PetEditorial/ApprovedEditorialSpanish", TestApprovedEditorialSpanish);
     runner.Add("PetEditorial/SpeciesIsLocalized", TestSpeciesIsLocalized);
     runner.Add("PetEditorial/UnauthoredPetsAreEmpty", TestUnauthoredPetsAreEmpty);
-    runner.Add("PetEditorial/NoProperNameInsideCopy", TestNoProperNameInsideCopy);
+    runner.Add("PetEditorial/CopyIsTwoSentences", TestCopyIsTwoSentences);
 }
 
 }  // namespace nimvlets::tests

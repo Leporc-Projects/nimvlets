@@ -6,6 +6,7 @@
 #include "catalog/CollectionModel.h"
 #include "core/Localization.h"
 #include "productui/PetAccent.h"
+#include "productui/SectionNav.h"
 #include "productui/UiColor.h"
 #include "productui/UiGeometry.h"
 
@@ -46,6 +47,11 @@ struct HeroVariantChip {
     UiRect underline;     // línea de acento de 2pt bajo el chip seleccionado
     std::string focusId;  // "variant:<variantId>"
     bool selected = false;
+    // ¿El owner posee esta variante? Una variante no poseída se muestra
+    // en el selector pero atenuada, y NO habilita "Use" (brief §6). En
+    // el estado actual del owner tras la migración las dos variantes de
+    // Frin están poseídas, así que esto siempre es true para él.
+    bool owned = true;
 };
 
 struct CollectionHero {
@@ -84,10 +90,11 @@ struct CollectionHero {
 struct CollectionLayout {
     UiRect viewport;
 
-    UiRect titleAnchor;            // "Nimvlets" (izquierda) — marca, no traducida
-    UiRect clicksAnchorRight;      // borde DERECHO del "1 248 clicks" / "1 248 clics"
-    UiRect sectionTitleAnchor;     // "Collection" / "Colección"
-    UiRect sectionSubtitleAnchor;  // "Your companions" / "Tus compañeros"
+    // Cabecera compartida con el Shop: "Nimvlets" + balance + pestañas
+    // "Collection · Shop" (Block 07). Reemplaza a los viejos anclas de
+    // título/subtítulo de sección de Block 06.
+    SectionHeaderLayout header;
+
     UiRect dividerRect;            // hairline entre el hero y la gallery
     UiRect galleryShelf;          // segundo plano: fondo un pelín más profundo bajo el divisor (§12)
 

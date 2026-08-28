@@ -1,6 +1,7 @@
 #include "CollectionLayoutTest.h"
 
 #include "catalog/CollectionModel.h"
+#include "catalog/PetEntitlement.h"
 #include "core/Localization.h"
 #include "productui/CollectionLayout.h"
 
@@ -12,12 +13,15 @@ using nimvlets::catalog::CatalogEntry;
 using nimvlets::catalog::CollectionModel;
 using nimvlets::catalog::OwnershipStatus;
 using nimvlets::catalog::PetCatalog;
+using nimvlets::catalog::PetEntitlement;
 using nimvlets::catalog::PetIdentity;
 using nimvlets::core::Language;
 using nimvlets::productui::BuildCollectionLayout;
 using nimvlets::productui::CollectionLayout;
 using nimvlets::productui::CollectionLayoutInput;
 using nimvlets::productui::StatusText;
+
+using Ents = std::vector<PetEntitlement>;
 
 namespace nimvlets::tests {
 
@@ -53,7 +57,17 @@ PetCatalog MakeDevCatalog() {
 }
 
 CollectionModel DevModel(const std::string& activePetId, const std::string& activeVariant = "") {
-    return BuildCollectionModel(MakeDevCatalog(), {"bunny", "frin"}, PetIdentity{activePetId, activeVariant});
+    // El owner tras la migración: Bunny + Frin como PET ENTERO (las dos
+    // variantes de Frin poseídas).
+    const Ents owned = {PetEntitlement{"bunny", ""}, PetEntitlement{"frin", ""}};
+    return BuildCollectionModel(MakeDevCatalog(), owned, PetIdentity{activePetId, activeVariant});
+}
+
+// Un modelo donde SOLO Frin macho está poseído (hembra no) — para el
+// estado "variante no disponible" del hero (brief §6).
+CollectionModel FrinMaleOnlyModel(const std::string& activePetId) {
+    const Ents owned = {PetEntitlement{"bunny", ""}, PetEntitlement{"frin", "male"}};
+    return BuildCollectionModel(MakeDevCatalog(), owned, PetIdentity{activePetId, ""});
 }
 
 bool Has(const std::vector<std::string>& v, const std::string& s) {
@@ -137,12 +151,16 @@ bool TestHeroOwnedInactiveEnablesUse() {
     NIMVLETS_CHECK(layout.hero.variants[0].selected);
     NIMVLETS_CHECK(!layout.hero.variants[1].selected);
 
-    NIMVLETS_CHECK(layout.focusOrder.size() == 5);  // variant:male, variant:female, use, item:bunny, item:nidir
-    NIMVLETS_CHECK(layout.focusOrder[0] == "variant:male");
-    NIMVLETS_CHECK(layout.focusOrder[1] == "variant:female");
-    NIMVLETS_CHECK(layout.focusOrder[2] == "use");
-    NIMVLETS_CHECK(layout.focusOrder[3] == "item:bunny");
-    NIMVLETS_CHECK(layout.focusOrder[4] == "item:nidir");
+    // Block 07: las pestañas de navegación van primero en el orden de
+    // tabulación, luego los widgets del hero, luego la gallery.
+    NIMVLETS_CHECK(layout.focusOrder.size() == 7);
+    NIMVLETS_CHECK(layout.focusOrder[0] == "nav:collection");
+    NIMVLETS_CHECK(layout.focusOrder[1] == "nav:shop");
+    NIMVLETS_CHECK(layout.focusOrder[2] == "variant:male");
+    NIMVLETS_CHECK(layout.focusOrder[3] == "variant:female");
+    NIMVLETS_CHECK(layout.focusOrder[4] == "use");
+    NIMVLETS_CHECK(layout.focusOrder[5] == "item:bunny");
+    NIMVLETS_CHECK(layout.focusOrder[6] == "item:nidir");
     return true;
 }
 
@@ -245,13 +263,16 @@ bool TestHeroCarriesApprovedEditorial() {
     en.selectedPetId = "frin";
     const auto frinEn = BuildCollectionLayout(DevModel("bunny"), en);
     NIMVLETS_CHECK(frinEn.hero.speciesText == "White wolf");
-    NIMVLETS_CHECK(frinEn.hero.descriptionText == "Watchful, calm, and happiest close by.");
+    // Block 07: descripción de un par de frases (brief §19).
+    NIMVLETS_CHECK(frinEn.hero.descriptionText.rfind("Watchful, calm, and happiest close by.", 0) == 0);
+    NIMVLETS_CHECK(frinEn.hero.descriptionText.find("quiet wolf") != std::string::npos);
 
     CollectionLayoutInput es = en;
     es.language = Language::kEs;
     const auto frinEs = BuildCollectionLayout(DevModel("bunny"), es);
     NIMVLETS_CHECK(frinEs.hero.speciesText == "Lobo blanco");
-    NIMVLETS_CHECK(frinEs.hero.descriptionText == "Atento, tranquilo y más feliz cerca.");
+    NIMVLETS_CHECK(frinEs.hero.descriptionText.rfind("Atento, tranquilo y más feliz cerca.", 0) == 0);
+    NIMVLETS_CHECK(frinEs.hero.descriptionText.find("lobo sereno") != std::string::npos);
     return true;
 }
 
@@ -348,10 +369,76 @@ bool TestScrollShiftsContentUp() {
 }
 
 // El contenido cabe en la ventana por defecto (800x560): no hace falta
-// scroll para ver el hero + la gallery.
+// scroll para ver el hero + la gallery, incluso con la descripción
+// editorial más larga de Block 07 (brief §19).
 bool TestDefaultLayoutFitsWithoutScroll() {
     const CollectionLayout layout = BuildCollectionLayout(DevModel("frin", "male"), CollectionLayoutInput{});
     NIMVLETS_CHECK(layout.contentHeight <= 560.0f + 1.0f);
+    return true;
+}
+
+// Block 07: la cabecera trae las pestañas "Collection · Shop"
+// localizadas, con la de la sección actual marcada activa, y ambas en el
+// focus order + hit-testeables.
+bool TestSectionNavTabs() {
+    CollectionLayoutInput es;
+    es.language = Language::kEs;
+    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), es);
+    NIMVLETS_CHECK(layout.header.tabs.size() == 2);
+    NIMVLETS_CHECK(layout.header.tabs[0].label == "Colección");
+    NIMVLETS_CHECK(layout.header.tabs[0].active);
+    NIMVLETS_CHECK(layout.header.tabs[0].focusId == "nav:collection");
+    NIMVLETS_CHECK(layout.header.tabs[1].label == "Tienda");
+    NIMVLETS_CHECK(!layout.header.tabs[1].active);
+    NIMVLETS_CHECK(layout.header.tabs[1].focusId == "nav:shop");
+
+    NIMVLETS_CHECK(Has(layout.focusOrder, "nav:collection"));
+    NIMVLETS_CHECK(Has(layout.focusOrder, "nav:shop"));
+    const auto& shopTab = layout.header.tabs[1];
+    NIMVLETS_CHECK(layout.HitTest(shopTab.hitRect.CenterX(), shopTab.hitRect.CenterY()) == "nav:shop");
+    return true;
+}
+
+// Frin con SOLO macho poseído, hero mostrando la hembra (no poseída):
+// sin botón "Use", estado contenido "Not in your collection", y "use"
+// fuera del focus order — sin ninguna ruta de compra (brief §6).
+bool TestUnownedVariantHasRestrainedStateNoAction() {
+    CollectionLayoutInput in;
+    in.selectedPetId = "frin";
+    in.selectedVariantId = "female";
+    const CollectionLayout layout = BuildCollectionLayout(FrinMaleOnlyModel("bunny"), in);
+    NIMVLETS_CHECK(layout.hero.petId == "frin");
+    NIMVLETS_CHECK(!layout.hero.actionEnabled);
+    NIMVLETS_CHECK(layout.hero.showStatusLine);
+    NIMVLETS_CHECK(layout.hero.statusText == "Not in your collection");
+    NIMVLETS_CHECK(!Has(layout.focusOrder, "use"));
+    // El chip de la hembra existe pero marcado no poseído; el macho sí.
+    NIMVLETS_CHECK(layout.hero.variants.size() == 2);
+    NIMVLETS_CHECK(layout.hero.variants[0].variantId == "male" && layout.hero.variants[0].owned);
+    NIMVLETS_CHECK(layout.hero.variants[1].variantId == "female" && !layout.hero.variants[1].owned);
+    return true;
+}
+
+// La MISMA Frin, hero mostrando el macho (poseído): "Use Frin"
+// habilitado normalmente.
+bool TestOwnedVariantOfPartiallyOwnedFrinEnablesUse() {
+    CollectionLayoutInput in;
+    in.selectedPetId = "frin";
+    in.selectedVariantId = "male";
+    const CollectionLayout layout = BuildCollectionLayout(FrinMaleOnlyModel("bunny"), in);
+    NIMVLETS_CHECK(layout.hero.actionEnabled);
+    NIMVLETS_CHECK(layout.hero.actionLabel == "Use Frin");
+    NIMVLETS_CHECK(Has(layout.focusOrder, "use"));
+    return true;
+}
+
+// La descripción del hero reserva alto para varias líneas (word-wrap lo
+// hace la vista) — el bloque de texto crece con la copy más larga.
+bool TestDescriptionReservesMultipleLines() {
+    const CollectionLayout layout = BuildCollectionLayout(DevModel("nidir"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(!layout.hero.descriptionText.empty());
+    NIMVLETS_CHECK(layout.hero.descriptionAnchor.h >= 34.0f);  // >= 2 líneas
+    NIMVLETS_CHECK(layout.hero.descriptionAnchor.w > 100.0f);
     return true;
 }
 
@@ -378,6 +465,12 @@ void RegisterCollectionLayoutTests(testing::TestRunner& runner) {
     runner.Add("CollectionLayout/HoverLiftShiftsGalleryItemUp", TestHoverLiftShiftsGalleryItemUp);
     runner.Add("CollectionLayout/ScrollShiftsContentUp", TestScrollShiftsContentUp);
     runner.Add("CollectionLayout/DefaultLayoutFitsWithoutScroll", TestDefaultLayoutFitsWithoutScroll);
+    runner.Add("CollectionLayout/SectionNavTabs", TestSectionNavTabs);
+    runner.Add("CollectionLayout/UnownedVariantHasRestrainedStateNoAction",
+               TestUnownedVariantHasRestrainedStateNoAction);
+    runner.Add("CollectionLayout/OwnedVariantOfPartiallyOwnedFrinEnablesUse",
+               TestOwnedVariantOfPartiallyOwnedFrinEnablesUse);
+    runner.Add("CollectionLayout/DescriptionReservesMultipleLines", TestDescriptionReservesMultipleLines);
 }
 
 }  // namespace nimvlets::tests

@@ -98,6 +98,30 @@ bool TestClickWording() {
     return true;
 }
 
+// Shop + wallet (Block 07). "Shop" SÍ se traduce; los nombres propios
+// (que se concatenan con kGetPetPrefix) no.
+bool TestShopStrings() {
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kShop, Language::kEn), "Shop"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kShop, Language::kEs), "Tienda"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGetPetPrefix, Language::kEn), "Get "));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGetPetPrefix, Language::kEs), "Obtener "));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kInYourCollection, Language::kEn), "In your collection"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kInYourCollection, Language::kEs), "En tu colección"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kCancel, Language::kEn), "Cancel"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kCancel, Language::kEs), "Cancelar"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kConfirm, Language::kEn), "Confirm"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kConfirm, Language::kEs), "Confirmar"));
+    // Plantillas con placeholder — Format las rellena; acá solo se
+    // verifica que el placeholder está presente y la frase se tradujo.
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kNeedMoreClicksMany, Language::kEn)).find("{n}") !=
+                   std::string::npos);
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kSpendPromptMany, Language::kEs)).find("{pet}") !=
+                   std::string::npos);
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kSpendPromptMany, Language::kEs)).find("Gastar") !=
+                   std::string::npos);
+    return true;
+}
+
 // El header de la Collection.
 bool TestCollectionHeaderStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kCollection, Language::kEn), "Collection"));
@@ -138,6 +162,7 @@ void RegisterLocalizationTests(testing::TestRunner& runner) {
     runner.Add("Localization/VariantLabels", TestVariantLabels);
     runner.Add("Localization/ClickWording", TestClickWording);
     runner.Add("Localization/CollectionHeaderStrings", TestCollectionHeaderStrings);
+    runner.Add("Localization/ShopStrings", TestShopStrings);
     runner.Add("Localization/EveryKeyIsPopulatedAndDistinct", TestEveryKeyIsPopulatedAndDistinct);
 }
 

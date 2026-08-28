@@ -26,8 +26,12 @@ add_library(nimvlets_productui_core STATIC
   PetEditorial.cpp
   PreviewArtifact.h
   PreviewArtifact.cpp
+  SectionNav.h
+  SectionNav.cpp
   CollectionLayout.h
   CollectionLayout.cpp
+  ShopLayout.h
+  ShopLayout.cpp
 )
 
 target_include_directories(nimvlets_productui_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
@@ -41,8 +45,12 @@ add_library(nimvlets_productui STATIC
   TextCache.cpp
   PetPreviewCache.h
   PetPreviewCache.cpp
+  SectionHeaderView.h
+  SectionHeaderView.cpp
   CollectionView.h
   CollectionView.cpp
+  ShopView.h
+  ShopView.cpp
   ProductWindow.h
   ProductWindow.cpp
 )

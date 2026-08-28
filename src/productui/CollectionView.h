@@ -25,6 +25,10 @@ struct CollectionViewResult {
     bool requestClose = false;  // Escape -> cerrar la ventana
     bool hasActivate = false;   // el owner pidió activar un pet
     ActivateRequest activate;
+    // El owner tocó una pestaña de navegación: ProductWindow cambia de
+    // sección (no llega a src/app — el runtime del pet no se toca).
+    bool switchSection = false;
+    ProductSection targetSection = ProductSection::kCollection;
 };
 
 // La Collection interactiva con composición HERO + GALLERY. El Nimvlet

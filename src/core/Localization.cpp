@@ -24,6 +24,18 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     /* kClickSingular */       {"click", "clic"},
     /* kClickPlural */         {"clicks", "clics"},
 
+    /* kShop */                {"Shop", "Tienda"},
+    /* kGetPetPrefix */        {"Get ", "Obtener "},
+    /* kInYourCollection */    {"In your collection", "En tu colección"},
+    /* kNeedMoreClicksOne */   {"Need 1 more click", "Te falta 1 clic"},
+    /* kNeedMoreClicksMany */  {"Need {n} more clicks", "Te faltan {n} clics"},
+    /* kCancel */              {"Cancel", "Cancelar"},
+    /* kConfirm */             {"Confirm", "Confirmar"},
+    /* kSpendPromptOne */      {"Spend 1 click to add {pet} to your collection?",
+                               "¿Gastar 1 clic para añadir {pet} a tu colección?"},
+    /* kSpendPromptMany */     {"Spend {n} clicks to add {pet} to your collection?",
+                               "¿Gastar {n} clics para añadir {pet} a tu colección?"},
+
     /* kShowNimvlet */         {"Show Nimvlet", "Mostrar Nimvlet"},
     /* kHideNimvlet */         {"Hide Nimvlet", "Ocultar Nimvlet"},
     /* kCollectionMenuItem */  {"Collection…", "Colección…"},

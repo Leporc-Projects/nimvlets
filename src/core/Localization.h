@@ -50,6 +50,18 @@ enum class StringKey {
     kClickSingular,    // "click" / "clic"
     kClickPlural,      // "clicks" / "clics"
 
+    // Shop + wallet (Block 07). Los nombres propios de pet NO se
+    // traducen; "Shop" SÍ. Ver docs/PRODUCT_UI.md §7-§12.
+    kShop,                 // "Shop" / "Tienda"
+    kGetPetPrefix,         // "Get " / "Obtener " — se concatena con un nombre propio
+    kInYourCollection,     // "In your collection" / "En tu colección"
+    kNeedMoreClicksOne,    // "Need 1 more click" / "Te falta 1 clic"
+    kNeedMoreClicksMany,   // "Need {n} more clicks" / "Te faltan {n} clics" ({n} lo sustituye Format)
+    kCancel,               // "Cancel" / "Cancelar"
+    kConfirm,              // "Confirm" / "Confirmar"
+    kSpendPromptOne,       // "Spend 1 click to add {pet} to your collection?" / "¿Gastar 1 clic para añadir {pet} a tu colección?"
+    kSpendPromptMany,      // "Spend {n} clicks to add {pet} to your collection?" / "¿Gastar {n} clics para añadir {pet} a tu colección?"
+
     // Menú rápido
     kShowNimvlet,      // "Show Nimvlet" / "Mostrar Nimvlet"
     kHideNimvlet,      // "Hide Nimvlet" / "Ocultar Nimvlet"

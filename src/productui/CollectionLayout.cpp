@@ -20,14 +20,10 @@ namespace {
 // Métricas en PUNTOS lógicos. Composición hero + gallery: jerarquía por
 // tamaño/espacio, no por más contenedores (brief §7/§17). Block 06.2:
 // hero stage más presente y proporciones que usan el ancho (§11/§21).
+// Block 07: la cabecera (título + balance + pestañas Collection/Shop)
+// la aporta SectionNav; el hero empieza en header.bodyTop.
 constexpr float kMargin = 40.0f;
-constexpr float kTitleTop = 30.0f;
-constexpr float kTitleH = 24.0f;
-constexpr float kSectionTitleTop = 70.0f;
-constexpr float kSectionSubtitleTop = 90.0f;
-constexpr float kLabelH = 16.0f;
 
-constexpr float kHeroTop = 112.0f;
 constexpr float kHeroArt = 216.0f;
 constexpr float kHeroTextGap = 40.0f;   // arte -> columna de texto
 
@@ -38,7 +34,12 @@ constexpr float kHeroRuleH = 2.0f;
 constexpr float kSpeciesGap = 12.0f;
 constexpr float kSpeciesH = 16.0f;
 constexpr float kDescGap = 8.0f;
-constexpr float kDescH = 18.0f;
+// Block 07: la copy editorial pasó de una frase a un par de frases
+// (brief §19). Se reserva alto para hasta kDescLines líneas envueltas;
+// la vista hace el word-wrap real (DrawTextWrapped) dentro de
+// descriptionAnchor.w.
+constexpr float kDescLineH = 17.0f;
+constexpr int kDescLines = 3;
 constexpr float kBlockGap = 14.0f;      // texto -> chips/acción
 constexpr float kHeroChipH = 26.0f;
 constexpr float kHeroChipPadX = 10.0f;
@@ -111,6 +112,11 @@ const GalleryItem* CollectionLayout::FindGalleryItem(const std::string& petId) c
 }
 
 std::string CollectionLayout::HitTest(float x, float y) const {
+    for (const SectionTab& tab : header.tabs) {
+        if (tab.hitRect.Contains(x, y)) {
+            return tab.focusId;
+        }
+    }
     for (const HeroVariantChip& chip : hero.variants) {
         if (chip.rect.Contains(x, y)) {
             return chip.focusId;
@@ -139,13 +145,13 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     out.viewport = UiRect{0.0f, 0.0f, in.viewportW, in.viewportH};
     const float contentW = std::max(160.0f, in.viewportW - 2.0f * kMargin);
 
-    out.titleAnchor = UiRect{kMargin, kTitleTop - sy, contentW, kTitleH};
-    out.clicksAnchorRight = UiRect{in.viewportW - kMargin, kTitleTop - sy, 0.0f, kTitleH};
-    out.sectionTitleAnchor = UiRect{kMargin, kSectionTitleTop - sy, contentW, kLabelH};
-    out.sectionSubtitleAnchor = UiRect{kMargin, kSectionSubtitleTop - sy, contentW, kLabelH};
+    out.header = BuildSectionHeaderLayout(in.viewportW, kMargin, sy, ProductSection::kCollection, lang);
+    for (const SectionTab& tab : out.header.tabs) {
+        out.focusOrder.push_back(tab.focusId);
+    }
 
     if (model.items.empty()) {
-        out.contentHeight = kHeroTop;
+        out.contentHeight = out.header.bodyTop + sy;
         return out;
     }
 
@@ -165,10 +171,9 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     h.speciesText = Species(heroItem.petId, lang);
     h.descriptionText = ShortDescription(heroItem.petId, lang);
     h.status = heroItem.status;
-    h.statusText = StatusText(heroItem.status, lang);
     h.accent = PetAccentFor(heroItem.petId);
 
-    const float heroTop = kHeroTop - sy;
+    const float heroTop = out.header.bodyTop;
     h.art = UiRect{kMargin, heroTop, kHeroArt, kHeroArt};
 
     const float textX = h.art.Right() + kHeroTextGap;
@@ -176,14 +181,22 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
 
     const std::string selectedVariant = ResolveVariant(heroItem, in.selectedVariantId);
     h.selectedVariantId = selectedVariant;
+    const bool selectedVariantOwned =
+        heroItem.HasVariants() ? heroItem.VariantOwned(selectedVariant)
+                               : (heroItem.variants.front().owned ||
+                                  heroItem.status == OwnershipStatus::kActive);
 
     // Estado / acción: el botón se dibuja SOLO cuando activar haría algo
-    // (owned-inactive, o el pet activo con otra variante elegida). Si no,
-    // solo la línea de estado — nunca las dos cosas (brief §18).
+    // (owned-inactive con la variante poseída, o el pet activo con otra
+    // variante elegida). Si no, solo la línea de estado — nunca las dos
+    // cosas (brief §18). Una variante NO poseída de un Frin por lo demás
+    // poseído: estado contenido "Not in your collection", sin botón y
+    // SIN ninguna ruta de compra visible (brief §6 — el shop oculto de
+    // starters es trabajo futuro).
     const bool activePet = heroItem.status == OwnershipStatus::kActive;
     const bool variantWouldChange =
         heroItem.HasVariants() && activePet && selectedVariant != model.activeVariantId;
-    if (heroItem.status == OwnershipStatus::kLocked) {
+    if (heroItem.status == OwnershipStatus::kLocked || !selectedVariantOwned) {
         h.actionLabel = Localized(StringKey::kNotInCollection, lang);
         h.actionEnabled = false;
     } else if (activePet && !variantWouldChange) {
@@ -193,6 +206,12 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
         h.actionLabel = std::string(Localized(StringKey::kUsePetPrefix, lang)) + heroItem.displayName;
         h.actionEnabled = true;
     }
+    // La línea de estado del hero: para una variante no poseída de un
+    // pet por lo demás poseído, mostrar el texto "no está en tu
+    // colección" aunque el status a nivel de pet sea kOwnedInactive.
+    h.statusText = (!selectedVariantOwned && heroItem.status != OwnershipStatus::kLocked)
+                       ? Localized(StringKey::kNotInCollection, lang)
+                       : StatusText(heroItem.status, lang);
     h.showStatusLine = !h.actionEnabled;
     h.actionFocusId = "use";
 
@@ -207,7 +226,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
         blockH += kSpeciesGap + kSpeciesH;
     }
     if (hasDesc) {
-        blockH += kDescGap + kDescH;
+        blockH += kDescGap + kDescLineH * static_cast<float>(kDescLines);
     }
     blockH += kBlockGap;
     if (hasChips) {
@@ -242,8 +261,8 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     }
     if (hasDesc) {
         y += kDescGap;
-        h.descriptionAnchor = UiRect{textX, y, textW, kDescH};
-        y += kDescH;
+        h.descriptionAnchor = UiRect{textX, y, textW, kDescLineH * static_cast<float>(kDescLines)};
+        y += kDescLineH * static_cast<float>(kDescLines);
     }
     y += kBlockGap;
 
@@ -260,6 +279,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
                                     w - 2.0f * kHeroChipPadX, 2.0f};
             chip.focusId = "variant:" + v.variantId;
             chip.selected = (v.variantId == selectedVariant);
+            chip.owned = v.owned;
             h.variants.push_back(chip);
             out.focusOrder.push_back(chip.focusId);
             chipX += w + kHeroChipGap;

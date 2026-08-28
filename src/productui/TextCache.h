@@ -78,4 +78,26 @@ float DrawText(
 // botón al texto exacto, etc.).
 float MeasureText(TextCache& cache, const std::string& utf8, double pointSize, platform::TextWeight weight, float scale);
 
+// Dibuja `utf8` con ajuste de línea por palabras (greedy) dentro de
+// `maxWidthLogical`, todas las líneas alineadas a la izquierda contra
+// `x`. La PRIMERA línea tiene su baseline en `firstBaselineY`; cada
+// línea siguiente `lineHeightLogical` más abajo. Corta a `maxLines`
+// líneas — si aún queda texto, la última termina en "…". Devuelve la
+// cantidad de líneas dibujadas. No-op (devuelve 0) si la plataforma no
+// rasteriza texto. Las descripciones editoriales de Block 07 son de un
+// par de frases: esto las hace envolver limpio en la columna del hero
+// (brief §19) sin un motor de tipografía completo.
+int DrawTextWrapped(
+    UiPainter& painter,
+    TextCache& cache,
+    const std::string& utf8,
+    double pointSize,
+    platform::TextWeight weight,
+    UiColor color,
+    float x,
+    float firstBaselineY,
+    float maxWidthLogical,
+    float lineHeightLogical,
+    int maxLines);
+
 }  // namespace nimvlets::productui

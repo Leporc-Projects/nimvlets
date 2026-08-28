@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "productui/Format.h"
+#include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
 
 namespace nimvlets::productui {
@@ -127,6 +128,13 @@ CollectionViewResult CollectionView::ActivateWidget(const std::string& focusId) 
     if (focusId.empty()) {
         return r;
     }
+    if (focusId == "nav:collection" || focusId == "nav:shop") {
+        r.switchSection = true;
+        r.targetSection =
+            focusId == "nav:shop" ? ProductSection::kShop : ProductSection::kCollection;
+        r.dirty = true;
+        return r;
+    }
     if (StartsWith(focusId, "item:")) {
         SelectHero(PetIdFromItemFocusId(focusId));
         r.dirty = true;
@@ -176,7 +184,7 @@ CollectionViewResult CollectionView::OnMouseDown(float x, float y) {
         dirty_ = true;  // por si había chrome de foco visible que ahora se apaga
         return CollectionViewResult{};
     }
-    if (StartsWith(hit, "item:")) {
+    if (StartsWith(hit, "item:") || StartsWith(hit, "nav:")) {
         focus_.Focus(hit);
     }
     CollectionViewResult r = ActivateWidget(hit);
@@ -250,18 +258,9 @@ void CollectionView::Render(
 
     painter.Clear(theme::kBackground);
 
-    // --- Cabecera (sin recorte de scroll) ---
-    const float titleBaseline = layout.titleAnchor.y + 18.0f;
-    DrawText(painter, text, "Nimvlets", type::kTitle, TextWeight::kSemibold, theme::kText,
-             layout.titleAnchor.x, titleBaseline, HAlign::kLeft);
-    DrawText(painter, text, FormatClickCount(clickBalance_, language_), type::kClicks, TextWeight::kRegular,
-             theme::kTextMuted, layout.clicksAnchorRight.x, titleBaseline, HAlign::kRight);
-    DrawText(painter, text, core::Localized(core::StringKey::kCollection, language_), type::kSectionTitle,
-             TextWeight::kSemibold, theme::kText, layout.sectionTitleAnchor.x,
-             layout.sectionTitleAnchor.y + 12.0f, HAlign::kLeft);
-    DrawText(painter, text, core::Localized(core::StringKey::kYourCompanions, language_), type::kSectionSub,
-             TextWeight::kRegular, theme::kTextFaint, layout.sectionSubtitleAnchor.x,
-             layout.sectionSubtitleAnchor.y + 12.0f, HAlign::kLeft);
+    // --- Cabecera compartida (título + balance + pestañas), sin recorte
+    //     de scroll ---
+    DrawSectionHeader(painter, text, layout.header, clickBalance_, language_, hoverId_, focusedId);
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
@@ -292,9 +291,11 @@ void CollectionView::Render(
                      theme::kTextMuted, h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
         }
         if (!h.descriptionText.empty()) {
-            DrawText(painter, text, h.descriptionText, type::kHeroBody, TextWeight::kRegular, theme::kText,
-                     h.descriptionAnchor.x, h.descriptionAnchor.y + 13.0f, HAlign::kLeft,
-                     static_cast<int>(h.descriptionAnchor.w));
+            // Block 07: la descripción es un par de frases -> word-wrap
+            // dentro de la columna del hero, hasta 3 líneas (brief §19).
+            DrawTextWrapped(painter, text, h.descriptionText, type::kHeroBody, TextWeight::kRegular,
+                            theme::kText, h.descriptionAnchor.x, h.descriptionAnchor.y + 13.0f,
+                            h.descriptionAnchor.w, 17.0f, 3);
         }
 
         // Selector de variante tipográfico: "Male · Female" con
@@ -310,12 +311,18 @@ void CollectionView::Render(
                 DrawText(painter, text, "·", type::kHeroVariant, TextWeight::kRegular, theme::kTextFaint,
                          dotX, chip.rect.CenterY() + 5.0f, HAlign::kCenter);
             }
+            // Una variante NO poseída se muestra atenuada (kTextFaint):
+            // visible en el selector para que la elección sea clara,
+            // pero se lee como no disponible — sin ninguna ruta de
+            // compra (brief §6).
+            const UiColor chipColor = !chip.owned ? theme::kTextFaint
+                                      : chip.selected ? theme::kText
+                                                      : theme::kTextMuted;
             DrawText(painter, text, chip.label, type::kHeroVariant,
-                     chip.selected ? TextWeight::kSemibold : TextWeight::kRegular,
-                     chip.selected ? theme::kText : theme::kTextMuted, chip.rect.CenterX(),
-                     chip.rect.CenterY() + 5.0f, HAlign::kCenter);
+                     chip.selected && chip.owned ? TextWeight::kSemibold : TextWeight::kRegular,
+                     chipColor, chip.rect.CenterX(), chip.rect.CenterY() + 5.0f, HAlign::kCenter);
             if (chip.selected) {
-                painter.FillRect(chip.underline, h.accent.line);
+                painter.FillRect(chip.underline, chip.owned ? h.accent.line : theme::kHairline);
             }
         }
 
