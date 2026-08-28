@@ -14,6 +14,7 @@
 #include "FormatTest.h"
 #include "LocalizationTest.h"
 #include "PetAccentTest.h"
+#include "PetEditorialTest.h"
 #include "PreviewArtifactTest.h"
 #include "QuickMenuModelTest.h"
 #include "DragClassifierTest.h"
@@ -63,6 +64,7 @@ int main() {
     nimvlets::tests::RegisterDisplayControlsTests(runner);
     nimvlets::tests::RegisterLocalizationTests(runner);
     nimvlets::tests::RegisterPetAccentTests(runner);
+    nimvlets::tests::RegisterPetEditorialTests(runner);
     nimvlets::tests::RegisterPreviewArtifactTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 

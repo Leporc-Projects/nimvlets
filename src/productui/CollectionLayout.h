@@ -11,8 +11,7 @@
 
 namespace nimvlets::productui {
 
-// Texto humano de estado, localizado (block brief 06 §8 / 06.1 §11):
-// nunca badges "ACTIVE"/"LOCKED".
+// Texto humano de estado, localizado. Nunca badges "ACTIVE"/"LOCKED".
 //   kActive        -> "On desktop"    / "En el escritorio"
 //   kOwnedInactive -> "Use"           / "Usar"
 //   kLocked        -> "Not in your collection" / "No está en tu colección"
@@ -25,8 +24,9 @@ struct GalleryItem {
     std::string displayName;  // nombre propio — nunca traducido
     catalog::OwnershipStatus status = catalog::OwnershipStatus::kLocked;
     std::string statusText;   // localizado
-    std::string previewVariantId;  // variante a usar para la preview (Frin: "male"/"female"; resto: "")
-    UiColor accentLine;       // tono de identidad del pet (para el foco)
+    std::string previewVariantId;  // variante para la preview (Frin: "male"/"female"; resto: "")
+    UiColor accentLine;       // tono de identidad del pet (para el foco de teclado)
+    UiColor pedestalTint;     // tinte MUY tenue del pedestal del arte (Block 06.2 §20)
     bool hasVariants = false;
 
     UiRect cell;     // zona clickeable + wash de hover/foco
@@ -50,24 +50,34 @@ struct HeroVariantChip {
 
 struct CollectionHero {
     std::string petId;
-    std::string displayName;  // nombre propio — nunca traducido
-    std::string speciesText;  // etiqueta de especie PROVISIONAL, puede ser ""
+    std::string displayName;   // nombre propio — nunca traducido
+    std::string speciesText;   // etiqueta de especie ("White wolf"), "" si no hay
+    std::string descriptionText;  // línea de personalidad, "" si no hay
     catalog::OwnershipStatus status = catalog::OwnershipStatus::kLocked;
-    std::string statusText;   // localizado
+    std::string statusText;    // localizado
     PetAccent accent;
 
-    UiRect shape;         // forma orgánica muy tenue detrás del arte
-    UiRect art;           // caja del arte grande
-    UiRect nameAnchor;    // ancla IZQUIERDA del nombre
+    // Hero stage: composición asimétrica de primitivas de primera parte
+    // detrás/alrededor del arte, teñida con accent.shapeTint a alpha
+    // bajo (Block 06.2 §11). La vista elige óvalo vs round-rect según
+    // accent.angularShape.
+    UiRect stagePrimary;    // óvalo/blob grande, se extiende bastante más que el arte
+    UiRect stageSecondary;  // primitiva más chica, descentrada hacia el texto
+    UiRect art;             // caja del arte grande
+    UiRect nameRule;        // línea de acento fina (2pt) bajo el nombre
+
+    UiRect nameAnchor;         // ancla IZQUIERDA del nombre
     UiRect speciesAnchor;
-    UiRect statusAnchor;
+    UiRect descriptionAnchor;
+    UiRect statusAnchor;       // solo se dibuja si showStatusLine
 
     std::vector<HeroVariantChip> variants;  // vacío si el pet no tiene variantes
     std::string selectedVariantId;
 
     UiRect actionButton;
-    std::string actionLabel;    // localizado: "Use Frin" / "On desktop" / "Not in your collection"
-    bool actionEnabled = false; // false para el pet activo y para locked (sin compra — brief §12)
+    std::string actionLabel;    // localizado: "Use Frin"
+    bool actionEnabled = false; // true => se dibuja el botón; false => solo el estado
+    bool showStatusLine = true; // = !actionEnabled — sin duplicar "Use" + botón (brief §18)
     std::string actionFocusId;  // "use" (solo en focusOrder si actionEnabled)
 };
 
@@ -79,6 +89,7 @@ struct CollectionLayout {
     UiRect sectionTitleAnchor;     // "Collection" / "Colección"
     UiRect sectionSubtitleAnchor;  // "Your companions" / "Tus compañeros"
     UiRect dividerRect;            // hairline entre el hero y la gallery
+    UiRect galleryShelf;          // segundo plano: fondo un pelín más profundo bajo el divisor (§12)
 
     CollectionHero hero;
     std::vector<GalleryItem> gallery;
@@ -107,16 +118,14 @@ struct CollectionLayoutInput {
     // "" => variante por defecto del item seleccionado.
     std::string selectedVariantId;
 
-    // petId de la entrada de gallery bajo el mouse — se dibuja con un
-    // micro-lift de 2pt (instantáneo, sin timer — ver
-    // docs/PRODUCT_UI.md §11). "" => ninguna.
+    // petId de la entrada de gallery bajo el mouse — micro-lift de 2pt
+    // instantáneo. "" => ninguna.
     std::string hoverPetId;
 };
 
 // Construye el layout hero + gallery completo. Puro y determinista:
 // mismas entradas -> mismo resultado, sin SDL, sin medición de texto
-// real (los anclas de texto son puntos de referencia; la vista mide y
-// dibuja). TODO el texto traducible ya viene localizado según
+// real. TODO el texto traducible ya viene localizado según
 // `in.language`.
 CollectionLayout BuildCollectionLayout(const catalog::CollectionModel& model, const CollectionLayoutInput& in);
 

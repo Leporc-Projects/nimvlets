@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "productui/Format.h"
-#include "productui/PetEditorial.h"
 #include "productui/UiTheme.h"
 
 namespace nimvlets::productui {
@@ -16,8 +15,23 @@ using platform::TextWeight;
 
 namespace {
 
-constexpr float kHeaderClipTop = 112.0f;  // el hero arranca en 120; arriba de acá no se recorta
+constexpr float kHeaderClipTop = 106.0f;  // el hero stage arranca en ~96; arriba de acá no se recorta
 constexpr float kWheelStep = 48.0f;
+
+// Alpha de las primitivas del hero stage: el stage "apoya" el arte,
+// nunca compite (brief §11). La primaria un poco más presente que en
+// Block 06.1 (52) porque el owner la reportó demasiado sutil (§5).
+constexpr unsigned char kStagePrimaryAlpha = 92;
+constexpr unsigned char kStageSecondaryAlpha = 52;
+
+// Alpha del arte de un pet locked: visible pero más callado, NO
+// grayscale/opacidad agresiva (brief §12/§13).
+constexpr unsigned char kLockedArtAlpha = 150;
+
+// Pedestal del arte en la gallery: un tinte de identidad MUY tenue en
+// vez del mismo cuadrado neutro para todos (brief §20).
+constexpr unsigned char kPedestalAlpha = 52;
+constexpr unsigned char kPedestalAlphaLocked = 30;
 
 bool StartsWith(const std::string& s, const char* prefix) {
     return s.rfind(prefix, 0) == 0;
@@ -31,26 +45,29 @@ std::string VariantFromFocusId(const std::string& focusId) {
     return StartsWith(focusId, "variant:") ? focusId.substr(8) : std::string();
 }
 
-// Color del texto de estado según el estado de propiedad.
+// Color del texto de estado. Locked usa kTextMuted (no kTextFaint): el
+// pet locked se siente NO DISPONIBLE, no muerto (brief §13).
 UiColor StatusColor(OwnershipStatus status, UiColor accentLine) {
     switch (status) {
         case OwnershipStatus::kActive:
             return theme::kTextMuted;
         case OwnershipStatus::kOwnedInactive:
-            return accentLine;  // el hint "Use" lleva el tono del pet
+            return accentLine;  // el hint "Use" de la gallery lleva el tono del pet
         case OwnershipStatus::kLocked:
-            return theme::kTextFaint;
+            return theme::kTextMuted;
     }
     return theme::kTextMuted;
 }
 
-// Alpha del arte de un pet locked: visible pero más callado, NO
-// grayscale/opacidad agresiva (brief §12).
-constexpr unsigned char kLockedArtAlpha = 150;
-
-// Alpha de la forma orgánica detrás del arte del hero: muy sutil — la
-// forma "apoya" el arte, nunca compite (brief §10).
-constexpr unsigned char kHeroShapeAlpha = 52;
+// Dibuja una primitiva del hero stage: óvalo, o round-rect si el acento
+// del pet pide una forma más angular (Nidir).
+void FillStagePrimitive(UiPainter& painter, const UiRect& r, bool angular, UiColor color) {
+    if (angular) {
+        painter.FillRoundRect(r, std::min(r.w, r.h) * 0.32f, color);
+    } else {
+        painter.FillEllipse(r, color);
+    }
+}
 
 }  // namespace
 
@@ -58,8 +75,6 @@ void CollectionView::SetModel(catalog::CollectionModel model, std::uint64_t clic
     model_ = std::move(model);
     clickBalance_ = clickBalance;
 
-    // Si el hero seleccionado ya no existe, se vuelve a "seguir al pet
-    // activo" (selectedPetId_ vacío).
     if (!selectedPetId_.empty() && model_.Find(selectedPetId_) == nullptr) {
         selectedPetId_.clear();
         selectedVariantId_.clear();
@@ -130,7 +145,6 @@ CollectionViewResult CollectionView::ActivateWidget(const std::string& focusId) 
             r.hasActivate = true;
             r.activate.petId = layout.hero.petId;
             r.activate.variantId = layout.hero.selectedVariantId;
-            // El hero sigue mostrando el pet que se está activando.
             selectedPetId_ = layout.hero.petId;
             selectedVariantId_ = layout.hero.selectedVariantId;
         }
@@ -153,16 +167,22 @@ CollectionViewResult CollectionView::OnMouseMove(float x, float y) {
 }
 
 CollectionViewResult CollectionView::OnMouseDown(float x, float y) {
+    // Un click de mouse sale del "modo teclado": el chrome de foco no se
+    // dibuja hasta la próxima navegación por teclado (brief §19).
+    keyboardFocus_ = false;
     const CollectionLayout layout = BuildLayout(viewportW_, viewportH_);
     const std::string hit = layout.HitTest(x, y);
     if (hit.empty()) {
+        dirty_ = true;  // por si había chrome de foco visible que ahora se apaga
         return CollectionViewResult{};
     }
     if (StartsWith(hit, "item:")) {
         focus_.Focus(hit);
-        focusVisible_ = true;
     }
-    return ActivateWidget(hit);
+    CollectionViewResult r = ActivateWidget(hit);
+    r.dirty = true;
+    dirty_ = true;
+    return r;
 }
 
 CollectionViewResult CollectionView::OnWheel(float dyLines) {
@@ -187,21 +207,21 @@ CollectionViewResult CollectionView::OnKey(int sdlKeycode, bool shiftHeld) {
             } else {
                 focus_.Next();
             }
-            focusVisible_ = true;
+            keyboardFocus_ = true;
             dirty_ = true;
             r.dirty = true;
             return r;
         case SDLK_LEFT:
         case SDLK_UP:
             focus_.Prev();
-            focusVisible_ = true;
+            keyboardFocus_ = true;
             dirty_ = true;
             r.dirty = true;
             return r;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
         case SDLK_SPACE:
-            focusVisible_ = true;
+            keyboardFocus_ = true;
             return ActivateWidget(focus_.FocusedId());
         case SDLK_ESCAPE:
             r.requestClose = true;
@@ -226,9 +246,7 @@ void CollectionView::Render(
     const CollectionLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
     SyncFocusList(layout);
-    // El anillo de foco solo se muestra tras la primera navegación por
-    // teclado / click que enfoca (focus-visible).
-    const std::string focusedId = focusVisible_ ? focus_.FocusedId() : std::string();
+    const std::string focusedId = keyboardFocus_ ? focus_.FocusedId() : std::string();
 
     painter.Clear(theme::kBackground);
 
@@ -247,35 +265,46 @@ void CollectionView::Render(
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
+    // --- Segundo plano: la zona de la gallery (brief §12) ---
+    painter.FillRect(layout.galleryShelf, theme::kGalleryShelf);
+
     // --- Hero ---
     const CollectionHero& h = layout.hero;
     if (!h.petId.empty()) {
-        const UiColor shapeCol = h.accent.shapeTint.WithAlpha(kHeroShapeAlpha);
-        if (h.accent.angularShape) {
-            painter.FillRoundRect(h.shape, 34.0f, shapeCol);
-        } else {
-            painter.FillEllipse(h.shape, shapeCol);
-        }
+        // Hero stage: primaria grande + secundaria descentrada, teñidas
+        // con el shapeTint del pet a alpha bajo (brief §11).
+        FillStagePrimitive(painter, h.stageSecondary, h.accent.angularShape,
+                           h.accent.shapeTint.WithAlpha(kStageSecondaryAlpha));
+        FillStagePrimitive(painter, h.stagePrimary, h.accent.angularShape,
+                           h.accent.shapeTint.WithAlpha(kStagePrimaryAlpha));
 
-        const std::string variant = h.selectedVariantId;
-        SDL_Texture* art = previews.Get(h.petId, variant);
+        SDL_Texture* art = previews.Get(h.petId, h.selectedVariantId);
         const unsigned char artAlpha = h.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255;
         painter.DrawTextureContained(art, h.art, artAlpha);
 
         DrawText(painter, text, h.displayName, type::kHeroName, TextWeight::kSemibold, theme::kText,
                  h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
+        // Regla de acento fina bajo el nombre — el tono del pet, sin caja.
+        painter.FillRect(h.nameRule, h.accent.line);
+
         if (!h.speciesText.empty()) {
-            DrawText(painter, text, h.speciesText, type::kHeroMeta, TextWeight::kRegular, theme::kTextMuted,
-                     h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
+            DrawText(painter, text, h.speciesText, type::kHeroSpecies, TextWeight::kRegular,
+                     theme::kTextMuted, h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
         }
-        DrawText(painter, text, h.statusText, type::kHeroMeta, TextWeight::kMedium,
-                 StatusColor(h.status, h.accent.line), h.statusAnchor.x, h.statusAnchor.y + 12.0f,
-                 HAlign::kLeft);
+        if (!h.descriptionText.empty()) {
+            DrawText(painter, text, h.descriptionText, type::kHeroBody, TextWeight::kRegular, theme::kText,
+                     h.descriptionAnchor.x, h.descriptionAnchor.y + 13.0f, HAlign::kLeft,
+                     static_cast<int>(h.descriptionAnchor.w));
+        }
 
         // Selector de variante tipográfico: "Male · Female" con
-        // subrayado de acento bajo la seleccionada (brief §13).
+        // subrayado de acento bajo la seleccionada; el chrome de foco de
+        // teclado es un pill sutil, NO un recuadro de control (brief §19).
         for (std::size_t i = 0; i < h.variants.size(); ++i) {
             const HeroVariantChip& chip = h.variants[i];
+            if (focusedId == chip.focusId) {
+                painter.FillRoundRect(chip.rect.Inset(-4.0f), 9.0f, h.accent.shapeTint.WithAlpha(150));
+            }
             if (i > 0) {
                 const float dotX = 0.5f * (h.variants[i - 1].rect.Right() + chip.rect.x);
                 DrawText(painter, text, "·", type::kHeroVariant, TextWeight::kRegular, theme::kTextFaint,
@@ -288,28 +317,32 @@ void CollectionView::Render(
             if (chip.selected) {
                 painter.FillRect(chip.underline, h.accent.line);
             }
-            if (focusedId == chip.focusId) {
-                painter.StrokeRoundRect(chip.rect.Inset(-3.0f), 8.0f, 2.0f, h.accent.line);
-            }
         }
 
-        // Botón de acción.
         if (h.actionEnabled) {
-            painter.FillRoundRect(h.actionButton, 9.0f, theme::kButtonFill);
+            // Botón primario con la identidad del pet: relleno tenue +
+            // borde y texto oscuros legibles — NUNCA casi-negro (§17).
+            painter.FillRoundRect(h.actionButton, 9.0f, h.accent.softFill);
+            painter.StrokeRoundRect(h.actionButton, 9.0f, 1.5f, h.accent.line);
             if (focusedId == h.actionFocusId) {
                 painter.StrokeRoundRect(h.actionButton.Inset(-3.0f), 12.0f, 2.0f, h.accent.line);
             }
-            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, theme::kButtonText,
+            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, h.accent.deepInk,
                      h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter);
-        } else {
-            painter.StrokeRoundRect(h.actionButton, 9.0f, 1.0f, theme::kHairline);
-            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kMedium, theme::kTextMuted,
-                     h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter,
-                     static_cast<int>(h.actionButton.w - 6.0f));
+        } else if (h.showStatusLine) {
+            // ACTIVO: "● On desktop". LOCKED: "Not in your collection",
+            // sin punto. Sin botón, sin duplicar (brief §18).
+            float statusX = h.statusAnchor.x;
+            if (h.status == OwnershipStatus::kActive) {
+                painter.FillEllipse(UiRect{statusX, h.statusAnchor.y + 3.0f, 7.0f, 7.0f}, h.accent.line);
+                statusX += 14.0f;
+            }
+            DrawText(painter, text, h.statusText, type::kHeroStatus, TextWeight::kMedium,
+                     StatusColor(h.status, h.accent.line), statusX, h.statusAnchor.y + 12.0f, HAlign::kLeft);
         }
     }
 
-    // --- Divisor ---
+    // --- Divisor (sobre el borde del segundo plano) ---
     painter.FillRect(layout.dividerRect, theme::kHairline);
 
     // --- Gallery ---
@@ -323,17 +356,16 @@ void CollectionView::Render(
             painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, g.accentLine);
         }
 
-        painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f,
-                              g.status == OwnershipStatus::kLocked ? theme::kArtBed.WithAlpha(120)
-                                                                  : theme::kArtBed);
+        const unsigned char pedAlpha =
+            g.status == OwnershipStatus::kLocked ? kPedestalAlphaLocked : kPedestalAlpha;
+        painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f, g.pedestalTint.WithAlpha(pedAlpha));
+
         SDL_Texture* art = previews.Get(g.petId, g.previewVariantId);
         painter.DrawTextureContained(
             art, g.art, g.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255);
 
-        const bool emphasize = hovered || focused;
-        DrawText(painter, text, g.displayName, type::kGalleryName, TextWeight::kMedium,
-                 emphasize ? theme::kText : theme::kText, g.name.CenterX(), g.name.y + 13.0f,
-                 HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
+        DrawText(painter, text, g.displayName, type::kGalleryName, TextWeight::kMedium, theme::kText,
+                 g.name.CenterX(), g.name.y + 13.0f, HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
         DrawText(painter, text, g.statusText, type::kGalleryStatus, TextWeight::kRegular,
                  StatusColor(g.status, g.accentLine), g.status_.CenterX(), g.status_.y + 11.0f,
                  HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));

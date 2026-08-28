@@ -17,8 +17,9 @@ using core::StringKey;
 
 namespace {
 
-// Métricas en PUNTOS lógicos. Composición hero + gallery de Block 06.1
-// (§7): jerarquía por tamaño/espacio, no por más contenedores.
+// Métricas en PUNTOS lógicos. Composición hero + gallery: jerarquía por
+// tamaño/espacio, no por más contenedores (brief §7/§17). Block 06.2:
+// hero stage más presente y proporciones que usan el ancho (§11/§21).
 constexpr float kMargin = 40.0f;
 constexpr float kTitleTop = 30.0f;
 constexpr float kTitleH = 24.0f;
@@ -26,34 +27,36 @@ constexpr float kSectionTitleTop = 70.0f;
 constexpr float kSectionSubtitleTop = 90.0f;
 constexpr float kLabelH = 16.0f;
 
-constexpr float kHeroTop = 118.0f;
-constexpr float kHeroArt = 202.0f;
-constexpr float kHeroTextGap = 36.0f;   // arte -> bloque de texto
-constexpr float kHeroNameH = 30.0f;
-// Offsets relativos al TOPE del bloque de texto (que se centra
-// verticalmente contra el arte — ver `blockTop` más abajo).
-constexpr float kHeroSpeciesRel = 38.0f;
-constexpr float kHeroStatusRel = 59.0f;
-constexpr float kHeroChipsRel = 92.0f;
+constexpr float kHeroTop = 112.0f;
+constexpr float kHeroArt = 216.0f;
+constexpr float kHeroTextGap = 40.0f;   // arte -> columna de texto
+
+constexpr float kHeroNameH = 32.0f;
+constexpr float kHeroRuleGap = 12.0f;   // base del nombre -> regla de acento
+constexpr float kHeroRuleW = 46.0f;
+constexpr float kHeroRuleH = 2.0f;
+constexpr float kSpeciesGap = 12.0f;
+constexpr float kSpeciesH = 16.0f;
+constexpr float kDescGap = 8.0f;
+constexpr float kDescH = 18.0f;
+constexpr float kBlockGap = 14.0f;      // texto -> chips/acción
 constexpr float kHeroChipH = 26.0f;
 constexpr float kHeroChipPadX = 10.0f;
-constexpr float kHeroChipGap = 22.0f;    // incluye el "·" separador
+constexpr float kHeroChipGap = 22.0f;   // incluye el "·" separador
+constexpr float kChipToAction = 16.0f;
 constexpr float kHeroButtonH = 36.0f;
 constexpr float kHeroButtonPadX = 22.0f;
-constexpr float kHeroButtonRelWithChips = 138.0f;
-constexpr float kHeroButtonRelNoChips = 92.0f;
-constexpr float kHeroBlockHWithChips = 174.0f;  // alto aprox. del bloque de texto para centrarlo
-constexpr float kHeroBlockHNoChips = 128.0f;
+constexpr float kHeroStatusH = 18.0f;
 
-constexpr float kDividerGap = 22.0f;
-constexpr float kGalleryGap = 20.0f;
+constexpr float kDividerGap = 24.0f;
+constexpr float kGalleryGap = 22.0f;
 constexpr float kGalleryColMax = 208.0f;  // el cluster de gallery no se estira a lo ancho
-constexpr float kGalleryArt = 90.0f;
+constexpr float kGalleryArt = 92.0f;
 constexpr float kGalleryNameH = 17.0f;
 constexpr float kGalleryStatusH = 14.0f;
 constexpr float kGalleryArtToName = 12.0f;
 constexpr float kGalleryNameToStatus = 4.0f;
-constexpr float kHoverLift = 2.0f;  // micro-lift instantáneo (brief §11)
+constexpr float kHoverLift = 2.0f;  // micro-lift instantáneo (brief §11/§20)
 
 // Ancho aproximado por carácter para dimensionar botón/chip sin medir
 // texto real acá — la vista lo ajusta; alcanza para el hit-test.
@@ -68,8 +71,6 @@ std::string Capitalize(const std::string& s) {
     return out;
 }
 
-// Etiqueta localizada de una variante. "male"/"female" -> Male/Female o
-// Macho/Hembra; cualquier otra -> Capitalize del id (defensivo).
 std::string VariantLabel(const std::string& variantId, Language lang) {
     if (variantId == "male") {
         return Localized(StringKey::kMale, lang);
@@ -80,8 +81,6 @@ std::string VariantLabel(const std::string& variantId, Language lang) {
     return Capitalize(variantId);
 }
 
-// Resuelve qué variante mostrar: la pedida si es válida, si no la del
-// item.
 std::string ResolveVariant(const CollectionItem& item, const std::string& requested) {
     const bool valid = std::any_of(item.variants.begin(), item.variants.end(),
                                    [&](const CollectionVariant& v) { return v.variantId == requested; });
@@ -163,37 +162,94 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     CollectionHero& h = out.hero;
     h.petId = heroItem.petId;
     h.displayName = heroItem.displayName;
-    h.speciesText = ProvisionalSpecies(heroItem.petId, lang);
+    h.speciesText = Species(heroItem.petId, lang);
+    h.descriptionText = ShortDescription(heroItem.petId, lang);
     h.status = heroItem.status;
     h.statusText = StatusText(heroItem.status, lang);
     h.accent = PetAccentFor(heroItem.petId);
 
     const float heroTop = kHeroTop - sy;
     h.art = UiRect{kMargin, heroTop, kHeroArt, kHeroArt};
-    // Forma de fondo: un poco más grande que el arte y descentrada
-    // (orgánico, no concéntrico — brief §10). La vista elige óvalo vs
-    // round-rect según h.accent.angularShape y la dibuja a alpha bajo.
-    h.shape = UiRect{h.art.x - 14.0f, h.art.y + 4.0f, h.art.w + 34.0f, h.art.h + 12.0f};
 
     const float textX = h.art.Right() + kHeroTextGap;
-    const float textW = std::max(140.0f, kMargin + contentW - textX);
-
-    // El bloque de texto se centra verticalmente contra el arte, así el
-    // hero no queda "pesado arriba" cuando el pet no tiene chips de
-    // variante (brief §8/§26).
-    const float blockH = heroItem.HasVariants() ? kHeroBlockHWithChips : kHeroBlockHNoChips;
-    const float blockTop = heroTop + std::max(0.0f, (kHeroArt - blockH) * 0.5f);
-
-    h.nameAnchor = UiRect{textX, blockTop, textW, kHeroNameH};
-    h.speciesAnchor = UiRect{textX, blockTop + kHeroSpeciesRel, textW, kLabelH};
-    h.statusAnchor = UiRect{textX, blockTop + kHeroStatusRel, textW, kLabelH};
+    const float textW = std::max(160.0f, kMargin + contentW - textX);
 
     const std::string selectedVariant = ResolveVariant(heroItem, in.selectedVariantId);
     h.selectedVariantId = selectedVariant;
 
-    if (heroItem.HasVariants()) {
+    // Estado / acción: el botón se dibuja SOLO cuando activar haría algo
+    // (owned-inactive, o el pet activo con otra variante elegida). Si no,
+    // solo la línea de estado — nunca las dos cosas (brief §18).
+    const bool activePet = heroItem.status == OwnershipStatus::kActive;
+    const bool variantWouldChange =
+        heroItem.HasVariants() && activePet && selectedVariant != model.activeVariantId;
+    if (heroItem.status == OwnershipStatus::kLocked) {
+        h.actionLabel = Localized(StringKey::kNotInCollection, lang);
+        h.actionEnabled = false;
+    } else if (activePet && !variantWouldChange) {
+        h.actionLabel = Localized(StringKey::kOnDesktop, lang);
+        h.actionEnabled = false;
+    } else {
+        h.actionLabel = std::string(Localized(StringKey::kUsePetPrefix, lang)) + heroItem.displayName;
+        h.actionEnabled = true;
+    }
+    h.showStatusLine = !h.actionEnabled;
+    h.actionFocusId = "use";
+
+    const bool hasSpecies = !h.speciesText.empty();
+    const bool hasDesc = !h.descriptionText.empty();
+    const bool hasChips = heroItem.HasVariants();
+
+    // Alto del bloque de texto, para centrarlo verticalmente contra el
+    // arte (así el hero no queda pesado arriba — brief §8/§26).
+    float blockH = kHeroNameH + kHeroRuleGap + kHeroRuleH;
+    if (hasSpecies) {
+        blockH += kSpeciesGap + kSpeciesH;
+    }
+    if (hasDesc) {
+        blockH += kDescGap + kDescH;
+    }
+    blockH += kBlockGap;
+    if (hasChips) {
+        blockH += kHeroChipH + kChipToAction;
+    }
+    blockH += h.actionEnabled ? kHeroButtonH : kHeroStatusH;
+
+    const float blockTop = heroTop + std::max(0.0f, (kHeroArt - blockH) * 0.5f);
+
+    // Hero stage: un halo asimétrico ALREDEDOR del arte — se extiende
+    // bastante más que un círculo, pero NO invade la columna de texto (el
+    // nombre roza su borde derecho; especie/descripción/acción quedan
+    // sobre el fondo cálido limpio). Más una primitiva secundaria más
+    // chica descentrada hacia abajo-derecha, pegada al arte, para la
+    // asimetría de "dos formas" (brief §11).
+    const float stageRight = textX - 6.0f;
+    h.stagePrimary = UiRect{h.art.x - 40.0f, h.art.y - 10.0f, stageRight - (h.art.x - 40.0f),
+                            h.art.h + 30.0f};
+    h.stageSecondary = UiRect{h.art.x + h.art.w * 0.34f, h.art.y + h.art.h * 0.42f,
+                              h.art.w * 0.84f, h.art.h * 0.70f};
+
+    // Colocación del bloque de texto (cursor descendente).
+    float y = blockTop;
+    h.nameAnchor = UiRect{textX, y, textW, kHeroNameH};
+    y += kHeroNameH + kHeroRuleGap;
+    h.nameRule = UiRect{textX, y, kHeroRuleW, kHeroRuleH};
+    y += kHeroRuleH;
+    if (hasSpecies) {
+        y += kSpeciesGap;
+        h.speciesAnchor = UiRect{textX, y, textW, kSpeciesH};
+        y += kSpeciesH;
+    }
+    if (hasDesc) {
+        y += kDescGap;
+        h.descriptionAnchor = UiRect{textX, y, textW, kDescH};
+        y += kDescH;
+    }
+    y += kBlockGap;
+
+    if (hasChips) {
         float chipX = textX;
-        const float chipY = blockTop + kHeroChipsRel;
+        const float chipY = y;
         for (const CollectionVariant& v : heroItem.variants) {
             HeroVariantChip chip;
             chip.variantId = v.variantId;
@@ -208,33 +264,21 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             out.focusOrder.push_back(chip.focusId);
             chipX += w + kHeroChipGap;
         }
+        y += kHeroChipH + kChipToAction;
     }
 
-    // Botón de acción.
-    const bool activePet = heroItem.status == OwnershipStatus::kActive;
-    const bool variantWouldChange =
-        heroItem.HasVariants() && activePet && selectedVariant != model.activeVariantId;
-    if (heroItem.status == OwnershipStatus::kLocked) {
-        h.actionLabel = Localized(StringKey::kNotInCollection, lang);
-        h.actionEnabled = false;
-    } else if (activePet && !variantWouldChange) {
-        h.actionLabel = Localized(StringKey::kOnDesktop, lang);
-        h.actionEnabled = false;
-    } else {
-        h.actionLabel = std::string(Localized(StringKey::kUsePetPrefix, lang)) + heroItem.displayName;
-        h.actionEnabled = true;
-    }
-    h.actionFocusId = "use";
-    const float buttonTop =
-        blockTop + (heroItem.HasVariants() ? kHeroButtonRelWithChips : kHeroButtonRelNoChips);
-    const float buttonW =
-        kHeroButtonPadX * 2.0f + static_cast<float>(h.actionLabel.size()) * kApproxCharW;
-    h.actionButton = UiRect{textX, buttonTop, buttonW, kHeroButtonH};
     if (h.actionEnabled) {
+        const float buttonW =
+            kHeroButtonPadX * 2.0f + static_cast<float>(h.actionLabel.size()) * kApproxCharW;
+        h.actionButton = UiRect{textX, y, buttonW, kHeroButtonH};
         out.focusOrder.push_back(h.actionFocusId);
+        y += kHeroButtonH;
+    } else {
+        h.statusAnchor = UiRect{textX, y, textW, kHeroStatusH};
+        y += kHeroStatusH;
     }
 
-    const float heroBottom = std::max(h.art.Bottom(), h.actionButton.Bottom());
+    const float heroBottom = std::max(h.art.Bottom(), y);
     out.dividerRect = UiRect{kMargin, heroBottom + kDividerGap, contentW, 1.0f};
 
     // --- Gallery: todos los pets MENOS el hero ---
@@ -249,9 +293,6 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     float galleryBottom = out.dividerRect.Bottom() + kGalleryGap;
     if (count > 0) {
         const int cols = std::min(count, 3);
-        // Las columnas no se estiran a todo el ancho: un cluster
-        // centrado se lee más tranquilo que dos items flotando lejos
-        // (brief §11/§26).
         const float colW = std::min(kGalleryColMax, contentW / static_cast<float>(cols));
         const float galleryLeft = kMargin + (contentW - colW * static_cast<float>(cols)) * 0.5f;
         const float galleryTop = out.dividerRect.Bottom() + kGalleryGap;
@@ -261,7 +302,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             const int col = i % cols;
             const int row = i / cols;
             const float rowH = kGalleryArt + kGalleryArtToName + kGalleryNameH + kGalleryNameToStatus +
-                               kGalleryStatusH + 20.0f;
+                               kGalleryStatusH + 22.0f;
 
             const float colX = galleryLeft + static_cast<float>(col) * colW;
             const float lift = (item.petId == in.hoverPetId) ? kHoverLift : 0.0f;
@@ -273,7 +314,9 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             g.status = item.status;
             g.statusText = StatusText(item.status, lang);
             g.previewVariantId = item.selectedVariantId;  // "" para un pet sin variantes
-            g.accentLine = PetAccentFor(item.petId).line;
+            const PetAccent itemAccent = PetAccentFor(item.petId);
+            g.accentLine = itemAccent.line;
+            g.pedestalTint = itemAccent.shapeTint;
             g.hasVariants = item.HasVariants();
             g.focusId = "item:" + item.petId;
 
@@ -282,9 +325,9 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             g.name = UiRect{colX, g.art.Bottom() + kGalleryArtToName, colW, kGalleryNameH};
             g.status_ = UiRect{colX, g.name.Bottom() + kGalleryNameToStatus, colW, kGalleryStatusH};
 
-            const float cellW = std::min(colW - 10.0f, kGalleryArt + 44.0f);
-            g.cell = UiRect{colX + (colW - cellW) * 0.5f, baseY - 10.0f, cellW,
-                            (g.status_.Bottom() - baseY) + 18.0f};
+            const float cellW = std::min(colW - 10.0f, kGalleryArt + 46.0f);
+            g.cell = UiRect{colX + (colW - cellW) * 0.5f, baseY - 12.0f, cellW,
+                            (g.status_.Bottom() - baseY) + 20.0f};
 
             galleryBottom = std::max(galleryBottom, g.status_.Bottom());
             out.gallery.push_back(g);
@@ -293,6 +336,13 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     }
 
     out.contentHeight = galleryBottom + kMargin + sy;
+
+    // Segundo plano: el fondo de la gallery, desde el divisor hacia
+    // abajo, generoso para que el scroll nunca descubra un borde. La
+    // vista lo recorta con su clip (brief §12).
+    out.galleryShelf = UiRect{0.0f, out.dividerRect.y, in.viewportW,
+                              (out.contentHeight - out.dividerRect.y) + in.viewportH};
+
     return out;
 }
 

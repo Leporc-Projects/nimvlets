@@ -20,10 +20,19 @@ struct PetAccent {
     // y el subrayado de la variante seleccionada.
     UiColor line;
 
-    // Versión pálida del mismo tono: para la forma detrás del arte del
-    // hero. La vista además la dibuja con alpha bajo — la forma "apoya"
-    // el arte, nunca compite (brief §10).
+    // Versión pálida del mismo tono: para la(s) forma(s) del hero stage
+    // detrás del arte. La vista además la dibuja con alpha bajo — el
+    // stage "apoya" el arte, nunca compite (brief §10/§11).
     UiColor shapeTint;
+
+    // Relleno tenue del botón de acción primario ("Use <pet>"): un tinte
+    // claro/medio del tono del pet (Block 06.2 §17 — el botón ya NO es
+    // casi-negro). Un poco más saturado que shapeTint.
+    UiColor softFill;
+
+    // Versión oscura y legible del mismo tono: el texto (y borde) del
+    // botón de acción sobre `softFill`. Contraste >= ~5:1 con softFill.
+    UiColor deepInk;
 
     // Si la forma del hero es más orgánica (óvalo, `false`) o un poco
     // más angular (round-rect de radio moderado, `true`). Bunny/Frin

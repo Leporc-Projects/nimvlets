@@ -27,22 +27,23 @@ struct CollectionViewResult {
     ActivateRequest activate;
 };
 
-// La Collection interactiva con composición HERO + GALLERY (Block
-// 06.1): el Nimvlet seleccionado es el protagonista visual; el resto
-// vive en una gallery discreta debajo. Junta el modelo
-// (catalog::CollectionModel), el layout puro (CollectionLayout), el
+// La Collection interactiva con composición HERO + GALLERY. El Nimvlet
+// seleccionado es el protagonista visual (hero stage teñido con su
+// acento, nombre/especie/descripción, selector de variante, acción); el
+// resto vive en una gallery discreta sobre un segundo plano, debajo de
+// un divisor. Junta el modelo, el layout puro (CollectionLayout), el
 // foco de teclado (FocusList), los caches de texto/arte, y la capa de
 // dibujo. Sin ventana ni event loop propios — ProductWindow la maneja.
 //
 // Redibuja SOLO ante un cambio real (hover, foco, selección de hero,
 // cambio de variante/modelo/idioma): `Dirty()` lo indica, no hay ningún
-// loop continuo (block brief §19/§20).
+// loop continuo (brief §20).
 class CollectionView {
  public:
     void SetModel(catalog::CollectionModel model, std::uint64_t clickBalance);
 
     // Idioma de TODO el texto. Redibuja de inmediato; el id del widget
-    // con foco es semántico, así que el foco se conserva (brief §21).
+    // con foco es semántico, así que el foco se conserva (brief §21/§28).
     void SetLanguage(core::Language language);
 
     const catalog::CollectionModel& Model() const { return model_; }
@@ -64,17 +65,22 @@ class CollectionView {
         selectedVariantId_ = variantId;
         dirty_ = true;
     }
-    // Solo-DEV: fija el estado de hover + foco visible sobre una entrada
-    // de la gallery (para la captura de "hover/focus state").
+    // Solo-DEV: fija SOLO el hover sobre una entrada de la gallery
+    // (captura de "gallery hover" — sin chrome de foco de teclado, que
+    // es una captura aparte).
     void SetGalleryHoverForQA(const std::string& petId) {
         hoverId_ = petId.empty() ? std::string() : ("item:" + petId);
-        focus_.Focus(hoverId_);
-        focusVisible_ = !petId.empty();
+        dirty_ = true;
+    }
+    // Solo-DEV: pone el foco de TECLADO sobre un chip de variante del
+    // hero (captura de "keyboard-focused Frin variant", brief §29).
+    void SetVariantKeyboardFocusForQA(const std::string& variantId) {
+        focus_.Focus("variant:" + variantId);
+        keyboardFocus_ = true;
         dirty_ = true;
     }
 
-    void Render(
-        UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH);
+    void Render(UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH);
 
  private:
     CollectionLayout BuildLayout(float w, float h) const;
@@ -99,11 +105,13 @@ class CollectionView {
     float viewportH_ = 560.0f;
 
     std::string hoverId_;
-    // El anillo de foco solo se dibuja después de la primera navegación
-    // por teclado (o un click que enfoca) — patrón "focus-visible":
-    // así, al abrir, la atención va al hero, no a un anillo sobre el
-    // primer item de la gallery (brief §21/§26).
-    bool focusVisible_ = false;
+    // Modalidad de input (patrón "focus-visible"): el chrome de foco
+    // (anillo del botón, pill del chip de variante) se dibuja SOLO
+    // mientras el último input fue de teclado. Un click de mouse lo
+    // apaga — así una selección de variante con mouse muestra solo el
+    // subrayado de acento, no un recuadro tipo control de formulario
+    // (brief §19). Arranca en false: al abrir, la atención va al hero.
+    bool keyboardFocus_ = false;
     bool dirty_ = true;
 };
 

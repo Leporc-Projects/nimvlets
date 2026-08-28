@@ -65,6 +65,8 @@ add_executable(nimvlets_tests
   LocalizationTest.cpp
   PetAccentTest.h
   PetAccentTest.cpp
+  PetEditorialTest.h
+  PetEditorialTest.cpp
   PreviewArtifactTest.h
   PreviewArtifactTest.cpp
   QuickMenuModelTest.h

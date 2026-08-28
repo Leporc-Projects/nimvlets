@@ -205,6 +205,101 @@ bool TestHeroTextLocalized() {
     return true;
 }
 
+// Block 06.2 §18: NUNCA se muestran a la vez la línea "Use" y el botón
+// "Use <pet>". showStatusLine == !actionEnabled, sin excepción.
+bool TestNoDuplicateUseStatusAndButton() {
+    // Owned-inactive: botón, sin línea de estado.
+    CollectionLayoutInput ownedInactive;
+    ownedInactive.selectedPetId = "frin";
+    const auto oi = BuildCollectionLayout(DevModel("bunny"), ownedInactive);
+    NIMVLETS_CHECK(oi.hero.actionEnabled);
+    NIMVLETS_CHECK(!oi.hero.showStatusLine);
+
+    // Activo, misma variante: línea de estado ("On desktop"), sin botón.
+    const auto active = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(!active.hero.actionEnabled);
+    NIMVLETS_CHECK(active.hero.showStatusLine);
+
+    // Locked: línea de estado, sin botón.
+    CollectionLayoutInput locked;
+    locked.selectedPetId = "nidir";
+    const auto lk = BuildCollectionLayout(DevModel("bunny"), locked);
+    NIMVLETS_CHECK(!lk.hero.actionEnabled);
+    NIMVLETS_CHECK(lk.hero.showStatusLine);
+
+    // Frin activo con otra variante elegida: botón (cambiaría variante),
+    // sin línea de estado.
+    CollectionLayoutInput frinOther;
+    frinOther.selectedPetId = "frin";
+    frinOther.selectedVariantId = "male";
+    const auto fo = BuildCollectionLayout(DevModel("frin", "female"), frinOther);
+    NIMVLETS_CHECK(fo.hero.actionEnabled);
+    NIMVLETS_CHECK(!fo.hero.showStatusLine);
+    return true;
+}
+
+// El hero de los tres pets con arte real trae especie + descripción
+// aprobadas; se localizan (brief §13-§16).
+bool TestHeroCarriesApprovedEditorial() {
+    CollectionLayoutInput en;
+    en.selectedPetId = "frin";
+    const auto frinEn = BuildCollectionLayout(DevModel("bunny"), en);
+    NIMVLETS_CHECK(frinEn.hero.speciesText == "White wolf");
+    NIMVLETS_CHECK(frinEn.hero.descriptionText == "Watchful, calm, and happiest close by.");
+
+    CollectionLayoutInput es = en;
+    es.language = Language::kEs;
+    const auto frinEs = BuildCollectionLayout(DevModel("bunny"), es);
+    NIMVLETS_CHECK(frinEs.hero.speciesText == "Lobo blanco");
+    NIMVLETS_CHECK(frinEs.hero.descriptionText == "Atento, tranquilo y más feliz cerca.");
+    return true;
+}
+
+// El hero stage: una primitiva de fondo que se extiende bastante MÁS
+// que el arte (brief §11: "extending farther than the current circle"),
+// más una secundaria descentrada, más la regla de acento fina.
+bool TestHeroStageExtendsBeyondArt() {
+    const auto layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    const auto& h = layout.hero;
+    // La primaria es un halo asimétrico que se extiende bastante más que
+    // el arte, pero sin invadir la columna de texto.
+    NIMVLETS_CHECK(h.stagePrimary.w > h.art.w + 30.0f);
+    NIMVLETS_CHECK(h.stagePrimary.x < h.art.x);
+    NIMVLETS_CHECK(h.stagePrimary.Right() > h.art.Right());
+    NIMVLETS_CHECK(h.stagePrimary.Right() <= h.nameAnchor.x);  // no invade el texto
+    // La secundaria es más chica y está descentrada respecto del arte
+    // (su centro cae abajo-derecha del centro del arte) — asimetría.
+    NIMVLETS_CHECK(h.stageSecondary.w < h.stagePrimary.w);
+    NIMVLETS_CHECK(h.stageSecondary.CenterX() > h.art.CenterX());
+    NIMVLETS_CHECK(h.stageSecondary.CenterY() > h.art.CenterY());
+    // Regla de acento fina bajo el nombre.
+    NIMVLETS_CHECK(h.nameRule.h <= 3.0f && h.nameRule.w > 0.0f);
+    return true;
+}
+
+// Segundo plano: el fondo de la gallery cubre desde el divisor hacia
+// abajo, ancho completo (brief §12).
+bool TestGalleryShelfIsSecondPlane() {
+    const auto layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(layout.galleryShelf.x == 0.0f);
+    NIMVLETS_CHECK(layout.galleryShelf.w >= 800.0f);
+    NIMVLETS_CHECK(layout.galleryShelf.y == layout.dividerRect.y);
+    NIMVLETS_CHECK(layout.galleryShelf.Bottom() >= layout.contentHeight);
+    return true;
+}
+
+// Cada pedestal de la gallery lleva un tinte de identidad del pet, no el
+// mismo cuadro neutro para todos (brief §20).
+bool TestGalleryPedestalCarriesPetTint() {
+    const auto layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    const auto* frin = layout.FindGalleryItem("frin");
+    const auto* nidir = layout.FindGalleryItem("nidir");
+    NIMVLETS_CHECK(frin != nullptr && nidir != nullptr);
+    NIMVLETS_CHECK(!(frin->pedestalTint == nidir->pedestalTint));
+    NIMVLETS_CHECK(frin->pedestalTint.a == 255);  // el alpha bajo lo aplica la vista
+    return true;
+}
+
 bool TestHitTestFindsGalleryItemAndHeroWidgets() {
     CollectionLayoutInput in;
     in.selectedPetId = "frin";
@@ -274,6 +369,11 @@ void RegisterCollectionLayoutTests(testing::TestRunner& runner) {
     runner.Add("CollectionLayout/HeroLockedHasNoAction", TestHeroLockedHasNoAction);
     runner.Add("CollectionLayout/HeroAndGalleryCarryPetAccent", TestHeroAndGalleryCarryPetAccent);
     runner.Add("CollectionLayout/HeroTextLocalized", TestHeroTextLocalized);
+    runner.Add("CollectionLayout/NoDuplicateUseStatusAndButton", TestNoDuplicateUseStatusAndButton);
+    runner.Add("CollectionLayout/HeroCarriesApprovedEditorial", TestHeroCarriesApprovedEditorial);
+    runner.Add("CollectionLayout/HeroStageExtendsBeyondArt", TestHeroStageExtendsBeyondArt);
+    runner.Add("CollectionLayout/GalleryShelfIsSecondPlane", TestGalleryShelfIsSecondPlane);
+    runner.Add("CollectionLayout/GalleryPedestalCarriesPetTint", TestGalleryPedestalCarriesPetTint);
     runner.Add("CollectionLayout/HitTestFindsGalleryItemAndHeroWidgets", TestHitTestFindsGalleryItemAndHeroWidgets);
     runner.Add("CollectionLayout/HoverLiftShiftsGalleryItemUp", TestHoverLiftShiftsGalleryItemUp);
     runner.Add("CollectionLayout/ScrollShiftsContentUp", TestScrollShiftsContentUp);
