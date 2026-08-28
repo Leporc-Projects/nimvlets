@@ -129,6 +129,31 @@ core::Language ResolveInitialLanguageFromOS() {
     return resolved;
 }
 
+// Puente propiedad<->catálogo (Block 07). appState_ guarda la propiedad
+// como persistence::OwnedEntitlement (datos planos, sin dependencia de
+// src/catalog); src/catalog razona sobre catalog::PetEntitlement (con
+// Covers()/canonicalización). Misma división que activePetId (string en
+// persistence) vs. catalog::PetIdentity.
+std::vector<catalog::PetEntitlement> ToCatalogEntitlements(
+    const std::vector<persistence::OwnedEntitlement>& v) {
+    std::vector<catalog::PetEntitlement> out;
+    out.reserve(v.size());
+    for (const persistence::OwnedEntitlement& e : v) {
+        out.push_back(catalog::PetEntitlement{e.petId, e.variantId});
+    }
+    return out;
+}
+
+std::vector<persistence::OwnedEntitlement> ToPersistedEntitlements(
+    const std::vector<catalog::PetEntitlement>& v) {
+    std::vector<persistence::OwnedEntitlement> out;
+    out.reserve(v.size());
+    for (const catalog::PetEntitlement& e : v) {
+        out.push_back(persistence::OwnedEntitlement{e.petId, e.variantId});
+    }
+    return out;
+}
+
 struct CursorSample {
     float globalX = 0.0f;
     float globalY = 0.0f;
@@ -367,21 +392,27 @@ bool SpikeApp::Init() {
     // verdad para la Collection, el invariante de propiedad, y el menú.
     activeCatalogIdentity_ = loadedEntry->identity;
 
-    // --- Estado de propiedad (Block 06) ---
+    // --- Estado de propiedad (Block 06 -> Block 07 autorizaciones) ---
     // Siembra de desarrollo SOLO en el primer arranque tras la
-    // migración a schema v2 (o una instalación nueva). Un bloque futuro
+    // migración a schema v2+ (o una instalación nueva). Un bloque futuro
     // de onboarding reemplaza esto sin tocar el catálogo.
     if (!appState_.ownershipSeeded) {
-        appState_.ownedPetIds = catalog::SeedOwnershipFromCatalog(catalog_);
+        appState_.ownedEntitlements =
+            ToPersistedEntitlements(catalog::SeedEntitlementsFromCatalog(catalog_));
         appState_.ownershipSeeded = true;
         persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
-        SDL_Log("nimvlets: ownership seeded from catalog (%zu pet(s) owned by default)", appState_.ownedPetIds.size());
+        SDL_Log("nimvlets: ownership seeded from catalog (%zu entitlement(s) by default)",
+                appState_.ownedEntitlements.size());
     }
-    // Invariante duro: el pet que está en el escritorio siempre es
-    // propio (block brief §9). Se persiste salvo que la sesión sea una
+    // Invariante duro: el pet/variante que está en el escritorio siempre
+    // es propio (brief §5). Se persiste salvo que la sesión sea una
     // selección DEV transitoria, igual que la reparación de arriba.
-    if (catalog::EnsureActivePetOwned(appState_.ownedPetIds, activeCatalogIdentity_.petId) && !haveDevSelection) {
-        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    {
+        std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
+        if (catalog::EnsureActiveEntitlementOwned(ents, activeCatalogIdentity_) && !haveDevSelection) {
+            appState_.ownedEntitlements = ToPersistedEntitlements(ents);
+            persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+        }
     }
 
     const SDL_WindowFlags flags =
@@ -605,9 +636,14 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
     appState_.activePetId = target.petId;
     appState_.activeVariantId = target.variantId;
     activeCatalogIdentity_ = target;
-    // El pet recién puesto en el escritorio es, por definición, propio
-    // (block brief §9) — CanActivate ya lo garantiza, pero se reafirma.
-    catalog::EnsureActivePetOwned(appState_.ownedPetIds, target.petId);
+    // El pet/variante recién puesto en el escritorio es, por definición,
+    // propio (brief §5) — CanActivate ya lo garantiza, pero se reafirma.
+    {
+        std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
+        if (catalog::EnsureActiveEntitlementOwned(ents, target)) {
+            appState_.ownedEntitlements = ToPersistedEntitlements(ents);
+        }
+    }
     persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
     RearmAmbientDeadline(static_cast<double>(SDL_GetTicks()));
     MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
@@ -618,8 +654,16 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
     return true;
 }
 
+std::vector<catalog::PetEntitlement> SpikeApp::CurrentEntitlements() const {
+    return ToCatalogEntitlements(appState_.ownedEntitlements);
+}
+
 catalog::CollectionModel SpikeApp::BuildCurrentCollectionModel() const {
-    return catalog::BuildCollectionModel(catalog_, appState_.ownedPetIds, activeCatalogIdentity_);
+    return catalog::BuildCollectionModel(catalog_, CurrentEntitlements(), activeCatalogIdentity_);
+}
+
+catalog::ShopModel SpikeApp::BuildCurrentShopModel() const {
+    return catalog::BuildShopModel(catalog_, appState_.clickBalance, CurrentEntitlements());
 }
 
 content::FrameDefinition SpikeApp::CurrentRestFrame() const {
@@ -635,9 +679,10 @@ content::FrameDefinition SpikeApp::CurrentRestFrame() const {
     return anim.frames.front();  // copia -- un solo frame, solo al abrir la Collection
 }
 
-void SpikeApp::PushCollectionModelToProductWindow() {
+void SpikeApp::PushModelsToProductWindow() {
     if (productWindow_.IsOpen()) {
-        productWindow_.SetModel(BuildCurrentCollectionModel(), appState_.clickBalance);
+        productWindow_.SetModels(
+            BuildCurrentCollectionModel(), BuildCurrentShopModel(), appState_.clickBalance);
     }
 }
 
@@ -672,14 +717,17 @@ void SpikeApp::OpenProductWindow() {
     productWindow_.SetLanguage(language_);
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
-    productWindow_.SetModel(BuildCurrentCollectionModel(), appState_.clickBalance);
+    productWindow_.SetModels(
+        BuildCurrentCollectionModel(), BuildCurrentShopModel(), appState_.clickBalance);
     productWindow_.FocusWindow();
 }
 
 void SpikeApp::HandleActivateRequest(const productui::ActivateRequest& request) {
     const catalog::CollectionModel model = BuildCurrentCollectionModel();
-    if (!catalog::CanActivate(model, request.petId)) {
-        SDL_Log("nimvlets: Collection: '%s' cannot be activated (locked or unknown) -- ignoring", request.petId.c_str());
+    if (!catalog::CanActivate(model, request.petId, request.variantId)) {
+        SDL_Log(
+            "nimvlets: Collection: '%s'%s%s cannot be activated (locked / variant not owned / unknown) -- ignoring",
+            request.petId.c_str(), request.variantId.empty() ? "" : "/", request.variantId.c_str());
         return;
     }
     const catalog::PetIdentity target{request.petId, request.variantId};
@@ -689,9 +737,49 @@ void SpikeApp::HandleActivateRequest(const productui::ActivateRequest& request) 
     if (TrySwitchActivePet(target)) {
         productWindow_.SetActivePreview(
             activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
-        PushCollectionModelToProductWindow();
+        PushModelsToProductWindow();
         PushShellState();
     }
+}
+
+void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    const catalog::PurchaseOutcome outcome = catalog::EvaluatePurchase(
+        catalog_, request.petId, appState_.clickBalance, CurrentEntitlements());
+
+    if (outcome.result != catalog::PurchaseResult::kSuccess) {
+        SDL_Log("nimvlets: Shop: purchase of '%s' not completed (%s)", request.petId.c_str(),
+                catalog::ToString(outcome.result));
+        // Igual se re-empujan los modelos: una confirmación que llegó
+        // tarde (p. ej. el balance bajó) debe reflejar el estado real.
+        PushModelsToProductWindow();
+        return;
+    }
+
+    // Mutación atómica EN MEMORIA: balance y propiedad en el MISMO
+    // AppState, sin escrituras intermedias (brief §13). Un solo
+    // SerializeAppState + un solo rename atómico persisten los dos
+    // juntos — nunca "gasté el balance pero no tengo el pet".
+    appState_.clickBalance = outcome.newBalance;
+    appState_.ownedEntitlements = ToPersistedEntitlements(outcome.newEntitlements);
+    persistenceScheduler_.MarkDirty(nowMs);
+    // Persistencia INMEDIATA tras una compra: el debounce normal de ~2s
+    // está bien para clicks (perder ~2s de clicks es trivial), pero una
+    // compra cambia propiedad — se fuerza el flush ahora. El per-click
+    // sigue usando el debounce; esto es la única excepción, y es solo
+    // llamar al flush que ya existe (ver docs/PERSISTENCE.md §6).
+    FlushPersistedState();
+
+    SDL_Log(
+        "nimvlets: Shop: purchased '%s' for %llu click(s) -- balance %llu -> %llu, ownership persisted",
+        request.petId.c_str(), static_cast<unsigned long long>(outcome.price),
+        static_cast<unsigned long long>(outcome.price + outcome.newBalance),
+        static_cast<unsigned long long>(outcome.newBalance));
+
+    // Refresco inmediato de AMBAS secciones (brief §16). El runtime del
+    // pet NO se toca; activar el pet recién comprado es una acción
+    // aparte del owner (el botón "Use" de la Collection).
+    PushModelsToProductWindow();
 }
 
 void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
@@ -1271,6 +1359,9 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             if (pe.hasActivate) {
                 HandleActivateRequest(pe.activate);
             }
+            if (pe.hasPurchase) {
+                HandlePurchaseRequest(pe.purchase);
+            }
             if (pe.closeRequested) {
                 productWindow_.Close();
             }
@@ -1446,10 +1537,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 animController_->TriggerClick(NextUniformRandom01(), nowMs);
                 MarkNeedsRedraw(nowMs);
                 RearmAmbientDeadline(nowMs);  // un click es una interacción real -- ver el comentario del campo
-                // Si la Collection está abierta, el balance visible se
-                // actualiza en vivo (block brief §13). No-op si está
-                // cerrada.
-                PushCollectionModelToProductWindow();
+                // Si el Product UI está abierto, el balance visible (y
+                // el estado asequible/insuficiente del Shop) se
+                // actualizan en vivo (brief §15/§16). No-op si está
+                // cerrado.
+                PushModelsToProductWindow();
                 SDL_Log(
                     "nimvlets: click #%d this session (balance: %llu)",
                     clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
@@ -1488,6 +1580,22 @@ int SpikeApp::Run() {
     RunDevClickSmokeTestIfRequested();
     RunDevHoverSmokeTestIfRequested();
 
+    // Mecanismo solo-DEV (Block 07): confirma una compra del Shop de
+    // forma no interactiva ("<petId>"), para smoke-testear la
+    // transacción de wallet completa (misma ruta que "Confirmar"):
+    // EvaluatePurchase -> mutación atómica de balance + propiedad ->
+    // flush INMEDIATO. Corre ANTES de abrir el Product UI, así que si
+    // además se abre, la Collection y el Shop ya reflejan la compra.
+    // Combinar con NIMVLETS_DEV_CLICK_TEST_COUNT para tener saldo, y con
+    // NIMVLETS_DEV_APPDATA_DIR para no tocar el estado real del owner.
+    // Ausente/vacía: no-op. Ver README.md.
+    if (const char* buy = std::getenv("NIMVLETS_DEV_BUY"); buy != nullptr && buy[0] != '\0') {
+        productui::PurchaseRequest req;
+        req.petId = buy;
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_BUY='%s'", buy);
+        HandlePurchaseRequest(req);
+    }
+
     // Mecanismo solo-DEV (Block 06): abre la Collection al arrancar,
     // para QA / capturas de pantalla sin tener que clickear el menú de
     // la barra. Ausente/vacía: no-op — la Collection solo se abre desde
@@ -1523,6 +1631,28 @@ int SpikeApp::Run() {
         // hero (captura de "keyboard-focused Frin variant", brief §29).
         if (const char* vf = std::getenv("NIMVLETS_DEV_VARIANT_FOCUS"); vf != nullptr && vf[0] != '\0') {
             productWindow_.SetVariantKeyboardFocusForQA(vf);
+        }
+        // --- Block 07: hooks de QA del Shop -------------------------
+        // NIMVLETS_DEV_SECTION=shop|collection — sección visible.
+        if (const char* sec = std::getenv("NIMVLETS_DEV_SECTION"); sec != nullptr && sec[0] != '\0') {
+            productWindow_.ShowSectionForQA(std::string(sec) == "shop"
+                                               ? productui::ProductSection::kShop
+                                               : productui::ProductSection::kCollection);
+        }
+        // NIMVLETS_DEV_SHOP_PET=<petId> — hero del Shop.
+        if (const char* sp = std::getenv("NIMVLETS_DEV_SHOP_PET"); sp != nullptr && sp[0] != '\0') {
+            productWindow_.SelectShopHeroForQA(sp);
+        }
+        // NIMVLETS_DEV_SHOP_HOVER=<petId> — hover sobre una entrada de la
+        // gallery del Shop.
+        if (const char* sh = std::getenv("NIMVLETS_DEV_SHOP_HOVER"); sh != nullptr && sh[0] != '\0') {
+            productWindow_.SetShopGalleryHoverForQA(sh);
+        }
+        // NIMVLETS_DEV_SHOP_CONFIRM=1 — abre la confirmación de compra
+        // inline del hero del Shop (captura del estado de confirmación).
+        if (const char* sc = std::getenv("NIMVLETS_DEV_SHOP_CONFIRM");
+            sc != nullptr && sc[0] != '\0' && sc[0] != '0') {
+            productWindow_.SetShopConfirmingForQA(true);
         }
         // Solo-DEV: vuelca el framebuffer de la Collection a un BMP y
         // sale (captura de QA a densidad nativa, sin captura de pantalla

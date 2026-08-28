@@ -3,7 +3,10 @@
 #include "catalog/ActivePetResolution.h"
 #include "catalog/CollectionModel.h"
 #include "catalog/PetCatalog.h"
+#include "catalog/PetEntitlement.h"
 #include "catalog/PetIdentity.h"
+#include "catalog/PurchasePolicy.h"
+#include "catalog/ShopModel.h"
 #include "content/AnimationController.h"
 #include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
@@ -177,10 +180,10 @@ private:
     // arranque — solo desde el menú rápido (ShellAction::kOpenCollection).
     void OpenProductWindow();
 
-    // Reconstruye catalog::CollectionModel a partir del estado actual
-    // (catálogo + ownedPetIds + identidad activa) y lo empuja a la
-    // ventana de producto si está abierta.
-    void PushCollectionModelToProductWindow();
+    // Reconstruye los modelos de la Collection y el Shop a partir del
+    // estado actual (catálogo + autorizaciones + balance + identidad
+    // activa) y los empuja a la ventana de producto si está abierta.
+    void PushModelsToProductWindow();
 
     // Empuja el estado visible del menú rápido (nombre del pet,
     // hidden/lock/size/opacity) al System Shell.
@@ -191,10 +194,18 @@ private:
     void HandleShellAction(int shellActionCode, bool& running);
 
     // Resultado de que el owner haya pedido activar un pet desde la
-    // Collection: valida propiedad vía el modelo y delega en
-    // TrySwitchActivePet(). No-op silencioso si el pet no se puede
-    // activar (locked / desconocido).
+    // Collection: valida propiedad (incluida la variante exacta) vía el
+    // modelo y delega en TrySwitchActivePet(). No-op silencioso si el
+    // pet/variante no se puede activar (locked / variante no poseída /
+    // desconocido).
     void HandleActivateRequest(const productui::ActivateRequest& request);
+
+    // Resultado de que el owner haya confirmado una compra en el Shop
+    // (Block 07). Evalúa catalog::EvaluatePurchase; si es kSuccess,
+    // muta balance + propiedad JUNTOS en appState_ y persiste de
+    // inmediato (un solo write atómico — ver docs/PERSISTENCE.md). No
+    // toca el runtime del pet. No-op silencioso en cualquier fallo.
+    void HandlePurchaseRequest(const productui::PurchaseRequest& request);
 
     // Copia del frame de reposo canónico del pet activo (states[0],
     // pose base, Direction::kRight) para la preview de la Collection —
@@ -202,6 +213,12 @@ private:
     content::FrameDefinition CurrentRestFrame() const;
 
     catalog::CollectionModel BuildCurrentCollectionModel() const;
+    catalog::ShopModel BuildCurrentShopModel() const;
+
+    // Las autorizaciones de propiedad actuales como tipo de src/catalog
+    // (appState_ las guarda como persistence::OwnedEntitlement — este
+    // puente es la misma división que activePetId/PetIdentity).
+    std::vector<catalog::PetEntitlement> CurrentEntitlements() const;
 
     // (Re)aplica tamaño de ventana + presentación lógica del pet a
     // EffectiveCanvasWidth()/Height() — usado tras un cambio de tamaño
