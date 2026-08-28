@@ -99,6 +99,36 @@ extern "C" void HandleTerminationSignal(int /*signum*/) {
     g_shutdownRequested.store(true, std::memory_order_relaxed);
 }
 
+// Idioma inicial cuando el owner nunca eligió uno (Block 06.1, brief
+// §5): "MAY follow OS language for English/Spanish. Otherwise default
+// to English." SDL_GetPreferredLocales() ya está disponible (SDL está
+// linkeado), así que no hace falta ninguna maquinaria de locale nueva
+// — se mira el primer locale preferido y solo se distingue "es" de
+// todo lo demás. NO se persiste el resultado: eso lo hace solo una
+// elección explícita desde el menú.
+core::Language ResolveInitialLanguageFromOS() {
+    int count = 0;
+    SDL_Locale** locales = SDL_GetPreferredLocales(&count);
+    core::Language resolved = core::Language::kEn;
+    if (locales != nullptr) {
+        for (int i = 0; i < count && locales[i] != nullptr; ++i) {
+            const char* lang = locales[i]->language;
+            if (lang != nullptr && SDL_strncasecmp(lang, "es", 2) == 0) {
+                resolved = core::Language::kEs;
+                break;
+            }
+            if (lang != nullptr && SDL_strncasecmp(lang, "en", 2) == 0) {
+                resolved = core::Language::kEn;
+                break;
+            }
+            // Cualquier otro idioma preferido: seguir mirando; si
+            // ninguno es en/es, queda el default kEn.
+        }
+        SDL_free(locales);
+    }
+    return resolved;
+}
+
 struct CursorSample {
     float globalX = 0.0f;
     float globalY = 0.0f;
@@ -248,6 +278,19 @@ bool SpikeApp::Init() {
         if (!loadWarning.empty()) {
             SDL_Log("nimvlets: %s", loadWarning.c_str());
         }
+    }
+
+    // --- Idioma del Product UI (Block 06.1) ---
+    // appState_.language vacío = el owner nunca eligió: se deriva del
+    // locale del OS (solo en/es), SIN persistirlo. Una elección
+    // explícita desde el menú gana siempre a partir de ahí (brief §5).
+    if (appState_.language.empty()) {
+        language_ = ResolveInitialLanguageFromOS();
+        SDL_Log("nimvlets: UI language not set -- resolved from OS locale to '%s' (not persisted)",
+                core::LanguageId(language_));
+    } else {
+        language_ = core::ParseLanguage(appState_.language);
+        SDL_Log("nimvlets: UI language = '%s' (persisted choice)", core::LanguageId(language_));
     }
 
     // Selección solo-DEV (ver kDevSelectPetEnvVar) -- resuelta ANTES
@@ -603,6 +646,7 @@ void SpikeApp::PushShellState() {
     state.sizeChoiceId = appState_.sizeChoice.empty() ? "medium" : appState_.sizeChoice;
     state.opacityPercent =
         appState_.opacityPercent == 0 ? 100 : static_cast<int>(appState_.opacityPercent);
+    state.language = language_;
     systemShell_->SetState(state);
 }
 
@@ -619,6 +663,7 @@ void SpikeApp::OpenProductWindow() {
         SDL_Log("nimvlets: could not open the Product UI window");
         return;
     }
+    productWindow_.SetLanguage(language_);
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
     productWindow_.SetModel(BuildCurrentCollectionModel(), appState_.clickBalance);
@@ -701,6 +746,24 @@ void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
             SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
             SDL_Log("nimvlets: pet opacity -> %d%%", pct);
             PushShellState();
+            break;
+        }
+
+        case platform::ShellAction::kSetLanguageEn:
+        case platform::ShellAction::kSetLanguageEs: {
+            const core::Language chosen =
+                action == platform::ShellAction::kSetLanguageEs ? core::Language::kEs : core::Language::kEn;
+            if (chosen != language_ || appState_.language.empty()) {
+                language_ = chosen;
+                // Una elección EXPLÍCITA sí se persiste (a partir de acá
+                // gana siempre sobre el locale del OS — block brief §5).
+                appState_.language = core::LanguageId(language_);
+                persistenceScheduler_.MarkDirty(nowMs);
+            }
+            SDL_Log("nimvlets: UI language -> %s", core::LanguageId(language_));
+            // Refresco inmediato, sin reiniciar: menú + Collection.
+            PushShellState();
+            productWindow_.SetLanguage(language_);
             break;
         }
 

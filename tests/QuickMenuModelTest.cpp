@@ -1,10 +1,12 @@
 #include "QuickMenuModelTest.h"
 
+#include "core/Localization.h"
 #include "platform/QuickMenuModel.h"
 
 #include <string>
 #include <vector>
 
+using nimvlets::core::Language;
 using nimvlets::platform::BuildQuickMenuModel;
 using nimvlets::platform::MenuItem;
 using nimvlets::platform::MenuItemKind;
@@ -152,7 +154,68 @@ bool TestStructureHasSeparatorsAndNoEmptyLabels() {
             NIMVLETS_CHECK(!it.label.empty());
         }
     }
-    NIMVLETS_CHECK(separators == 3);  // pet name | acciones | tamaño/opacidad/lock | quit
+    NIMVLETS_CHECK(separators == 3);  // pet name | acciones | tamaño/opacidad/lock/idioma | quit
+    return true;
+}
+
+// --- Block 06.1: localización + submenú Language ------------------
+
+// Con state.language = kEs, TODAS las etiquetas traducibles cambian.
+bool TestSpanishRelabelsEverything() {
+    ShellState s;
+    s.language = Language::kEs;
+    const QuickMenuModel m = BuildQuickMenuModel(s);
+
+    NIMVLETS_CHECK(Find(m, ShellAction::kTogglePetVisibility)->label == "Ocultar Nimvlet");
+    NIMVLETS_CHECK(Find(m, ShellAction::kOpenCollection)->label == "Colección…");
+    NIMVLETS_CHECK(Find(m, ShellAction::kToggleLockPosition)->label == "Bloquear posición");
+    NIMVLETS_CHECK(FindSubmenu(m, "Tamaño") != nullptr);
+    NIMVLETS_CHECK(FindSubmenu(m, "Opacidad") != nullptr);
+    NIMVLETS_CHECK(FindSubmenu(m, "Idioma") != nullptr);
+    NIMVLETS_CHECK(m.items.back().label == "Salir de Nimvlets");
+    // El nombre del pet es un nombre propio: NO se traduce.
+    s.currentPetName = "Nidir";
+    NIMVLETS_CHECK(BuildQuickMenuModel(s).items[0].label == "Nidir");
+    return true;
+}
+
+// Cambiar state.petHidden en español.
+bool TestShowHideLabelSpanish() {
+    ShellState s;
+    s.language = Language::kEs;
+    s.petHidden = true;
+    NIMVLETS_CHECK(Find(BuildQuickMenuModel(s), ShellAction::kTogglePetVisibility)->label == "Mostrar Nimvlet");
+    s.petHidden = false;
+    NIMVLETS_CHECK(Find(BuildQuickMenuModel(s), ShellAction::kTogglePetVisibility)->label == "Ocultar Nimvlet");
+    return true;
+}
+
+// El submenú Language: dos items (English / Español, endónimos), uno
+// marcado según state.language, con las acciones correctas.
+bool TestLanguageSubmenu() {
+    ShellState en;
+    en.language = Language::kEn;
+    const QuickMenuModel me = BuildQuickMenuModel(en);
+    const MenuItem* langMenu = FindSubmenu(me, "Language");
+    NIMVLETS_CHECK(langMenu != nullptr);
+    NIMVLETS_CHECK(langMenu->submenu.size() == 2);
+    NIMVLETS_CHECK(langMenu->submenu[0].label == "English");
+    NIMVLETS_CHECK(langMenu->submenu[0].action == ShellAction::kSetLanguageEn);
+    NIMVLETS_CHECK(langMenu->submenu[0].checked);
+    NIMVLETS_CHECK(langMenu->submenu[1].label == "Español");
+    NIMVLETS_CHECK(langMenu->submenu[1].action == ShellAction::kSetLanguageEs);
+    NIMVLETS_CHECK(!langMenu->submenu[1].checked);
+
+    ShellState es;
+    es.language = Language::kEs;
+    const QuickMenuModel ms = BuildQuickMenuModel(es);
+    const MenuItem* langMenuEs = FindSubmenu(ms, "Idioma");
+    NIMVLETS_CHECK(langMenuEs != nullptr);
+    // Endónimos: SIEMPRE en su propio idioma, no traducidos.
+    NIMVLETS_CHECK(langMenuEs->submenu[0].label == "English");
+    NIMVLETS_CHECK(langMenuEs->submenu[1].label == "Español");
+    NIMVLETS_CHECK(!langMenuEs->submenu[0].checked);
+    NIMVLETS_CHECK(langMenuEs->submenu[1].checked);
     return true;
 }
 
@@ -166,6 +229,9 @@ void RegisterQuickMenuModelTests(testing::TestRunner& runner) {
     runner.Add("QuickMenuModel/SizeSubmenuChecksExactlyOne", TestSizeSubmenuChecksExactlyOne);
     runner.Add("QuickMenuModel/OpacitySubmenuSnapsToNearestChoice", TestOpacitySubmenuSnapsToNearestChoice);
     runner.Add("QuickMenuModel/StructureHasSeparatorsAndNoEmptyLabels", TestStructureHasSeparatorsAndNoEmptyLabels);
+    runner.Add("QuickMenuModel/SpanishRelabelsEverything", TestSpanishRelabelsEverything);
+    runner.Add("QuickMenuModel/ShowHideLabelSpanish", TestShowHideLabelSpanish);
+    runner.Add("QuickMenuModel/LanguageSubmenu", TestLanguageSubmenu);
 }
 
 }  // namespace nimvlets::tests

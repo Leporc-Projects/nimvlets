@@ -7,6 +7,7 @@
 #include "catalog/CollectionModel.h"
 #include "catalog/PetCatalog.h"
 #include "content/AnimationDefinition.h"
+#include "core/Localization.h"
 #include "productui/CollectionView.h"
 
 struct SDL_Window;
@@ -60,6 +61,10 @@ class ProductWindow {
     // Snapshot del modelo + balance. Se llama al abrir y cada vez que
     // cambian el pet activo o la propiedad.
     void SetModel(const catalog::CollectionModel& model, std::uint64_t clickBalance);
+
+    // Idioma de TODO el texto de la Collection. Cambiarlo redibuja de
+    // inmediato, sin reiniciar (block brief §5). No-op si está cerrada.
+    void SetLanguage(core::Language language);
 
     // Frame de reposo del pet ACTIVO (su pack ya está cargado por
     // src/app) para la preview, sin recargar nada.

@@ -5,6 +5,7 @@
 
 #include "catalog/CollectionModel.h"
 #include "catalog/PetCatalog.h"
+#include "core/Localization.h"
 #include "productui/CollectionLayout.h"
 #include "productui/FocusList.h"
 #include "productui/PetPreviewCache.h"
@@ -41,6 +42,11 @@ class CollectionView {
     // propiedad.
     void SetModel(catalog::CollectionModel model, std::uint64_t clickBalance);
 
+    // Idioma de todo el texto de la vista. Redibuja de inmediato; si el
+    // widget con foco todavía existe tras el cambio, el foco se
+    // conserva (block brief §21).
+    void SetLanguage(core::Language language);
+
     const catalog::CollectionModel& Model() const { return model_; }
 
     // Entradas. Coordenadas en PUNTOS lógicos de la ventana.
@@ -71,6 +77,7 @@ class CollectionView {
 
     catalog::CollectionModel model_;
     std::uint64_t clickBalance_ = 0;
+    core::Language language_ = core::Language::kEn;
 
     FocusList focus_;
     bool detailOpen_ = false;

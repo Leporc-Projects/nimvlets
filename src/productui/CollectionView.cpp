@@ -70,6 +70,18 @@ void CollectionView::SetModel(catalog::CollectionModel model, std::uint64_t clic
     dirty_ = true;
 }
 
+void CollectionView::SetLanguage(core::Language language) {
+    if (language == language_) {
+        return;
+    }
+    language_ = language;
+    // El id del widget con foco es semántico ("item:frin", "use", ...),
+    // no depende del idioma — así que el foco se conserva solo tras
+    // reconstruir la focus list (block brief §21).
+    SyncFocusList(BuildLayout(viewportW_, viewportH_));
+    dirty_ = true;
+}
+
 CollectionLayout CollectionView::BuildLayout(float w, float h) const {
     CollectionLayoutInput in;
     in.viewportW = w;

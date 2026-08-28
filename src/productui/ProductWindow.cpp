@@ -132,6 +132,10 @@ void ProductWindow::SetModel(const catalog::CollectionModel& model, std::uint64_
     view_.SetModel(model, clickBalance);
 }
 
+void ProductWindow::SetLanguage(core::Language language) {
+    view_.SetLanguage(language);
+}
+
 void ProductWindow::SetActivePreview(
     const std::string& petId, const std::string& variantId, const content::FrameDefinition& restFrame) {
     if (previews_) {

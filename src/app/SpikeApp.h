@@ -11,6 +11,7 @@
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
 #include "core/HoverDwellTracker.h"
+#include "core/Localization.h"
 #include "graphics/ActiveFrameTexture.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
@@ -384,6 +385,13 @@ private:
     // §17). NO se persiste: al reabrir la app el pet siempre arranca
     // visible. Esconder != salir.
     bool petHidden_ = false;
+
+    // Idioma EFECTIVO del Product UI y del menú esta sesión (Block
+    // 06.1). Resuelto en Init(): si appState_.language está vacío (el
+    // owner nunca eligió), se deriva del locale del OS (en/es) SIN
+    // persistirlo; una elección explícita desde el menú Language sí se
+    // persiste y gana siempre.
+    core::Language language_ = core::Language::kEn;
 
     bool usingNativeShapeHitTest_ = false;
     bool usingPollDrivenClickThrough_ = false;
