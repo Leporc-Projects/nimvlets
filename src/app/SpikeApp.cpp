@@ -1490,14 +1490,20 @@ int SpikeApp::Run() {
         openCol != nullptr && openCol[0] != '\0' && openCol[0] != '0') {
         SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_OPEN_COLLECTION (opening Collection at startup)");
         OpenProductWindow();
-        // Si el valor es un petId presente en el catálogo, además se
-        // abre su detalle (para capturas de QA de los estados de
-        // detalle).
+        // "petId" o "petId/variantId" (p. ej. "frin/female"): además de
+        // abrir la Collection, elige ese Nimvlet como hero (y su
+        // variante), para capturas de QA de los estados del hero.
         const std::string spec(openCol);
         if (spec != "1") {
+            const std::size_t slash = spec.find('/');
+            const std::string petId = slash == std::string::npos ? spec : spec.substr(0, slash);
+            const std::string variantId = slash == std::string::npos ? std::string() : spec.substr(slash + 1);
             for (const catalog::CatalogEntry& entry : catalog_.Entries()) {
-                if (entry.identity.petId == spec) {
-                    productWindow_.OpenDetailForQA(spec);
+                if (entry.identity.petId == petId) {
+                    productWindow_.SelectHeroForQA(petId);
+                    if (!variantId.empty()) {
+                        productWindow_.SetHeroVariantForQA(variantId);
+                    }
                     break;
                 }
             }

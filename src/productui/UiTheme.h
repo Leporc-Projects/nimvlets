@@ -34,16 +34,22 @@ constexpr UiColor kArtBed{0xF0, 0xEC, 0xE3, 0xFF};
 
 }  // namespace theme
 
-// Tamaños tipográficos en PUNTOS lógicos.
+// Tamaños tipográficos en PUNTOS lógicos. Block 06.1: jerarquía por
+// tamaño/peso/espacio, no por más contenedores (brief §7/§17).
 namespace type {
 
-constexpr double kTitle = 17.0;       // "Nimvlets"
-constexpr double kClicks = 13.0;      // "1 248 clicks"
-constexpr double kSectionLabel = 11.5;  // "COLLECTION"
-constexpr double kPetName = 14.0;
-constexpr double kStatus = 12.0;
-constexpr double kDetailName = 20.0;
-constexpr double kChip = 12.5;
+constexpr double kTitle = 16.0;        // "Nimvlets" (cabecera discreta)
+constexpr double kClicks = 13.0;       // "1 248 clicks"
+constexpr double kSectionTitle = 15.0; // "Collection"
+constexpr double kSectionSub = 12.0;   // "Your companions"
+
+constexpr double kHeroName = 25.0;     // el nombre del Nimvlet protagonista
+constexpr double kHeroMeta = 13.0;     // especie / estado del hero
+constexpr double kHeroVariant = 14.0;  // "Male · Female"
+
+constexpr double kGalleryName = 13.5;
+constexpr double kGalleryStatus = 11.5;
+
 constexpr double kButton = 13.0;
 
 }  // namespace type

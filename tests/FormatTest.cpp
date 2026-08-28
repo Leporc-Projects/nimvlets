@@ -1,9 +1,11 @@
 #include "FormatTest.h"
 
+#include "core/Localization.h"
 #include "productui/Format.h"
 
 #include <string>
 
+using nimvlets::core::Language;
 using nimvlets::productui::FormatClickCount;
 using nimvlets::productui::FormatGroupedNumber;
 
@@ -23,12 +25,21 @@ bool TestGroupedNumber() {
     return true;
 }
 
-// Block brief §6: "1 248 clicks", nunca "1,248 COINS".
-bool TestClickCountWording() {
-    NIMVLETS_CHECK(FormatClickCount(0) == "0 clicks");
-    NIMVLETS_CHECK(FormatClickCount(1) == "1 click");   // singular
-    NIMVLETS_CHECK(FormatClickCount(2) == "2 clicks");
-    NIMVLETS_CHECK(FormatClickCount(1248) == "1 248 clicks");
+// Block brief 06 §6 / 06.1 §16: "1 248 clicks" (en), "1 248 clics"
+// (es), nunca "coins"/"monedas".
+bool TestClickCountWordingEnglish() {
+    NIMVLETS_CHECK(FormatClickCount(0, Language::kEn) == "0 clicks");
+    NIMVLETS_CHECK(FormatClickCount(1, Language::kEn) == "1 click");   // singular
+    NIMVLETS_CHECK(FormatClickCount(2, Language::kEn) == "2 clicks");
+    NIMVLETS_CHECK(FormatClickCount(1248, Language::kEn) == "1 248 clicks");
+    return true;
+}
+
+bool TestClickCountWordingSpanish() {
+    NIMVLETS_CHECK(FormatClickCount(0, Language::kEs) == "0 clics");
+    NIMVLETS_CHECK(FormatClickCount(1, Language::kEs) == "1 clic");   // singular
+    NIMVLETS_CHECK(FormatClickCount(2, Language::kEs) == "2 clics");
+    NIMVLETS_CHECK(FormatClickCount(1248, Language::kEs) == "1 248 clics");
     return true;
 }
 
@@ -36,7 +47,8 @@ bool TestClickCountWording() {
 
 void RegisterFormatTests(testing::TestRunner& runner) {
     runner.Add("Format/GroupedNumber", TestGroupedNumber);
-    runner.Add("Format/ClickCountWording", TestClickCountWording);
+    runner.Add("Format/ClickCountWordingEnglish", TestClickCountWordingEnglish);
+    runner.Add("Format/ClickCountWordingSpanish", TestClickCountWordingSpanish);
 }
 
 }  // namespace nimvlets::tests

@@ -22,29 +22,27 @@ struct ActivateRequest {
 
 struct CollectionViewResult {
     bool dirty = false;         // hay que redibujar
-    bool requestClose = false;  // Escape sin detalle abierto -> cerrar la ventana
+    bool requestClose = false;  // Escape -> cerrar la ventana
     bool hasActivate = false;   // el owner pidió activar un pet
     ActivateRequest activate;
 };
 
-// La Collection interactiva: junta el modelo (catalog::CollectionModel)
-// con el layout puro (CollectionLayout), el foco de teclado (FocusList),
-// los caches de texto/arte, y la capa de dibujo. Sin ventana ni event
-// loop propios — ProductWindow la maneja.
+// La Collection interactiva con composición HERO + GALLERY (Block
+// 06.1): el Nimvlet seleccionado es el protagonista visual; el resto
+// vive en una gallery discreta debajo. Junta el modelo
+// (catalog::CollectionModel), el layout puro (CollectionLayout), el
+// foco de teclado (FocusList), los caches de texto/arte, y la capa de
+// dibujo. Sin ventana ni event loop propios — ProductWindow la maneja.
 //
-// Redibuja SOLO ante un cambio real (hover, foco, scroll, abrir/cerrar
-// detalle, cambio de modelo): `Dirty()` lo indica, no hay ningún loop
-// continuo (block brief §19).
+// Redibuja SOLO ante un cambio real (hover, foco, selección de hero,
+// cambio de variante/modelo/idioma): `Dirty()` lo indica, no hay ningún
+// loop continuo (block brief §19/§20).
 class CollectionView {
  public:
-    // Snapshot del modelo + balance de clicks a mostrar. Se llama al
-    // abrir la ventana y cada vez que cambian el pet activo o la
-    // propiedad.
     void SetModel(catalog::CollectionModel model, std::uint64_t clickBalance);
 
-    // Idioma de todo el texto de la vista. Redibuja de inmediato; si el
-    // widget con foco todavía existe tras el cambio, el foco se
-    // conserva (block brief §21).
+    // Idioma de TODO el texto. Redibuja de inmediato; el id del widget
+    // con foco es semántico, así que el foco se conserva (brief §21).
     void SetLanguage(core::Language language);
 
     const catalog::CollectionModel& Model() const { return model_; }
@@ -59,9 +57,13 @@ class CollectionView {
     bool Dirty() const { return dirty_; }
     void ClearDirty() { dirty_ = false; }
 
-    // Solo-DEV: abre el panel de detalle de `petId` sin un click real
-    // (para QA / capturas). No-op si `petId` no está en el modelo.
-    void OpenDetailForQA(const std::string& petId) { OpenDetail(petId); }
+    // Solo-DEV (QA / capturas): elige el hero / la variante del hero sin
+    // un click real. No-op si el pet no está en el modelo.
+    void SelectHeroForQA(const std::string& petId) { SelectHero(petId); }
+    void SetHeroVariantForQA(const std::string& variantId) {
+        selectedVariantId_ = variantId;
+        dirty_ = true;
+    }
 
     void Render(
         UiPainter& painter, TextCache& text, PetPreviewCache& previews, const catalog::PetCatalog& catalog,
@@ -70,26 +72,31 @@ class CollectionView {
  private:
     CollectionLayout BuildLayout(float w, float h) const;
     void SyncFocusList(const CollectionLayout& layout);
-    void OpenDetail(const std::string& petId);
-    void CloseDetail();
+    void SelectHero(const std::string& petId);
+    std::string HoverPetId() const;  // "item:<x>" -> "<x>", si no ""
     CollectionViewResult ActivateWidget(const std::string& focusId);
-    std::string ResolvedDetailVariant() const;
 
     catalog::CollectionModel model_;
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
 
     FocusList focus_;
-    bool detailOpen_ = false;
-    std::string detailPetId_;
-    std::string detailVariantId_;
+    // "" => el hero sigue al pet activo del modelo.
+    std::string selectedPetId_;
+    // "" => variante por defecto del hero.
+    std::string selectedVariantId_;
 
     float scrollY_ = 0.0f;
     float lastContentHeight_ = 0.0f;
-    float viewportW_ = 760.0f;
-    float viewportH_ = 540.0f;
+    float viewportW_ = 800.0f;
+    float viewportH_ = 560.0f;
 
     std::string hoverId_;
+    // El anillo de foco solo se dibuja después de la primera navegación
+    // por teclado (o un click que enfoca) — patrón "focus-visible":
+    // así, al abrir, la atención va al hero, no a un anillo sobre el
+    // primer item de la gallery (brief §21/§26).
+    bool focusVisible_ = false;
     bool dirty_ = true;
 };
 

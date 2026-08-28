@@ -11,12 +11,13 @@ namespace nimvlets::productui {
 
 namespace {
 
-// Tamaño de contenido objetivo (block brief §6). Redimensionable —
+// Tamaño de contenido objetivo (block brief 06 §6 -> 06.1 §18: subido
+// a ~800x560 para que el hero + gallery respiren). Redimensionable —
 // nada acá asume que no cambia.
-constexpr int kDefaultW = 760;
-constexpr int kDefaultH = 540;
-constexpr int kMinW = 560;
-constexpr int kMinH = 420;
+constexpr int kDefaultW = 800;
+constexpr int kDefaultH = 560;
+constexpr int kMinW = 600;
+constexpr int kMinH = 460;
 
 bool KeycodeShift(SDL_Keymod mod) {
     return (mod & SDL_KMOD_SHIFT) != 0;

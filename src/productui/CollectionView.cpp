@@ -6,17 +6,18 @@
 #include <utility>
 
 #include "productui/Format.h"
+#include "productui/PetEditorial.h"
+#include "productui/UiTheme.h"
 
 namespace nimvlets::productui {
 
-using catalog::CollectionItem;
 using catalog::OwnershipStatus;
 using platform::TextWeight;
 
 namespace {
 
-constexpr float kHeaderClipTop = 100.0f;  // el grid arranca en 112; por debajo de acá se recorta el scroll
-constexpr float kWheelStep = 48.0f;       // puntos por "línea" de rueda
+constexpr float kHeaderClipTop = 112.0f;  // el hero arranca en 120; arriba de acá no se recorta
+constexpr float kWheelStep = 48.0f;
 
 bool StartsWith(const std::string& s, const char* prefix) {
     return s.rfind(prefix, 0) == 0;
@@ -30,32 +31,26 @@ std::string VariantFromFocusId(const std::string& focusId) {
     return StartsWith(focusId, "variant:") ? focusId.substr(8) : std::string();
 }
 
-// Sub-línea bajo el arte en el grid (block brief §8/§11).
-std::string GridSubLabel(const CollectionItem& item) {
-    switch (item.status) {
+// Color del texto de estado según el estado de propiedad.
+UiColor StatusColor(OwnershipStatus status, UiColor accentLine) {
+    switch (status) {
         case OwnershipStatus::kActive:
-            return "On desktop";
-        case OwnershipStatus::kLocked:
-            return "Not in your collection";
+            return theme::kTextMuted;
         case OwnershipStatus::kOwnedInactive:
-            break;
+            return accentLine;  // el hint "Use" lleva el tono del pet
+        case OwnershipStatus::kLocked:
+            return theme::kTextFaint;
     }
-    if (item.HasVariants()) {
-        std::string joined;
-        for (const auto& v : item.variants) {
-            if (!joined.empty()) {
-                joined += " · ";  // " · "
-            }
-            std::string label = v.variantId;
-            if (!label.empty()) {
-                label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
-            }
-            joined += label;
-        }
-        return joined;
-    }
-    return "Use";
+    return theme::kTextMuted;
 }
+
+// Alpha del arte de un pet locked: visible pero más callado, NO
+// grayscale/opacidad agresiva (brief §12).
+constexpr unsigned char kLockedArtAlpha = 150;
+
+// Alpha de la forma orgánica detrás del arte del hero: muy sutil — la
+// forma "apoya" el arte, nunca compite (brief §10).
+constexpr unsigned char kHeroShapeAlpha = 52;
 
 }  // namespace
 
@@ -63,8 +58,11 @@ void CollectionView::SetModel(catalog::CollectionModel model, std::uint64_t clic
     model_ = std::move(model);
     clickBalance_ = clickBalance;
 
-    if (detailOpen_ && model_.Find(detailPetId_) == nullptr) {
-        CloseDetail();
+    // Si el hero seleccionado ya no existe, se vuelve a "seguir al pet
+    // activo" (selectedPetId_ vacío).
+    if (!selectedPetId_.empty() && model_.Find(selectedPetId_) == nullptr) {
+        selectedPetId_.clear();
+        selectedVariantId_.clear();
     }
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
     dirty_ = true;
@@ -75,9 +73,6 @@ void CollectionView::SetLanguage(core::Language language) {
         return;
     }
     language_ = language;
-    // El id del widget con foco es semántico ("item:frin", "use", ...),
-    // no depende del idioma — así que el foco se conserva solo tras
-    // reconstruir la focus list (block brief §21).
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
     dirty_ = true;
 }
@@ -87,9 +82,10 @@ CollectionLayout CollectionView::BuildLayout(float w, float h) const {
     in.viewportW = w;
     in.viewportH = h;
     in.scrollY = ClampScroll(scrollY_, lastContentHeight_, h);
-    in.detailOpen = detailOpen_;
-    in.detailPetId = detailPetId_;
-    in.detailSelectedVariantId = detailVariantId_;
+    in.language = language_;
+    in.selectedPetId = selectedPetId_;
+    in.selectedVariantId = selectedVariantId_;
+    in.hoverPetId = HoverPetId();
     return BuildCollectionLayout(model_, in);
 }
 
@@ -97,38 +93,17 @@ void CollectionView::SyncFocusList(const CollectionLayout& layout) {
     focus_.SetItems(layout.focusOrder);
 }
 
-std::string CollectionView::ResolvedDetailVariant() const {
-    const CollectionItem* item = model_.Find(detailPetId_);
-    if (item == nullptr) {
-        return std::string();
-    }
-    const bool valid = std::any_of(item->variants.begin(), item->variants.end(),
-                                   [&](const catalog::CollectionVariant& v) { return v.variantId == detailVariantId_; });
-    return valid ? detailVariantId_ : item->selectedVariantId;
+std::string CollectionView::HoverPetId() const {
+    return StartsWith(hoverId_, "item:") ? hoverId_.substr(5) : std::string();
 }
 
-void CollectionView::OpenDetail(const std::string& petId) {
-    const CollectionItem* item = model_.Find(petId);
-    if (item == nullptr) {
+void CollectionView::SelectHero(const std::string& petId) {
+    if (model_.Find(petId) == nullptr || petId == selectedPetId_) {
         return;
     }
-    detailOpen_ = true;
-    detailPetId_ = petId;
-    detailVariantId_ = item->selectedVariantId;
+    selectedPetId_ = petId;
+    selectedVariantId_.clear();  // que el layout resuelva la variante por defecto del nuevo hero
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
-    focus_.Focus("item:" + petId);
-    dirty_ = true;
-}
-
-void CollectionView::CloseDetail() {
-    const std::string was = detailPetId_;
-    detailOpen_ = false;
-    detailPetId_.clear();
-    detailVariantId_.clear();
-    SyncFocusList(BuildLayout(viewportW_, viewportH_));
-    if (!was.empty()) {
-        focus_.Focus("item:" + was);
-    }
     dirty_ = true;
 }
 
@@ -138,12 +113,12 @@ CollectionViewResult CollectionView::ActivateWidget(const std::string& focusId) 
         return r;
     }
     if (StartsWith(focusId, "item:")) {
-        OpenDetail(PetIdFromItemFocusId(focusId));
+        SelectHero(PetIdFromItemFocusId(focusId));
         r.dirty = true;
         return r;
     }
     if (StartsWith(focusId, "variant:")) {
-        detailVariantId_ = VariantFromFocusId(focusId);
+        selectedVariantId_ = VariantFromFocusId(focusId);
         SyncFocusList(BuildLayout(viewportW_, viewportH_));
         focus_.Focus(focusId);
         r.dirty = true;
@@ -151,10 +126,13 @@ CollectionViewResult CollectionView::ActivateWidget(const std::string& focusId) 
     }
     if (focusId == "use") {
         const CollectionLayout layout = BuildLayout(viewportW_, viewportH_);
-        if (layout.detail.open && layout.detail.actionEnabled) {
+        if (layout.hero.actionEnabled) {
             r.hasActivate = true;
-            r.activate.petId = detailPetId_;
-            r.activate.variantId = ResolvedDetailVariant();
+            r.activate.petId = layout.hero.petId;
+            r.activate.variantId = layout.hero.selectedVariantId;
+            // El hero sigue mostrando el pet que se está activando.
+            selectedPetId_ = layout.hero.petId;
+            selectedVariantId_ = layout.hero.selectedVariantId;
         }
         r.dirty = true;
         return r;
@@ -178,16 +156,11 @@ CollectionViewResult CollectionView::OnMouseDown(float x, float y) {
     const CollectionLayout layout = BuildLayout(viewportW_, viewportH_);
     const std::string hit = layout.HitTest(x, y);
     if (hit.empty()) {
-        // Click en el vacío: si hay un detalle abierto, se cierra.
-        CollectionViewResult r;
-        if (detailOpen_) {
-            CloseDetail();
-            r.dirty = true;
-        }
-        return r;
+        return CollectionViewResult{};
     }
     if (StartsWith(hit, "item:")) {
         focus_.Focus(hit);
+        focusVisible_ = true;
     }
     return ActivateWidget(hit);
 }
@@ -207,37 +180,31 @@ CollectionViewResult CollectionView::OnKey(int sdlKeycode, bool shiftHeld) {
     CollectionViewResult r;
     switch (sdlKeycode) {
         case SDLK_TAB:
-            if (shiftHeld) {
+        case SDLK_RIGHT:
+        case SDLK_DOWN:
+            if (sdlKeycode == SDLK_TAB && shiftHeld) {
                 focus_.Prev();
             } else {
                 focus_.Next();
             }
-            dirty_ = true;
-            r.dirty = true;
-            return r;
-        case SDLK_RIGHT:
-        case SDLK_DOWN:
-            focus_.Next();
+            focusVisible_ = true;
             dirty_ = true;
             r.dirty = true;
             return r;
         case SDLK_LEFT:
         case SDLK_UP:
             focus_.Prev();
+            focusVisible_ = true;
             dirty_ = true;
             r.dirty = true;
             return r;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
         case SDLK_SPACE:
+            focusVisible_ = true;
             return ActivateWidget(focus_.FocusedId());
         case SDLK_ESCAPE:
-            if (detailOpen_) {
-                CloseDetail();
-                r.dirty = true;
-            } else {
-                r.requestClose = true;
-            }
+            r.requestClose = true;
             return r;
         default:
             return r;
@@ -260,110 +227,123 @@ void CollectionView::Render(
     const CollectionLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
     SyncFocusList(layout);
-    const std::string focusedId = focus_.FocusedId();
+    // El anillo de foco solo se muestra tras la primera navegación por
+    // teclado / click que enfoca (focus-visible).
+    const std::string focusedId = focusVisible_ ? focus_.FocusedId() : std::string();
 
     painter.Clear(theme::kBackground);
 
     // --- Cabecera (sin recorte de scroll) ---
-    const float titleBaseline = layout.titleAnchor.y + 17.0f;
+    const float titleBaseline = layout.titleAnchor.y + 18.0f;
     DrawText(painter, text, "Nimvlets", type::kTitle, TextWeight::kSemibold, theme::kText,
              layout.titleAnchor.x, titleBaseline, HAlign::kLeft);
-    DrawText(painter, text, FormatClickCount(clickBalance_), type::kClicks, TextWeight::kRegular,
+    DrawText(painter, text, FormatClickCount(clickBalance_, language_), type::kClicks, TextWeight::kRegular,
              theme::kTextMuted, layout.clicksAnchorRight.x, titleBaseline, HAlign::kRight);
-    DrawText(painter, text, "Collection", type::kSectionLabel, TextWeight::kMedium, theme::kTextFaint,
-             layout.sectionLabelAnchor.x, layout.sectionLabelAnchor.y + 12.0f, HAlign::kLeft);
+    DrawText(painter, text, core::Localized(core::StringKey::kCollection, language_), type::kSectionTitle,
+             TextWeight::kSemibold, theme::kText, layout.sectionTitleAnchor.x,
+             layout.sectionTitleAnchor.y + 12.0f, HAlign::kLeft);
+    DrawText(painter, text, core::Localized(core::StringKey::kYourCompanions, language_), type::kSectionSub,
+             TextWeight::kRegular, theme::kTextFaint, layout.sectionSubtitleAnchor.x,
+             layout.sectionSubtitleAnchor.y + 12.0f, HAlign::kLeft);
 
-    // --- Cuerpo scrolleable ---
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
-    for (std::size_t i = 0; i < layout.items.size() && i < model_.items.size(); ++i) {
-        const CollectionItemBox& box = layout.items[i];
-        const CollectionItem& item = model_.items[i];
-        const bool selected = detailOpen_ && detailPetId_ == box.petId;
-        const bool hovered = hoverId_ == box.focusId;
-
-        if (selected) {
-            painter.FillRoundRect(box.cell.Inset(2.0f), 12.0f, theme::kSelectedWash);
-        } else if (hovered) {
-            painter.FillRoundRect(box.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
-        }
-        if (focusedId == box.focusId) {
-            painter.StrokeRoundRect(box.cell.Inset(2.0f), 12.0f, 2.0f, theme::kAccent);
-        }
-
-        if (item.status != OwnershipStatus::kLocked) {
-            painter.FillRoundRect(box.art.Inset(-6.0f), 14.0f, theme::kArtBed);
-            SDL_Texture* art = previews.Peek(box.petId, item.selectedVariantId);
-            if (art == nullptr) {
-                art = previews.Acquire(catalog, box.petId, item.selectedVariantId);
-            }
-            painter.DrawTextureContained(art, box.art, 255);
+    // --- Hero ---
+    const CollectionHero& h = layout.hero;
+    if (!h.petId.empty()) {
+        const UiColor shapeCol = h.accent.shapeTint.WithAlpha(kHeroShapeAlpha);
+        if (h.accent.angularShape) {
+            painter.FillRoundRect(h.shape, 34.0f, shapeCol);
         } else {
-            // Locked: sin arte (block brief §8/§9), pero una caja MUY
-            // tenue mantiene el ritmo de las tres columnas.
-            painter.FillRoundRect(box.art.Inset(-6.0f), 14.0f, theme::kArtBed.WithAlpha(90));
+            painter.FillEllipse(h.shape, shapeCol);
         }
 
-        DrawText(painter, text, item.displayName, type::kPetName, TextWeight::kMedium, theme::kText,
-                 box.name.CenterX(), box.name.y + 14.0f, HAlign::kCenter,
-                 static_cast<int>(box.cell.w - 8.0f));
+        const std::string variant = h.selectedVariantId;
+        SDL_Texture* art = previews.Peek(h.petId, variant);
+        if (art == nullptr) {
+            art = previews.Acquire(catalog, h.petId, variant);
+        }
+        const unsigned char artAlpha = h.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255;
+        painter.DrawTextureContained(art, h.art, artAlpha);
 
-        const std::string sub = GridSubLabel(item);
-        const UiColor subColor = item.status == OwnershipStatus::kLocked
-                                     ? theme::kTextFaint
-                                     : (item.status == OwnershipStatus::kOwnedInactive && !item.HasVariants()
-                                            ? theme::kAccent
-                                            : theme::kTextMuted);
-        DrawText(painter, text, sub, type::kStatus, TextWeight::kRegular, subColor, box.status_.CenterX(),
-                 box.status_.y + 12.0f, HAlign::kCenter, static_cast<int>(box.cell.w - 8.0f));
-    }
+        DrawText(painter, text, h.displayName, type::kHeroName, TextWeight::kSemibold, theme::kText,
+                 h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
+        if (!h.speciesText.empty()) {
+            DrawText(painter, text, h.speciesText, type::kHeroMeta, TextWeight::kRegular, theme::kTextMuted,
+                     h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
+        }
+        DrawText(painter, text, h.statusText, type::kHeroMeta, TextWeight::kMedium,
+                 StatusColor(h.status, h.accent.line), h.statusAnchor.x, h.statusAnchor.y + 12.0f,
+                 HAlign::kLeft);
 
-    // --- Panel de detalle ---
-    if (layout.detail.open) {
-        const CollectionDetail& d = layout.detail;
-        painter.FillRect(UiRect{d.panel.x, d.panel.y - 18.0f, d.panel.w, 1.0f}, theme::kHairline);
-
-        if (d.status != OwnershipStatus::kLocked) {
-            painter.FillRoundRect(d.art.Inset(-8.0f), 16.0f, theme::kArtBed);
-            const std::string variant = ResolvedDetailVariant();
-            SDL_Texture* art = previews.Peek(d.petId, variant);
-            if (art == nullptr) {
-                art = previews.Acquire(catalog, d.petId, variant);
+        // Selector de variante tipográfico: "Male · Female" con
+        // subrayado de acento bajo la seleccionada (brief §13).
+        for (std::size_t i = 0; i < h.variants.size(); ++i) {
+            const HeroVariantChip& chip = h.variants[i];
+            if (i > 0) {
+                const float dotX = 0.5f * (h.variants[i - 1].rect.Right() + chip.rect.x);
+                DrawText(painter, text, "·", type::kHeroVariant, TextWeight::kRegular, theme::kTextFaint,
+                         dotX, chip.rect.CenterY() + 5.0f, HAlign::kCenter);
             }
-            painter.DrawTextureContained(art, d.art, 255);
-        }
-
-        DrawText(painter, text, d.displayName, type::kDetailName, TextWeight::kSemibold, theme::kText,
-                 d.nameAnchor.x, d.nameAnchor.y + 20.0f, HAlign::kLeft);
-
-        for (const VariantChip& chip : d.variants) {
+            DrawText(painter, text, chip.label, type::kHeroVariant,
+                     chip.selected ? TextWeight::kSemibold : TextWeight::kRegular,
+                     chip.selected ? theme::kText : theme::kTextMuted, chip.rect.CenterX(),
+                     chip.rect.CenterY() + 5.0f, HAlign::kCenter);
             if (chip.selected) {
-                painter.FillRoundRect(chip.rect, 9.0f, theme::kAccentSoft);
-                painter.StrokeRoundRect(chip.rect, 9.0f, 1.5f, theme::kAccent);
-            } else {
-                painter.StrokeRoundRect(chip.rect, 9.0f, 1.0f, theme::kHairline);
+                painter.FillRect(chip.underline, h.accent.line);
             }
             if (focusedId == chip.focusId) {
-                painter.StrokeRoundRect(chip.rect.Inset(-3.0f), 12.0f, 2.0f, theme::kAccent);
+                painter.StrokeRoundRect(chip.rect.Inset(-3.0f), 8.0f, 2.0f, h.accent.line);
             }
-            DrawText(painter, text, chip.label, type::kChip, TextWeight::kMedium,
-                     chip.selected ? theme::kText : theme::kTextMuted, chip.rect.CenterX(),
-                     chip.rect.CenterY() + 4.5f, HAlign::kCenter);
         }
 
-        if (d.actionEnabled) {
-            painter.FillRoundRect(d.actionButton, 9.0f, theme::kButtonFill);
-            if (focusedId == d.actionFocusId) {
-                painter.StrokeRoundRect(d.actionButton.Inset(-3.0f), 12.0f, 2.0f, theme::kAccent);
+        // Botón de acción.
+        if (h.actionEnabled) {
+            painter.FillRoundRect(h.actionButton, 9.0f, theme::kButtonFill);
+            if (focusedId == h.actionFocusId) {
+                painter.StrokeRoundRect(h.actionButton.Inset(-3.0f), 12.0f, 2.0f, h.accent.line);
             }
-            DrawText(painter, text, d.actionLabel, type::kButton, TextWeight::kSemibold, theme::kButtonText,
-                     d.actionButton.CenterX(), d.actionButton.CenterY() + 4.5f, HAlign::kCenter);
+            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, theme::kButtonText,
+                     h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter);
         } else {
-            painter.StrokeRoundRect(d.actionButton, 9.0f, 1.0f, theme::kHairline);
-            DrawText(painter, text, d.actionLabel, type::kButton, TextWeight::kMedium, theme::kTextMuted,
-                     d.actionButton.CenterX(), d.actionButton.CenterY() + 4.5f, HAlign::kCenter,
-                     static_cast<int>(d.actionButton.w - 6.0f));
+            painter.StrokeRoundRect(h.actionButton, 9.0f, 1.0f, theme::kHairline);
+            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kMedium, theme::kTextMuted,
+                     h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter,
+                     static_cast<int>(h.actionButton.w - 6.0f));
         }
+    }
+
+    // --- Divisor ---
+    painter.FillRect(layout.dividerRect, theme::kHairline);
+
+    // --- Gallery ---
+    for (const GalleryItem& g : layout.gallery) {
+        const bool hovered = hoverId_ == g.focusId;
+        const bool focused = focusedId == g.focusId;
+        if (hovered) {
+            painter.FillRoundRect(g.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
+        }
+        if (focused) {
+            painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, g.accentLine);
+        }
+
+        painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f,
+                              g.status == OwnershipStatus::kLocked ? theme::kArtBed.WithAlpha(120)
+                                                                  : theme::kArtBed);
+        SDL_Texture* art = previews.Peek(g.petId, g.previewVariantId);
+        if (art == nullptr) {
+            art = previews.Acquire(catalog, g.petId, g.previewVariantId);
+        }
+        painter.DrawTextureContained(
+            art, g.art, g.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255);
+
+        const bool emphasize = hovered || focused;
+        DrawText(painter, text, g.displayName, type::kGalleryName, TextWeight::kMedium,
+                 emphasize ? theme::kText : theme::kText, g.name.CenterX(), g.name.y + 13.0f,
+                 HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
+        DrawText(painter, text, g.statusText, type::kGalleryStatus, TextWeight::kRegular,
+                 StatusColor(g.status, g.accentLine), g.status_.CenterX(), g.status_.y + 11.0f,
+                 HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
     }
 
     painter.PopClip();

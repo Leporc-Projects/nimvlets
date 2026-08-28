@@ -79,8 +79,9 @@ class ProductWindow {
     // y no-op si no hay nada que hacer.
     void RenderIfNeeded();
 
-    // Solo-DEV: abre el detalle de `petId` (para QA / capturas).
-    void OpenDetailForQA(const std::string& petId) { view_.OpenDetailForQA(petId); }
+    // Solo-DEV (QA / capturas): elige el hero / su variante sin click.
+    void SelectHeroForQA(const std::string& petId) { view_.SelectHeroForQA(petId); }
+    void SetHeroVariantForQA(const std::string& variantId) { view_.SetHeroVariantForQA(variantId); }
 
  private:
     void RecomputeScale();

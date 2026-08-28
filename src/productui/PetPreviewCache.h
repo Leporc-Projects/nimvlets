@@ -15,17 +15,17 @@ namespace nimvlets::productui {
 // frame 0 de la pose base del primer estado, en dirección canónica.
 //
 // El pet ACTIVO se inyecta desde src/app (SetActive) — su pack ya está
-// en memoria, no se recarga. Un pet poseído-INACTIVO se carga
-// perezosamente la primera vez que se dibuja su entrada (Acquire): se
-// abre su pack, se copia el frame 0, y el PetDefinition se descarta de
-// inmediato — solo queda la textura chica. Los pets LOCKED no tienen
-// preview (block brief §8/§9: se muestran con nombre + estado, sin
-// arte).
+// en memoria, no se recarga. Cualquier OTRO pet visible (poseído-
+// inactivo o, desde Block 06.1, también LOCKED — que ahora muestra su
+// arte más callada, brief §12) se carga perezosamente la primera vez
+// que se dibuja su entrada (Acquire): se abre su pack, se copia el
+// frame 0, y el PetDefinition se descarta de inmediato — solo queda la
+// textura chica.
 //
-// Costo: una carga de pack (~decenas de MB, transitoria) por pet
-// poseído-inactivo, pagada una sola vez mientras la Collection está
+// Costo: una carga de pack (~decenas de MB, transitoria) por pet no
+// activo visible, pagada una sola vez mientras la Collection está
 // abierta. Clear() libera todas las texturas al cerrar la ventana. Ver
-// docs/PRODUCT_UI.md §8 (modelo de performance).
+// docs/PRODUCT_UI.md §11 (modelo de performance).
 class PetPreviewCache {
  public:
     explicit PetPreviewCache(SDL_Renderer* renderer) : renderer_(renderer) {}

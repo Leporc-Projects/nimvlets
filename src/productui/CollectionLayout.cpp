@@ -3,40 +3,55 @@
 #include <algorithm>
 #include <cctype>
 
+#include "productui/PetEditorial.h"
+
 namespace nimvlets::productui {
 
 using catalog::CollectionItem;
 using catalog::CollectionModel;
+using catalog::CollectionVariant;
 using catalog::OwnershipStatus;
+using core::Language;
+using core::Localized;
+using core::StringKey;
 
 namespace {
 
-// Métricas en PUNTOS lógicos. Deliberadamente sobrias (block brief §3):
-// márgenes amplios, jerarquía chica, sin cards fuertes.
-constexpr float kMargin = 36.0f;
+// Métricas en PUNTOS lógicos. Composición hero + gallery de Block 06.1
+// (§7): jerarquía por tamaño/espacio, no por más contenedores.
+constexpr float kMargin = 40.0f;
 constexpr float kTitleTop = 30.0f;
 constexpr float kTitleH = 24.0f;
-constexpr float kSectionLabelTop = 74.0f;
-constexpr float kSectionLabelH = 16.0f;
-constexpr float kGridTop = 100.0f;
-constexpr int kMaxCols = 3;
-constexpr float kArtMax = 140.0f;
-constexpr float kNameH = 18.0f;
-constexpr float kStatusH = 15.0f;
-constexpr float kArtToName = 12.0f;
-constexpr float kNameToStatus = 5.0f;
-constexpr float kRowGap = 20.0f;
+constexpr float kSectionTitleTop = 70.0f;
+constexpr float kSectionSubtitleTop = 90.0f;
+constexpr float kLabelH = 16.0f;
 
-constexpr float kDetailTopGap = 20.0f;
-constexpr float kDetailArt = 150.0f;
-constexpr float kDetailNameH = 24.0f;
-constexpr float kChipW = 74.0f;
-constexpr float kChipH = 30.0f;
-constexpr float kChipGap = 10.0f;
-constexpr float kButtonH = 34.0f;
-constexpr float kButtonPadX = 22.0f;
-// Ancho aproximado por carácter para dimensionar el botón sin medir
-// texto real acá (la vista lo puede ajustar; alcanza para el hit-test).
+constexpr float kHeroTop = 120.0f;
+constexpr float kHeroArt = 210.0f;
+constexpr float kHeroTextGap = 34.0f;   // arte -> bloque de texto
+constexpr float kHeroNameH = 30.0f;
+constexpr float kHeroSpeciesTop = 40.0f;  // desde el tope del bloque de texto
+constexpr float kHeroStatusTop = 62.0f;
+constexpr float kHeroChipsTop = 100.0f;
+constexpr float kHeroChipH = 26.0f;
+constexpr float kHeroChipPadX = 10.0f;
+constexpr float kHeroChipGap = 22.0f;    // incluye el "·" separador
+constexpr float kHeroButtonH = 36.0f;
+constexpr float kHeroButtonPadX = 22.0f;
+constexpr float kHeroButtonTopWithChips = 150.0f;
+constexpr float kHeroButtonTopNoChips = 100.0f;
+
+constexpr float kDividerGap = 26.0f;
+constexpr float kGalleryGap = 22.0f;
+constexpr float kGalleryArt = 84.0f;
+constexpr float kGalleryNameH = 17.0f;
+constexpr float kGalleryStatusH = 14.0f;
+constexpr float kGalleryArtToName = 12.0f;
+constexpr float kGalleryNameToStatus = 4.0f;
+constexpr float kHoverLift = 2.0f;  // micro-lift instantáneo (brief §11)
+
+// Ancho aproximado por carácter para dimensionar botón/chip sin medir
+// texto real acá — la vista lo ajusta; alcanza para el hit-test.
 constexpr float kApproxCharW = 8.0f;
 
 std::string Capitalize(const std::string& s) {
@@ -48,184 +63,220 @@ std::string Capitalize(const std::string& s) {
     return out;
 }
 
+// Etiqueta localizada de una variante. "male"/"female" -> Male/Female o
+// Macho/Hembra; cualquier otra -> Capitalize del id (defensivo).
+std::string VariantLabel(const std::string& variantId, Language lang) {
+    if (variantId == "male") {
+        return Localized(StringKey::kMale, lang);
+    }
+    if (variantId == "female") {
+        return Localized(StringKey::kFemale, lang);
+    }
+    return Capitalize(variantId);
+}
+
+// Resuelve qué variante mostrar: la pedida si es válida, si no la del
+// item.
+std::string ResolveVariant(const CollectionItem& item, const std::string& requested) {
+    const bool valid = std::any_of(item.variants.begin(), item.variants.end(),
+                                   [&](const CollectionVariant& v) { return v.variantId == requested; });
+    return valid ? requested : item.selectedVariantId;
+}
+
 }  // namespace
 
-const char* StatusShortLabel(OwnershipStatus status) {
+const char* StatusText(OwnershipStatus status, Language lang) {
     switch (status) {
         case OwnershipStatus::kActive:
-            return "On desktop";
+            return Localized(StringKey::kOnDesktop, lang);
         case OwnershipStatus::kOwnedInactive:
-            return "Use";
+            return Localized(StringKey::kUse, lang);
         case OwnershipStatus::kLocked:
-            return "Not in your collection";
+            return Localized(StringKey::kNotInCollection, lang);
     }
     return "";
 }
 
-const CollectionItemBox* CollectionLayout::FindItem(const std::string& petId) const {
-    for (const CollectionItemBox& box : items) {
-        if (box.petId == petId) {
-            return &box;
+const GalleryItem* CollectionLayout::FindGalleryItem(const std::string& petId) const {
+    for (const GalleryItem& g : gallery) {
+        if (g.petId == petId) {
+            return &g;
         }
     }
     return nullptr;
 }
 
 std::string CollectionLayout::HitTest(float x, float y) const {
-    if (detail.open) {
-        for (const VariantChip& chip : detail.variants) {
-            if (chip.rect.Contains(x, y)) {
-                return chip.focusId;
-            }
-        }
-        if (detail.actionEnabled && detail.actionButton.Contains(x, y)) {
-            return detail.actionFocusId;
+    for (const HeroVariantChip& chip : hero.variants) {
+        if (chip.rect.Contains(x, y)) {
+            return chip.focusId;
         }
     }
-    for (const CollectionItemBox& box : items) {
-        if (box.cell.Contains(x, y)) {
-            return box.focusId;
+    if (hero.actionEnabled && hero.actionButton.Contains(x, y)) {
+        return hero.actionFocusId;
+    }
+    for (const GalleryItem& g : gallery) {
+        if (g.cell.Contains(x, y)) {
+            return g.focusId;
         }
     }
     return "";
 }
 
 float ClampScroll(float scrollY, float contentHeight, float viewportH) {
-    const float maxScroll = std::max(0.0f, contentHeight - viewportH);
-    return std::clamp(scrollY, 0.0f, maxScroll);
+    return std::clamp(scrollY, 0.0f, std::max(0.0f, contentHeight - viewportH));
 }
 
 CollectionLayout BuildCollectionLayout(const CollectionModel& model, const CollectionLayoutInput& in) {
+    const Language lang = in.language;
+    const float sy = in.scrollY;
+
     CollectionLayout out;
     out.viewport = UiRect{0.0f, 0.0f, in.viewportW, in.viewportH};
-
-    const float sy = in.scrollY;
-    const float contentW = std::max(120.0f, in.viewportW - 2.0f * kMargin);
+    const float contentW = std::max(160.0f, in.viewportW - 2.0f * kMargin);
 
     out.titleAnchor = UiRect{kMargin, kTitleTop - sy, contentW, kTitleH};
     out.clicksAnchorRight = UiRect{in.viewportW - kMargin, kTitleTop - sy, 0.0f, kTitleH};
-    out.sectionLabelAnchor = UiRect{kMargin, kSectionLabelTop - sy, contentW, kSectionLabelH};
+    out.sectionTitleAnchor = UiRect{kMargin, kSectionTitleTop - sy, contentW, kLabelH};
+    out.sectionSubtitleAnchor = UiRect{kMargin, kSectionSubtitleTop - sy, contentW, kLabelH};
 
-    const int count = static_cast<int>(model.items.size());
-    const int cols = std::max(1, std::min(kMaxCols, count));
-    const float colW = contentW / static_cast<float>(cols);
-    const float art = std::min(kArtMax, colW - 22.0f);
-    const float rowH = art + kArtToName + kNameH + kNameToStatus + kStatusH + kRowGap;
-
-    float lastRowBottom = kGridTop - sy;
-    for (int i = 0; i < count; ++i) {
-        const CollectionItem& item = model.items[static_cast<std::size_t>(i)];
-        const int row = i / cols;
-        const int col = i % cols;
-
-        CollectionItemBox box;
-        box.petId = item.petId;
-        box.displayName = item.displayName;
-        box.status = item.status;
-        box.hasVariants = item.HasVariants();
-        box.focusId = "item:" + item.petId;
-
-        const float colX = kMargin + static_cast<float>(col) * colW;
-        const float cellY = (kGridTop - sy) + static_cast<float>(row) * rowH;
-
-        // La "celda" (fondo de hover/selección/foco) abraza el contenido
-        // — arte + nombre + estado — con un poco de aire, NO toda la
-        // columna (block brief §8: sin cards fuertes alrededor de cada
-        // pet).
-        const float cellW = std::min(colW - 12.0f, art + 40.0f);
-        const float cellX = colX + (colW - cellW) * 0.5f;
-        const float cellH = art + kArtToName + kNameH + kNameToStatus + kStatusH + 16.0f;
-        box.cell = UiRect{cellX, cellY - 10.0f, cellW, cellH};
-
-        box.art = UiRect{colX + (colW - art) * 0.5f, cellY, art, art};
-        box.name = UiRect{colX, box.art.Bottom() + kArtToName, colW, kNameH};
-        box.status_ = UiRect{colX, box.name.Bottom() + kNameToStatus, colW, kStatusH};
-
-        lastRowBottom = std::max(lastRowBottom, box.status_.Bottom());
-        out.items.push_back(box);
-        out.focusOrder.push_back(box.focusId);
+    if (model.items.empty()) {
+        out.contentHeight = kHeroTop;
+        return out;
     }
 
-    float bottom = lastRowBottom + kRowGap;
+    // --- Resolver el hero ---
+    std::string heroPetId = in.selectedPetId;
+    if (model.Find(heroPetId) == nullptr) {
+        heroPetId = model.activePetId;
+        if (model.Find(heroPetId) == nullptr) {
+            heroPetId = model.items.front().petId;
+        }
+    }
+    const CollectionItem& heroItem = *model.Find(heroPetId);
 
-    // --- Panel de detalle ---
-    if (in.detailOpen) {
-        const CollectionItem* item = model.Find(in.detailPetId);
-        if (item != nullptr) {
-            CollectionDetail& d = out.detail;
-            d.open = true;
-            d.petId = item->petId;
-            d.displayName = item->displayName;
-            d.status = item->status;
+    CollectionHero& h = out.hero;
+    h.petId = heroItem.petId;
+    h.displayName = heroItem.displayName;
+    h.speciesText = ProvisionalSpecies(heroItem.petId, lang);
+    h.status = heroItem.status;
+    h.statusText = StatusText(heroItem.status, lang);
+    h.accent = PetAccentFor(heroItem.petId);
 
-            const float panelY = bottom + kDetailTopGap;
-            d.panel = UiRect{kMargin, panelY, contentW, kDetailArt + 8.0f};
-            d.art = UiRect{kMargin, panelY, kDetailArt, kDetailArt};
+    const float heroTop = kHeroTop - sy;
+    h.art = UiRect{kMargin, heroTop, kHeroArt, kHeroArt};
+    // Forma de fondo: un poco más grande que el arte y descentrada
+    // (orgánico, no concéntrico — brief §10). La vista elige óvalo vs
+    // round-rect según h.accent.angularShape y la dibuja a alpha bajo.
+    h.shape = UiRect{h.art.x - 14.0f, h.art.y + 4.0f, h.art.w + 34.0f, h.art.h + 12.0f};
 
-            // Un pet locked no muestra arte (block brief §9), así que el
-            // texto arranca en el borde del panel, no después de una
-            // columna de arte vacía.
-            const bool hasArt = item->status != OwnershipStatus::kLocked;
-            const float rightX = hasArt ? d.art.Right() + 30.0f : kMargin;
-            const float rightW = std::max(120.0f, kMargin + contentW - rightX);
-            d.nameAnchor = UiRect{rightX, panelY + 2.0f, rightW, kDetailNameH};
+    const float textX = h.art.Right() + kHeroTextGap;
+    const float textW = std::max(140.0f, kMargin + contentW - textX);
+    h.nameAnchor = UiRect{textX, heroTop + 2.0f, textW, kHeroNameH};
+    h.speciesAnchor = UiRect{textX, heroTop + kHeroSpeciesTop, textW, kLabelH};
+    h.statusAnchor = UiRect{textX, heroTop + kHeroStatusTop, textW, kLabelH};
 
-            std::string selected = in.detailSelectedVariantId;
-            const bool selectedValid =
-                std::any_of(item->variants.begin(), item->variants.end(),
-                            [&](const catalog::CollectionVariant& v) { return v.variantId == selected; });
-            if (!selectedValid) {
-                selected = item->selectedVariantId;
-            }
-            d.selectedVariantId = selected;
+    const std::string selectedVariant = ResolveVariant(heroItem, in.selectedVariantId);
+    h.selectedVariantId = selectedVariant;
 
-            float cursorY = d.nameAnchor.Bottom() + 14.0f;
-            if (item->HasVariants()) {
-                float chipX = rightX;
-                for (const catalog::CollectionVariant& v : item->variants) {
-                    VariantChip chip;
-                    chip.variantId = v.variantId;
-                    chip.label = Capitalize(v.variantId);
-                    chip.rect = UiRect{chipX, cursorY, kChipW, kChipH};
-                    chip.focusId = "variant:" + v.variantId;
-                    chip.selected = (v.variantId == selected);
-                    d.variants.push_back(chip);
-                    out.focusOrder.push_back(chip.focusId);
-                    chipX += kChipW + kChipGap;
-                }
-                cursorY += kChipH + 16.0f;
-            }
-
-            // Etiqueta y habilitación del botón de acción.
-            const bool activePet = item->status == OwnershipStatus::kActive;
-            const bool variantWouldChange =
-                item->HasVariants() && activePet && selected != model.activeVariantId;
-            if (item->status == OwnershipStatus::kLocked) {
-                d.actionLabel = "Not in your collection";
-                d.actionEnabled = false;
-            } else if (activePet && !variantWouldChange) {
-                d.actionLabel = "On desktop";
-                d.actionEnabled = false;
-            } else {
-                d.actionLabel = "Use " + item->displayName;
-                d.actionEnabled = true;
-            }
-            d.actionFocusId = "use";
-
-            const float buttonW =
-                kButtonPadX * 2.0f + static_cast<float>(d.actionLabel.size()) * kApproxCharW;
-            d.actionButton = UiRect{rightX, cursorY, buttonW, kButtonH};
-            if (d.actionEnabled) {
-                out.focusOrder.push_back(d.actionFocusId);
-            }
-
-            bottom = std::max(d.panel.Bottom(), d.actionButton.Bottom()) + kMargin;
+    if (heroItem.HasVariants()) {
+        float chipX = textX;
+        const float chipY = heroTop + kHeroChipsTop;
+        for (const CollectionVariant& v : heroItem.variants) {
+            HeroVariantChip chip;
+            chip.variantId = v.variantId;
+            chip.label = VariantLabel(v.variantId, lang);
+            const float w = kHeroChipPadX * 2.0f + static_cast<float>(chip.label.size()) * kApproxCharW;
+            chip.rect = UiRect{chipX, chipY, w, kHeroChipH};
+            chip.underline = UiRect{chipX + kHeroChipPadX, chip.rect.Bottom() - 3.0f,
+                                    w - 2.0f * kHeroChipPadX, 2.0f};
+            chip.focusId = "variant:" + v.variantId;
+            chip.selected = (v.variantId == selectedVariant);
+            h.variants.push_back(chip);
+            out.focusOrder.push_back(chip.focusId);
+            chipX += w + kHeroChipGap;
         }
     }
 
-    // contentHeight se calcula SIN el scroll ya aplicado: se re-suma sy
-    // porque `bottom` está en coordenadas ya desplazadas.
-    out.contentHeight = bottom + sy;
+    // Botón de acción.
+    const bool activePet = heroItem.status == OwnershipStatus::kActive;
+    const bool variantWouldChange =
+        heroItem.HasVariants() && activePet && selectedVariant != model.activeVariantId;
+    if (heroItem.status == OwnershipStatus::kLocked) {
+        h.actionLabel = Localized(StringKey::kNotInCollection, lang);
+        h.actionEnabled = false;
+    } else if (activePet && !variantWouldChange) {
+        h.actionLabel = Localized(StringKey::kOnDesktop, lang);
+        h.actionEnabled = false;
+    } else {
+        h.actionLabel = std::string(Localized(StringKey::kUsePetPrefix, lang)) + heroItem.displayName;
+        h.actionEnabled = true;
+    }
+    h.actionFocusId = "use";
+    const float buttonTop =
+        heroTop + (heroItem.HasVariants() ? kHeroButtonTopWithChips : kHeroButtonTopNoChips);
+    const float buttonW =
+        kHeroButtonPadX * 2.0f + static_cast<float>(h.actionLabel.size()) * kApproxCharW;
+    h.actionButton = UiRect{textX, buttonTop, buttonW, kHeroButtonH};
+    if (h.actionEnabled) {
+        out.focusOrder.push_back(h.actionFocusId);
+    }
+
+    const float heroBottom = std::max(h.art.Bottom(), h.actionButton.Bottom());
+    out.dividerRect = UiRect{kMargin, heroBottom + kDividerGap, contentW, 1.0f};
+
+    // --- Gallery: todos los pets MENOS el hero ---
+    std::vector<const CollectionItem*> galleryPets;
+    for (const CollectionItem& item : model.items) {
+        if (item.petId != heroPetId) {
+            galleryPets.push_back(&item);
+        }
+    }
+
+    const int count = static_cast<int>(galleryPets.size());
+    float galleryBottom = out.dividerRect.Bottom() + kGalleryGap;
+    if (count > 0) {
+        const int cols = std::min(count, 3);
+        const float colW = contentW / static_cast<float>(cols);
+        const float galleryTop = out.dividerRect.Bottom() + kGalleryGap;
+
+        for (int i = 0; i < count; ++i) {
+            const CollectionItem& item = *galleryPets[static_cast<std::size_t>(i)];
+            const int col = i % cols;
+            const int row = i / cols;
+            const float rowH = kGalleryArt + kGalleryArtToName + kGalleryNameH + kGalleryNameToStatus +
+                               kGalleryStatusH + 20.0f;
+
+            const float colX = kMargin + static_cast<float>(col) * colW;
+            const float lift = (item.petId == in.hoverPetId) ? kHoverLift : 0.0f;
+            const float baseY = galleryTop + static_cast<float>(row) * rowH - lift;
+
+            GalleryItem g;
+            g.petId = item.petId;
+            g.displayName = item.displayName;
+            g.status = item.status;
+            g.statusText = StatusText(item.status, lang);
+            g.previewVariantId = item.selectedVariantId;  // "" para un pet sin variantes
+            g.accentLine = PetAccentFor(item.petId).line;
+            g.hasVariants = item.HasVariants();
+            g.focusId = "item:" + item.petId;
+
+            const float artX = colX + (colW - kGalleryArt) * 0.5f;
+            g.art = UiRect{artX, baseY, kGalleryArt, kGalleryArt};
+            g.name = UiRect{colX, g.art.Bottom() + kGalleryArtToName, colW, kGalleryNameH};
+            g.status_ = UiRect{colX, g.name.Bottom() + kGalleryNameToStatus, colW, kGalleryStatusH};
+
+            const float cellW = std::min(colW - 10.0f, kGalleryArt + 44.0f);
+            g.cell = UiRect{colX + (colW - cellW) * 0.5f, baseY - 10.0f, cellW,
+                            (g.status_.Bottom() - baseY) + 18.0f};
+
+            galleryBottom = std::max(galleryBottom, g.status_.Bottom());
+            out.gallery.push_back(g);
+            out.focusOrder.push_back(g.focusId);
+        }
+    }
+
+    out.contentHeight = galleryBottom + kMargin + sy;
     return out;
 }
 

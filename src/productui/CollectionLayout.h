@@ -4,104 +4,120 @@
 #include <vector>
 
 #include "catalog/CollectionModel.h"
+#include "core/Localization.h"
+#include "productui/PetAccent.h"
+#include "productui/UiColor.h"
 #include "productui/UiGeometry.h"
 
 namespace nimvlets::productui {
 
-// Texto humano de estado bajo el arte (block brief §8): nunca badges
-// "ACTIVE"/"LOCKED".
-//   kActive        -> "On desktop"
-//   kOwnedInactive -> "Use"
-//   kLocked        -> "Not in your collection"
-const char* StatusShortLabel(catalog::OwnershipStatus status);
+// Texto humano de estado, localizado (block brief 06 §8 / 06.1 §11):
+// nunca badges "ACTIVE"/"LOCKED".
+//   kActive        -> "On desktop"    / "En el escritorio"
+//   kOwnedInactive -> "Use"           / "Usar"
+//   kLocked        -> "Not in your collection" / "No está en tu colección"
+const char* StatusText(catalog::OwnershipStatus status, core::Language lang);
 
-// Una entrada del grid de la colección (una fila lógica = un Nimvlet).
-struct CollectionItemBox {
+// --- Gallery (los Nimvlets NO seleccionados) --------------------------
+
+struct GalleryItem {
     std::string petId;
-    std::string displayName;
+    std::string displayName;  // nombre propio — nunca traducido
     catalog::OwnershipStatus status = catalog::OwnershipStatus::kLocked;
+    std::string statusText;   // localizado
+    std::string previewVariantId;  // variante a usar para la preview (Frin: "male"/"female"; resto: "")
+    UiColor accentLine;       // tono de identidad del pet (para el foco)
     bool hasVariants = false;
 
-    UiRect cell;    // toda la celda de la columna (para el wash de hover/foco)
-    UiRect art;     // caja del arte
-    UiRect name;    // ancla del nombre (texto centrado en x)
-    UiRect status_; // ancla del texto de estado (centrado en x)
+    UiRect cell;     // zona clickeable + wash de hover/foco
+    UiRect art;      // caja del arte (chica)
+    UiRect name;     // ancla del nombre (centrada en x)
+    UiRect status_;  // ancla del estado (centrada en x)
 
     std::string focusId;  // "item:<petId>"
 };
 
-// Un chip de variante en el panel de detalle (solo Frin hoy).
-struct VariantChip {
+// --- Hero (el Nimvlet seleccionado, protagonista de la pantalla) -----
+
+struct HeroVariantChip {
     std::string variantId;
-    std::string label;  // "Male" / "Female"
-    UiRect rect;
+    std::string label;    // localizado: Male/Female o Macho/Hembra
+    UiRect rect;          // zona clickeable (texto + un poco de aire)
+    UiRect underline;     // línea de acento de 2pt bajo el chip seleccionado
     std::string focusId;  // "variant:<variantId>"
     bool selected = false;
 };
 
-// El panel de detalle expandido (composición, no modal — block brief
-// §10). `open` false => el resto de los campos no tienen sentido.
-struct CollectionDetail {
-    bool open = false;
+struct CollectionHero {
     std::string petId;
-    std::string displayName;
+    std::string displayName;  // nombre propio — nunca traducido
+    std::string speciesText;  // etiqueta de especie PROVISIONAL, puede ser ""
     catalog::OwnershipStatus status = catalog::OwnershipStatus::kLocked;
+    std::string statusText;   // localizado
+    PetAccent accent;
 
-    UiRect panel;
-    UiRect art;
-    UiRect nameAnchor;
+    UiRect shape;         // forma orgánica muy tenue detrás del arte
+    UiRect art;           // caja del arte grande
+    UiRect nameAnchor;    // ancla IZQUIERDA del nombre
+    UiRect speciesAnchor;
+    UiRect statusAnchor;
 
-    std::vector<VariantChip> variants;  // vacío si el pet no tiene variantes
+    std::vector<HeroVariantChip> variants;  // vacío si el pet no tiene variantes
     std::string selectedVariantId;
 
     UiRect actionButton;
-    std::string actionLabel;      // "Use Nidir" / "On desktop" / "Not in your collection"
-    bool actionEnabled = false;   // false para el pet activo y para locked
-    std::string actionFocusId;    // "use" (solo presente en focusOrder si actionEnabled)
+    std::string actionLabel;    // localizado: "Use Frin" / "On desktop" / "Not in your collection"
+    bool actionEnabled = false; // false para el pet activo y para locked (sin compra — brief §12)
+    std::string actionFocusId;  // "use" (solo en focusOrder si actionEnabled)
 };
 
 struct CollectionLayout {
     UiRect viewport;
 
-    UiRect titleAnchor;         // "Nimvlets" (izquierda)
-    UiRect clicksAnchorRight;   // borde DERECHO donde termina "1 248 clicks"
-    UiRect sectionLabelAnchor;  // "Collection"
+    UiRect titleAnchor;            // "Nimvlets" (izquierda) — marca, no traducida
+    UiRect clicksAnchorRight;      // borde DERECHO del "1 248 clicks" / "1 248 clics"
+    UiRect sectionTitleAnchor;     // "Collection" / "Colección"
+    UiRect sectionSubtitleAnchor;  // "Your companions" / "Tus compañeros"
+    UiRect dividerRect;            // hairline entre el hero y la gallery
 
-    std::vector<CollectionItemBox> items;
-    CollectionDetail detail;
+    CollectionHero hero;
+    std::vector<GalleryItem> gallery;
 
-    // Orden de tabulación: "item:<petId>" en orden de grid, luego los
-    // "variant:<id>" y "use" del detalle si está abierto (y "use" solo
-    // si actionEnabled).
+    // Orden de tabulación: chips de variante del hero, luego "use" (si
+    // habilitado), luego "item:<petId>" por cada entrada de la gallery.
     std::vector<std::string> focusOrder;
 
-    // Alto total del contenido (para acotar el scroll). El layout ya
-    // viene con `scrollY` aplicado a las coordenadas y.
-    float contentHeight = 0.0f;
+    float contentHeight = 0.0f;  // ya con `scrollY` aplicado a las coordenadas
 
-    const CollectionItemBox* FindItem(const std::string& petId) const;
+    const GalleryItem* FindGalleryItem(const std::string& petId) const;
 
     // focusId del widget accionable en (x, y) en coordenadas de
-    // viewport, o "" si no hay ninguno. Cubre items del grid, chips de
-    // variante y el botón de acción.
+    // viewport, o "" si no hay ninguno.
     std::string HitTest(float x, float y) const;
 };
 
 struct CollectionLayoutInput {
-    float viewportW = 760.0f;
-    float viewportH = 540.0f;
+    float viewportW = 800.0f;
+    float viewportH = 560.0f;
     float scrollY = 0.0f;
+    core::Language language = core::Language::kEn;
 
-    bool detailOpen = false;
-    std::string detailPetId;
-    // "" => usar la variante por defecto del item (CollectionItem::
-    // selectedVariantId).
-    std::string detailSelectedVariantId;
+    // "" => el hero es el pet ACTIVO del modelo.
+    std::string selectedPetId;
+    // "" => variante por defecto del item seleccionado.
+    std::string selectedVariantId;
+
+    // petId de la entrada de gallery bajo el mouse — se dibuja con un
+    // micro-lift de 2pt (instantáneo, sin timer — ver
+    // docs/PRODUCT_UI.md §11). "" => ninguna.
+    std::string hoverPetId;
 };
 
-// Construye el layout completo. Puro y determinista: mismas entradas ->
-// mismo resultado, sin SDL, sin medición de texto real (los anclas de
-// texto son puntos de referencia; la vista mide y dibuja).
+// Construye el layout hero + gallery completo. Puro y determinista:
+// mismas entradas -> mismo resultado, sin SDL, sin medición de texto
+// real (los anclas de texto son puntos de referencia; la vista mide y
+// dibuja). TODO el texto traducible ya viene localizado según
+// `in.language`.
 CollectionLayout BuildCollectionLayout(const catalog::CollectionModel& model, const CollectionLayoutInput& in);
 
 // Acota `scrollY` a [0, max(0, contentHeight - viewportH)].

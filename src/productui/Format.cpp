@@ -15,8 +15,9 @@ std::string FormatGroupedNumber(std::uint64_t value) {
     return out;
 }
 
-std::string FormatClickCount(std::uint64_t clicks) {
-    return FormatGroupedNumber(clicks) + (clicks == 1 ? " click" : " clicks");
+std::string FormatClickCount(std::uint64_t clicks, core::Language lang) {
+    const core::StringKey word = clicks == 1 ? core::StringKey::kClickSingular : core::StringKey::kClickPlural;
+    return FormatGroupedNumber(clicks) + " " + core::Localized(word, lang);
 }
 
 }  // namespace nimvlets::productui
