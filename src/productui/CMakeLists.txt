@@ -14,10 +14,15 @@
 
 add_library(nimvlets_productui_core STATIC
   UiGeometry.h
+  UiColor.h
   FocusList.h
   FocusList.cpp
   Format.h
   Format.cpp
+  PetAccent.h
+  PetAccent.cpp
+  PetEditorial.h
+  PetEditorial.cpp
   CollectionLayout.h
   CollectionLayout.cpp
 )

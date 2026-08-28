@@ -33,6 +33,11 @@ class UiPainter {
     // event-driven, y evita depender de SDL_RenderGeometry.
     void FillRoundRect(const UiRect& r, float radius, UiColor color);
 
+    // Elipse llena inscrita en `r` (spans horizontales, como
+    // FillRoundRect). Para la forma orgánica muy tenue detrás del arte
+    // del hero (Block 06.1 §10) — dibujada a alpha bajo.
+    void FillEllipse(const UiRect& r, UiColor color);
+
     // Solo el CONTORNO de un round-rect, `thickness` puntos de grosor
     // hacia adentro. No rellena el interior (a diferencia de un fill).
     // Para anillos de foco y chips sin seleccionar.

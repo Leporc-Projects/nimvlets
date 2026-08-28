@@ -1,24 +1,15 @@
 #pragma once
 
-#include <cstdint>
+#include "productui/UiColor.h"
 
 namespace nimvlets::productui {
 
-// Color RGBA straight-alpha (0-255). Puro, sin SDL.
-struct UiColor {
-    std::uint8_t r = 0;
-    std::uint8_t g = 0;
-    std::uint8_t b = 0;
-    std::uint8_t a = 255;
-
-    UiColor WithAlpha(std::uint8_t alpha) const { return UiColor{r, g, b, alpha}; }
-};
-
-// Paleta de Nimvlets Product UI — dirección visual ya decidida (block
-// brief §2/§3): blanco cálido, casi-negro (no negro puro), bordes
-// discretos, sin gradientes, sin glassmorphism, sin acentos azul/violeta
-// de "app de IA". El único acento es una terracota cálida, usada con
-// moderación (foco de teclado y la variante seleccionada).
+// Paleta base de Nimvlets Product UI — dirección visual ya decidida
+// (block brief 06 §2/§3): blanco cálido, casi-negro (no negro puro),
+// bordes discretos, sin gradientes, sin glassmorphism. El acento por
+// defecto es una terracota cálida; Block 06.1 agrega un acento SUTIL
+// por-pet encima (ver productui::PetAccent) para foco/selección/forma
+// del hero, nunca recoloreando toda la UI.
 namespace theme {
 
 constexpr UiColor kBackground{0xF6, 0xF3, 0xEE, 0xFF};   // blanco hueso cálido

@@ -78,6 +78,36 @@ void UiPainter::FillRoundRect(const UiRect& r, float radius, UiColor color) {
     }
 }
 
+void UiPainter::FillEllipse(const UiRect& r, UiColor color) {
+    if (color.a == 0 || r.w <= 0.0f || r.h <= 0.0f) {
+        return;
+    }
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SetColor(renderer_, color);
+
+    const float px = r.x * scale_;
+    const float py = r.y * scale_;
+    const float pw = r.w * scale_;
+    const float ph = r.h * scale_;
+    const float cx = px + pw * 0.5f;
+    const float ry = ph * 0.5f;
+    const float cyPix = py + ry;
+    const int rows = static_cast<int>(std::lround(ph));
+
+    for (int i = 0; i < rows; ++i) {
+        const float yc = py + static_cast<float>(i) + 0.5f;
+        const float t = (yc - cyPix) / ry;
+        if (t <= -1.0f || t >= 1.0f) {
+            continue;
+        }
+        const float halfSpan = (pw * 0.5f) * std::sqrt(std::max(0.0f, 1.0f - t * t));
+        const SDL_FRect span{cx - halfSpan, py + static_cast<float>(i), 2.0f * halfSpan, 1.0f};
+        if (span.w > 0.0f) {
+            SDL_RenderFillRect(renderer_, &span);
+        }
+    }
+}
+
 void UiPainter::StrokeRoundRect(const UiRect& r, float radius, float thickness, UiColor color) {
     if (color.a == 0 || r.w <= 0.0f || r.h <= 0.0f || thickness <= 0.0f) {
         return;

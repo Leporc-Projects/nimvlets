@@ -12,6 +12,7 @@
 #include "FocusListTest.h"
 #include "FormatTest.h"
 #include "LocalizationTest.h"
+#include "PetAccentTest.h"
 #include "QuickMenuModelTest.h"
 #include "DragClassifierTest.h"
 #include "FrameSchedulerTest.h"
@@ -58,6 +59,7 @@ int main() {
     nimvlets::tests::RegisterDirectionTests(runner);
     nimvlets::tests::RegisterDisplayControlsTests(runner);
     nimvlets::tests::RegisterLocalizationTests(runner);
+    nimvlets::tests::RegisterPetAccentTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);
 
     return runner.RunAll();
