@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 
@@ -11,21 +12,25 @@ struct SDL_Texture;
 
 namespace nimvlets::productui {
 
-// Texturas de vista previa del arte de un pet para la Collection: el
-// frame 0 de la pose base del primer estado, en dirección canónica.
+// Texturas de vista previa del arte de un pet para la Collection.
 //
-// El pet ACTIVO se inyecta desde src/app (SetActive) — su pack ya está
-// en memoria, no se recarga. Cualquier OTRO pet visible (poseído-
-// inactivo o, desde Block 06.1, también LOCKED — que ahora muestra su
-// arte más callada, brief §12) se carga perezosamente la primera vez
-// que se dibuja su entrada (Acquire): se abre su pack, se copia el
-// frame 0, y el PetDefinition se descarta de inmediato — solo queda la
-// textura chica.
+// Block 06.2 (§4-§7): la Collection ya NO abre ni parsea el pack de
+// animación completo de un pet (~46-76 MB c/u) para mostrar una preview
+// estática. Al abrir la ventana, LoadBundle() carga de una sola vez el
+// artefacto liviano ".nvprev" ("NVPREV1", ~0.3-0.4 MB c/u) de cada
+// entrada del catálogo — el frame de reposo canónico ya extraído por el
+// pipeline de assets (tools/compile_pet_preview.py). Total en memoria:
+// unos pocos MB de texturas chicas, no cientos.
 //
-// Costo: una carga de pack (~decenas de MB, transitoria) por pet no
-// activo visible, pagada una sola vez mientras la Collection está
-// abierta. Clear() libera todas las texturas al cerrar la ventana. Ver
-// docs/PRODUCT_UI.md §11 (modelo de performance).
+// El pet ACTIVO se inyecta además desde src/app (SetActive) con su frame
+// de reposo real a resolución completa — su pack ya está en RAM, así que
+// su preview es la más nítida posible sin ningún costo extra; sobre-
+// escribe la entrada del bundle para esa identidad.
+//
+// Cambiar de variante (Frin Macho <-> Hembra) o de hero es entonces un
+// lookup en un mapa sobre texturas ya residentes — sin I/O, sin parseo,
+// dentro del redraw event-driven normal. Clear() libera todo al cerrar
+// la ventana; sin hilos, sin carga perezosa de packs.
 class PetPreviewCache {
  public:
     explicit PetPreviewCache(SDL_Renderer* renderer) : renderer_(renderer) {}
@@ -34,27 +39,37 @@ class PetPreviewCache {
     PetPreviewCache(const PetPreviewCache&) = delete;
     PetPreviewCache& operator=(const PetPreviewCache&) = delete;
 
+    // Carga (eager, una sola vez al abrir la ventana) la preview liviana
+    // de cada entrada del catálogo, por la convención de nombres
+    // PreviewPathForPack(packPath). Una preview faltante/corrupta se
+    // registra y se saltea — su entrada simplemente no dibuja arte. Idem-
+    // potente: volver a llamar no recarga lo que ya está.
+    void LoadBundle(const catalog::PetCatalog& catalog);
+
     // Sube el frame de reposo del pet activo (pack ya cargado por
-    // src/app). Reemplaza cualquier entrada previa para esa identidad.
+    // src/app) a resolución completa. Reemplaza cualquier entrada previa
+    // para esa identidad (incluida la del bundle).
     void SetActive(const std::string& petId, const std::string& variantId, const content::FrameDefinition& frame);
 
-    // Devuelve la textura de preview para (petId, variantId), cargando
-    // el pack si hace falta. nullptr si el pack no se pudo abrir o no
-    // hay entrada en el catálogo. La textura la posee el cache.
-    SDL_Texture* Acquire(const catalog::PetCatalog& catalog, const std::string& petId, const std::string& variantId);
-
-    // Igual que Acquire pero SIN cargar nada: solo devuelve lo que ya
-    // esté cacheado (para dibujar sin bloquear en el primer frame).
-    SDL_Texture* Peek(const std::string& petId, const std::string& variantId) const;
+    // Textura de preview para (petId, variantId), o nullptr si no hay
+    // ninguna cargada. La textura la posee el cache — no destruirla.
+    SDL_Texture* Get(const std::string& petId, const std::string& variantId) const;
 
     void Clear();
 
+    // Solo para logging/diagnóstico (informe de performance del bloque).
+    std::size_t BundleImageCount() const { return bundleImageCount_; }
+    std::size_t BundleBytes() const { return bundleBytes_; }
+
  private:
     static std::string KeyOf(const std::string& petId, const std::string& variantId);
-    SDL_Texture* UploadFrame(const content::FrameDefinition& frame);
+    SDL_Texture* UploadRgba(int width, int height, const std::uint8_t* pixels, std::size_t byteCount);
 
     SDL_Renderer* renderer_ = nullptr;
     std::unordered_map<std::string, SDL_Texture*> textures_;
+    bool bundleLoaded_ = false;
+    std::size_t bundleImageCount_ = 0;
+    std::size_t bundleBytes_ = 0;
 };
 
 }  // namespace nimvlets::productui

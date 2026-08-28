@@ -219,8 +219,7 @@ CollectionViewResult CollectionView::OnViewportChanged() {
 }
 
 void CollectionView::Render(
-    UiPainter& painter, TextCache& text, PetPreviewCache& previews, const catalog::PetCatalog& catalog,
-    float viewportW, float viewportH) {
+    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH) {
     viewportW_ = viewportW;
     viewportH_ = viewportH;
 
@@ -259,10 +258,7 @@ void CollectionView::Render(
         }
 
         const std::string variant = h.selectedVariantId;
-        SDL_Texture* art = previews.Peek(h.petId, variant);
-        if (art == nullptr) {
-            art = previews.Acquire(catalog, h.petId, variant);
-        }
+        SDL_Texture* art = previews.Get(h.petId, variant);
         const unsigned char artAlpha = h.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255;
         painter.DrawTextureContained(art, h.art, artAlpha);
 
@@ -330,10 +326,7 @@ void CollectionView::Render(
         painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f,
                               g.status == OwnershipStatus::kLocked ? theme::kArtBed.WithAlpha(120)
                                                                   : theme::kArtBed);
-        SDL_Texture* art = previews.Peek(g.petId, g.previewVariantId);
-        if (art == nullptr) {
-            art = previews.Acquire(catalog, g.petId, g.previewVariantId);
-        }
+        SDL_Texture* art = previews.Get(g.petId, g.previewVariantId);
         painter.DrawTextureContained(
             art, g.art, g.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255);
 

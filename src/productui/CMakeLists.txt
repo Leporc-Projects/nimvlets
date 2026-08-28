@@ -23,6 +23,8 @@ add_library(nimvlets_productui_core STATIC
   PetAccent.cpp
   PetEditorial.h
   PetEditorial.cpp
+  PreviewArtifact.h
+  PreviewArtifact.cpp
   CollectionLayout.h
   CollectionLayout.cpp
 )
@@ -46,7 +48,9 @@ add_library(nimvlets_productui STATIC
 
 target_include_directories(nimvlets_productui PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
-# nimvlets_content: PetPreviewCache carga packs para las previews.
+# nimvlets_content: PetPreviewCache::SetActive recibe un
+# content::FrameDefinition (el frame de reposo del pet activo). Las
+# previews del resto salen del bundle liviano ".nvprev", sin abrir packs.
 # nimvlets_productui_core + nimvlets_catalog llegan por ahí también.
 # SDL3 es PUBLIC porque los headers exponen SDL_Renderer*/SDL_Event.
 target_link_libraries(nimvlets_productui

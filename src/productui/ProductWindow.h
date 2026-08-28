@@ -44,10 +44,10 @@ class ProductWindow {
 
     bool IsOpen() const { return window_ != nullptr; }
 
-    // Crea ventana + renderer + caches + vista. `catalog` debe seguir
-    // vivo mientras la ventana lo esté (se guarda por puntero para las
-    // cargas perezosas de preview). No-op si ya está abierta (solo la
-    // trae al frente).
+    // Crea ventana + renderer + caches + vista, y carga el bundle de
+    // previews livianas (".nvprev") de todas las entradas de `catalog`
+    // de una sola vez. `catalog` solo tiene que vivir durante esta
+    // llamada. No-op si ya está abierta (solo la trae al frente).
     bool Open(const catalog::PetCatalog& catalog);
 
     // Destruye todos los recursos. Seguro llamar aunque ya esté cerrada.
@@ -90,7 +90,6 @@ class ProductWindow {
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
-    const catalog::PetCatalog* catalog_ = nullptr;
 
     std::unique_ptr<TextCache> text_;
     std::unique_ptr<PetPreviewCache> previews_;

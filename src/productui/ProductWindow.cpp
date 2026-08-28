@@ -30,7 +30,6 @@ ProductWindow::~ProductWindow() {
 }
 
 bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
-    catalog_ = &catalog;
     if (window_ != nullptr) {
         FocusWindow();
         return true;
@@ -40,7 +39,6 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     window_ = SDL_CreateWindow("Nimvlets", kDefaultW, kDefaultH, flags);
     if (window_ == nullptr) {
         SDL_Log("nimvlets: ProductWindow: SDL_CreateWindow failed: %s", SDL_GetError());
-        catalog_ = &catalog;
         return false;
     }
     SDL_SetWindowMinimumSize(window_, kMinW, kMinH);
@@ -57,6 +55,10 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
 
     text_ = std::make_unique<TextCache>(renderer_);
     previews_ = std::make_unique<PetPreviewCache>(renderer_);
+    // Carga eager (una sola vez) los artefactos ".nvprev" livianos de
+    // todas las entradas del catálogo — unos pocos MB, sin abrir ningún
+    // pack de animación (Block 06.2 §4/§7).
+    previews_->LoadBundle(catalog);
     view_ = CollectionView{};
 
     RecomputeScale();
@@ -235,7 +237,7 @@ void ProductWindow::RenderIfNeeded() {
     SDL_GetWindowSize(window_, &logicalW, &logicalH);
 
     UiPainter painter(renderer_, scale_);
-    view_.Render(painter, *text_, *previews_, *catalog_, static_cast<float>(logicalW), static_cast<float>(logicalH));
+    view_.Render(painter, *text_, *previews_, static_cast<float>(logicalW), static_cast<float>(logicalH));
     view_.ClearDirty();
     SDL_RenderPresent(renderer_);
 }

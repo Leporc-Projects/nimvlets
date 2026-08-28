@@ -74,8 +74,7 @@ class CollectionView {
     }
 
     void Render(
-        UiPainter& painter, TextCache& text, PetPreviewCache& previews, const catalog::PetCatalog& catalog,
-        float viewportW, float viewportH);
+        UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH);
 
  private:
     CollectionLayout BuildLayout(float w, float h) const;
