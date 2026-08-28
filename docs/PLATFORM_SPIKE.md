@@ -653,3 +653,31 @@ hero por estado y del idioma se generaron con
 `NIMVLETS_DEV_LANGUAGE=<en|es>` (misma ruta de código que un click /
 una elección de menú reales); el `NSMenu` en español no se capturó por
 harness — verificación manual del owner.
+
+### 12.5 Adenda Block 06.2 (previews livianas, nitidez Retina, hero stage)
+
+Sin cambios de plataforma: 06.2 sigue siendo macOS-única, misma
+arquitectura; Windows/Linux compilan con stubs honestos. Novedades del
+adaptador macOS que el owner debería mirar en su máquina:
+
+17. **Cambio de variante Frin instantáneo**: con Frin como hero,
+    alternar Macho ⇆ Hembra ya NO tiene la pausa perceptible de 06.1
+    (antes abría un `.nvpack` de ~76 MB por cambio; ahora es un lookup
+    sobre una textura ya residente — ver DEC-119 y
+    `docs/PERFORMANCE_BUDGETS.md`).
+18. **Texto nítido en Retina**: el texto centrado del botón y de la
+    gallery ("Use Frin", nombres, estados) ya no se ve blando —
+    `GlyphBlitOrigin` acota el bitmap a píxel entero del dispositivo
+    (DEC-120). El check nativo `nimvlets_macos_text_check` verifica
+    además la relación de píxeles 1x vs 2x.
+19. **Hero stage con acento**: halo asimétrico teñido con el color del
+    pet alrededor del arte + la Collection en dos planos (gallery sobre
+    un neutro cálido más profundo). El botón "Use <pet>" ahora tiene el
+    tinte del pet, no es casi-negro.
+
+`platform::RasterizeText` no cambió — el arreglo Retina es de colocación
+en `productui`, no del rasterizador. Las 8 capturas de QA de 06.2 se
+generaron con `NIMVLETS_DEV_PRODUCT_SHOT=<path>` (vuelca el framebuffer
+del renderer de la Collection vía `SDL_RenderReadPixels` + `SDL_SaveBMP`,
+a densidad nativa — cómputo local, sin ninguna captura de pantalla del
+SO, AGENTS.md §5).

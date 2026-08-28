@@ -150,6 +150,16 @@ runtime resolverá más tarde desde el directorio de trabajo del
 proceso, exactamente igual que `kPetPackPath` se resolvía antes de
 este bloque.
 
+**Vista previa del Product UI (`.nvprev`, Block 06.2).** El formato
+binario del catálogo NO cambia: la preview liviana de una entrada vive
+al lado de su pack, con el mismo nombre y la extensión `.nvpack`
+cambiada por `.nvprev` (`assets/dev/frin_male_pack.nvpack` ->
+`assets/dev/frin_male_pack.nvprev`). Esa convención la implementan
+`productui::PreviewPathForPack` (runtime) y
+`tools/compile_pet_previews.py` (compilación) — ver `docs/PRODUCT_UI.md`
+§6.4 y DEC-119. Regenerar tras regenerar cualquier pack:
+`python3 tools/compile_pet_previews.py`.
+
 El catálogo de dev real (`assets/dev/pet_catalog_manifest.json` ->
 `assets/dev/pet_catalog.nvcat`) tiene una única entrada: Bunny, marcada
 default — porque Bunny es el único pack real que existe (block brief:

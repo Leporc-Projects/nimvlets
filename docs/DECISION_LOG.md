@@ -4254,3 +4254,132 @@ el brief nombra como preferible en ese caso. El modelo event-driven de
 Block 06 (DEC-112) queda intacto: `ProductWindow::RenderIfNeeded()`
 sigue siendo un no-op salvo `dirty_`/`EXPOSED`, sin término de deadline
 nuevo.
+
+---
+
+### DEC-119 — Previews del Product UI: artefacto compilado liviano `"NVPREV1"`, no el pack completo
+**Status:** DECIDIDO · Block 06.2. **Supersede DEC-113** (parte de
+carga-y-suelta / locked-sin-arte).
+
+**Contexto.** QA del owner sobre Block 06.1: cambiar de variante Frin
+(Macho ⇆ Hembra) en el hero "se siente MUY lento". La instrumentación
+del camino real (Release, esta máquina) lo confirmó: `PetPreviewCache`
+abría y parseaba el pack de animación COMPLETO del pet
+(`frin_male` 72,6 MB / `frin_female` 76,3 MB — todos los frames de
+todas las animaciones decodificados a RGBA) solo para quedarse con UN
+frame de reposo estático, y después lo descartaba. Por etapa: lectura
+de archivo 45–85 ms (peor en frío), parseo 7–12 ms, upload ~0,2 ms —
+**55–100 ms por primer cambio a una variante, en el hilo de render.**
+No escala al roster de 8 pets; el RSS con la Collection abierta ya
+llegaba a ~324 MB con dos packs decodificados transitoriamente.
+
+**Decisión.** Un artefacto de disco por variante de catálogo,
+`"NVPREV1"` (`tools/compile_pet_preview.py` / `compile_pet_previews.py`,
+lector puro `productui::PreviewArtifact`): magic + versión + petId +
+variantId + sourcePack + width + height + pixel_bytes + RGBA8
+straight-alpha. Se deriva en el pipeline de assets del frame de reposo
+canónico del pack ya compilado (estado 0, `base_animation`, frame 0,
+`Direction::kRight` — el MISMO frame que el runtime mostraba), acotado a
+≤320 px (paridad con `runtime_max_frame_dimension`). ~0,3–0,4 MB c/u;
+**1,44 MB para los 4 vs 244 MB de packs**. Vive al lado del pack con el
+mismo nombre y extensión `.nvprev` — `productui::PreviewPathForPack`
+usa esa convención en runtime, así que el formato binario del catálogo
+NO cambia ni necesita migración.
+
+`PetPreviewCache::LoadBundle` los carga TODOS de una vez al abrir la
+ventana (`ProductWindow::Open`); `Get(petId, variantId)` pasa a ser un
+lookup en un mapa sobre texturas ya residentes. `SetActive` sigue
+inyectando el frame de reposo real a resolución completa del pet activo
+(su pack ya está en RAM). Un pet locked ahora SÍ tiene arte (su
+`.nvprev`, dibujado más callado) — el `.nvprev` es tan barato que la
+distinción "locked sin arte" de DEC-113 ya no se justifica.
+
+**Resultado medido** (Release, esta máquina): RSS con la Collection
+abierta 324 MB → **180 MB**; cambio de variante Frin 55–100 ms → **el
+fetch es un lookup sub-ms** (el redibujo completo de la Collection
+~8–10 ms); 20 ciclos abrir/cerrar sin fuga (RSS asienta ~128 MB, por
+debajo del baseline pet-only de 166 MB); CPU 0 % tras cerrar. El
+`"Use <pet>"` real sigue cargando el pack de runtime completo de forma
+transaccional — eso es correcto (selección de preview ≠ carga del pet
+activo).
+
+---
+
+### DEC-120 — Nitidez Retina: el bitmap de glyphs se acota a píxel entero del dispositivo
+**Status:** DECIDIDO · Block 06.2.
+
+**Contexto.** QA del owner: "algo de texto se ve levemente borroso en
+Retina". Chequeo forense primero (brief §8), con `DrawText`
+instrumentado a scale 2.0: la RASTERIZACIÓN ya es correcta — los glyphs
+se rasterizan a densidad de backing nativa (25 pt → textura de 59 px;
+`TextCache` indexa por `scale`; un cambio de display-scale limpia el
+cache) y se blittean 1:1. El defecto es de COLOCACIÓN: `DrawText` ponía
+los runs centrados/derechos en `anchorX*scale − glyphW*0.5`, que cae en
+`X,5` cuando el ancho del bitmap es impar, así que SDL dibujaba el
+bitmap 1:1 con medio píxel de offset y cada texel quedaba a caballo
+entre dos píxeles del dispositivo. Medido: `frac=0.500` en
+"Use Frin" / "Bunny" / "On desktop" (todos centrados — justo lo que el
+owner reportó); `frac=0.000` en todo el texto de cabecera alineado a la
+izquierda (que era nítido).
+
+**Decisión.** `productui/TextLayout.h::GlyphBlitOrigin` (puro, testeado)
+calcula el origen y lo redondea a píxel entero del dispositivo. La
+rasterización no se toca — nada de negrita, nada de reescalado. El
+check nativo de texto ahora también verifica la relación de píxeles 1x
+vs 2x (~2x) para atrapar una regresión futura de "rasterizar a 1x y
+agrandar". Además se subió el contraste del texto secundario
+(`kTextMuted` 3,3:1 → ~5,0:1; `kTextFaint` 2,1:1 → ~3,5:1) sin volverlo
+casi-negro.
+
+---
+
+### DEC-121 — Acción primaria del hero: relleno/tinta de acento del pet, nunca casi-negro
+**Status:** DECIDIDO · Block 06.2. Ajusta DEC-117.
+
+**Contexto.** QA del owner: el botón "Use <pet>" casi-negro
+(`#2A2520`) "pesa demasiado" contra la UI clara — es el objeto más
+oscuro de la pantalla. Y mostrar la línea de estado "Use" ARRIBA del
+botón "Use <pet>" es redundante.
+
+**Decisión.** `productui::PetAccent` gana `softFill` (tinte claro/medio
+del tono del pet) y `deepInk` (versión oscura y legible del mismo tono,
+contraste verificado ≥ 5,5:1 sobre `softFill`). El botón = `softFill` +
+borde `line` + texto `deepInk`. Nunca negro arbitrario. Y `showStatusLine
+== !actionEnabled`: la línea de estado y el botón son MUTUAMENTE
+excluyentes — activo muestra "● On desktop" sin botón; locked muestra
+"Not in your collection" sin botón; poseído-inactivo muestra SOLO el
+botón. No se dibuja ningún botón deshabilitado.
+
+También: hero stage más presente (halo asimétrico de primitivas de
+primera parte alrededor del arte + lóbulo secundario + regla de acento
+fina bajo el nombre, teñido con `shapeTint` a alpha más alto) y la
+Collection se lee como DOS planos (gallery sobre `kGalleryShelf`, un
+neutro cálido un poco más profundo, bajo el divisor; pedestales de la
+gallery con un tinte de identidad muy tenue por pet en vez del mismo
+cuadro neutro).
+
+---
+
+### DEC-122 — Copy editorial de Bunny/Nidir/Frin: autorada y aprobada por el owner
+**Status:** DECIDIDO · Block 06.2. Supersede la parte "sin personalidad
+autorada" de DEC-117.
+
+**Contexto.** Block 06.1 (brief §14) prohibía que el agente inventara
+personalidades permanentes; `PetEditorial` solo tenía una etiqueta de
+especie provisional y `ShortDescription` siempre `""`. El brief de
+Block 06.2 (§14/§15) provee copy bilingüe EXPLÍCITA para los tres pets
+con arte real y pide una línea de descripción en el hero.
+
+**Decisión.** `productui::PetEditorial` (puro, tabla por id de catálogo
++ idioma — data-driven, NO hard-codeado en la vista) sirve la especie y
+la descripción de una frase aprobadas:
+
+| pet | especie EN / ES | descripción EN / ES |
+|---|---|---|
+| bunny | Rabbit / Conejo | "Small, curious, and never in a hurry." / "Pequeño, curioso y sin ninguna prisa." |
+| nidir | Black dragon / Dragón negro | "Quiet wings. Bright eyes. Fire when it matters." / "Alas quietas. Ojos brillantes. Fuego cuando hace falta." |
+| frin | White wolf / Lobo blanco | "Watchful, calm, and happiest close by." / "Atento, tranquilo y más feliz cerca." |
+
+El resto del roster sigue devolviendo `""` hasta que se le escriba copy
+propia (el hero omite la línea). Los nombres propios nunca están en la
+tabla.

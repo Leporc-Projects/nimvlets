@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Quick Menu (Block 06 / 06.1)
+# Nimvlets — Product Shell + Collection + Quick Menu (Block 06 / 06.1 / 06.2)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -194,18 +194,23 @@ Nimvlets                                          1 248 clicks   <- cabecera dis
 Collection                                                        <- título de sección
 Your companions                                                   <- subtítulo
 
-  ╭ forma de acento (muy tenue) ╮
-  │        [ ARTE GRANDE ]      │   Bunny                          <- HERO: el Nimvlet
-  │        del Nimvlet          │   Rabbit                            seleccionado, protagonista
-  │        seleccionado         │   On desktop
-  ╰────────────────────────────╯   Male · Female   (solo Frin)
-                                   [ Use Frin ]   /  On desktop
-  ─────────────────────────────────────────────────────────────  <- hairline
-              [art]          [art]                                <- GALLERY: los demás,
-              Nidir          Frin                                    cluster centrado y discreto
-              Not in your    Use
+ ╭─ hero stage (halo asimétrico teñido con el acento del pet) ─╮
+ │      [ ARTE GRANDE ]      Frin                               │  <- HERO: el Nimvlet
+ │      del Nimvlet          ──                                 │     seleccionado, protagonista
+ │      seleccionado         White wolf                         │     (nombre / regla de acento /
+ │                           Watchful, calm, and happiest…      │      especie / descripción /
+ │                           Male · Female     (solo Frin)      │      selector / acción-o-estado)
+ ╰───────────────────────────[ Use Frin ]  o  ● On desktop ─────╯
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  <- hairline = borde del 2º plano
+              [art]          [art]         ← GALLERY sobre un neutro cálido un poco
+              Nidir          Frin            más profundo (segundo plano); pedestal
+              Not in your    Use             con un tinte de identidad muy tenue por pet
               collection
 ```
+
+*(superseded 06.2: 06.1 usaba una sola forma tenue detrás del arte, un
+botón de acción casi-negro, sin línea de descripción, y un solo plano
+de fondo.)*
 
 Jerarquía (brief 06.1 §7):
 
@@ -220,32 +225,50 @@ hero**; el que era hero baja a la gallery. Siempre hay un hero — por
 defecto, el pet activo. No hay un "panel de detalle" separado: el hero
 ES el detalle.
 
-### 6.1 Principios visuales (brief 06 §2/§3 + 06.1 §17)
+### 6.1 Principios visuales (brief 06 §2/§3 + 06.1 §17 + 06.2 §11/§12/§17/§22)
 
-- fondo blanco hueso cálido (`#F6F3EE`), texto casi-negro (`#26221E`);
-- **el arte del Nimvlet domina** — el hero flota sobre una forma
-  orgánica MUY tenue (§6.2), la gallery sobre una caja apenas
-  insinuada; nunca una card con borde fuerte;
+- fondo blanco hueso cálido (`#F6F3EE`), texto casi-negro (`#26221E`) —
+  el fondo cálido es parte de la identidad, PERO ya no es una hoja en
+  blanco: la Collection se lee como **dos planos** (hero sobre el fondo
+  base; gallery sobre `#F0EBE1`, un neutro cálido un poco más profundo,
+  bajo el divisor), con whitespace y líneas estructurales discretas;
+- **el arte del Nimvlet domina**, e integrado en la interfaz: el hero se
+  apoya en un *hero stage* — un halo asimétrico de primitivas de primera
+  parte (óvalo, o round-rect para un pet "angular" como Nidir) teñido
+  con el acento del pet, que se extiende bastante más que el arte pero
+  NO invade la columna de texto, más un lóbulo secundario descentrado y
+  una regla de acento fina bajo el nombre (§6.2). Sin imágenes
+  generadas, sin gradiente vívido, sin glassmorphism, sin cards con
+  borde fuerte;
 - texto de estado **humano y localizado** ("On desktop" / "Use" / "Not
   in your collection" — "En el escritorio" / "Usar" / "No está en tu
   colección"), nunca badges "ACTIVE"/"LOCKED";
 - jerarquía por **tamaño / peso / espacio**, no por más contenedores:
-  el nombre del hero es grande, la especie y el estado son líneas
-  chicas, el bloque de texto se centra verticalmente contra el arte;
+  nombre grande, regla de acento, especie, descripción de una frase
+  (§6.4-editorial), y luego selector + acción/estado; el bloque de
+  texto se centra verticalmente contra el arte;
+- **contraste del texto secundario** legible: `kTextMuted` ~5,0:1,
+  `kTextFaint` ~3,5:1 sobre el fondo (subidos en 06.2 tras QA — brief
+  §10 — sin volverlos casi-negro);
 - animación de UI mínima: micro-lift de hover **instantáneo** (2pt) +
   wash + más contraste, sin tween temporizado — ver DEC-118 y §11;
-- el anillo de foco solo aparece tras la primera navegación por teclado
-  o un click que enfoca (focus-visible);
+- **focus-visible por modalidad de input**: el chrome de foco (anillo
+  del botón, pill del chip de variante) se dibuja SOLO mientras el
+  último input fue de teclado — un click de mouse lo apaga, así una
+  selección de variante con mouse muestra solo el subrayado de acento,
+  no un recuadro tipo control de formulario (brief §19);
 - sin sidebar, sin toolbar gigante, sin cabecera sobredimensionada, sin
   dashboard, sin "Welcome back", sin barras de progreso / logros /
   rachas / métricas.
 
-### 6.2 Acento de identidad por pet (`productui::PetAccent`, 06.1 §9)
+### 6.2 Acento de identidad por pet (`productui::PetAccent`, 06.1 §9 + 06.2 §17)
 
-Cada Nimvlet lógico tiene un tono de identidad restringido. Se usa
-**solo** para: la forma orgánica detrás del arte del hero, la línea de
-foco/selección, y el subrayado de la variante seleccionada. **Nunca**
-recolorea el resto de la UI, sin gradientes.
+Cada Nimvlet lógico tiene un tono de identidad restringido. Campos:
+`line` (línea de foco/selección, subrayado de variante, regla del
+nombre, punto de "On desktop"), `shapeTint` (las primitivas del hero
+stage y el pedestal de la gallery — dibujados a alpha bajo), `softFill`
++ `deepInk` (relleno / texto+borde del botón de acción — DEC-121),
+`angularShape`. **Nunca** recolorea el resto de la UI, sin gradientes.
 
 | Pet | Tono | Forma del hero |
 |---|---|---|
@@ -255,8 +278,24 @@ recolorea el resto de la UI, sin gradientes.
 | Rato · Rin Rin · Artu · Kyubi · Sweetie | apricot · verde bosque · marrón/oro · violeta oscuro · naranja quemado | (ids TENTATIVOS — sin arte todavía) |
 | desconocido | terracota neutro | óvalo |
 
-La forma se dibuja a alpha muy bajo (~52/255 sobre un tinte ya pálido)
-— apoya el arte, no compite (brief §10).
+El hero stage: primitiva primaria ~92/255 + lóbulo secundario ~52/255,
+sobre un tinte ya pálido — apoya el arte, no compite (brief §10/§11). El
+botón usa `softFill` (claro) + `deepInk` (oscuro, contraste ≥ 5,5:1) —
+nunca un negro arbitrario.
+
+### 6.4 Previews compiladas livianas (`"NVPREV1"`, 06.2 §4-§7 — DEC-119)
+
+La Collection **no abre el `.nvpack` de animación de un pet** (~46–76 MB)
+para dibujar una preview estática. Al abrir la ventana,
+`PetPreviewCache::LoadBundle` carga de una vez el artefacto liviano
+`"NVPREV1"` (~0,3–0,4 MB c/u) de cada entrada del catálogo — el frame de
+reposo canónico ya extraído por `tools/compile_pet_preview.py`. Vive al
+lado del pack, mismo nombre + `.nvprev` (`productui::PreviewPathForPack`
+— sin campo nuevo en el catálogo). `Get(petId, variantId)` es entonces
+un lookup sobre texturas ya residentes: cambiar de variante Frin o de
+hero es instantáneo. El pet activo además inyecta su frame de reposo
+real a resolución completa (`SetActive`). `Clear()` libera todo al
+cerrar. Regenerar tras regenerar un pack: `python3 tools/compile_pet_previews.py`.
 
 ### 6.3 Estados de propiedad
 
@@ -269,18 +308,21 @@ La forma se dibuja a alpha muy bajo (~52/255 sobre un tinte ya pálido)
 | poseído + inactivo (Frin) | `Use` | sí (variante por defecto) |
 | bloqueado | `Not in your collection` (tenue) | **sí, más callado** (alpha 150) — visible, no destruido (brief §12) |
 
-**Hero** (etiqueta del botón de acción):
+**Hero** — la línea de estado y el botón son **mutuamente excluyentes**
+(`showStatusLine == !actionEnabled`), nunca los dos (brief 06.2 §18):
 
-| Estado del hero | Botón |
+| Estado del hero | Muestra |
 |---|---|
-| activo, sin variantes | `On desktop` — deshabilitado (contorno tenue) |
-| activo (Frin), variante mostrada == la activa | `On desktop` — deshabilitado |
-| activo (Frin), variante mostrada != la activa | `Use <name>` — **habilitado** (re-activa con la otra variante) |
-| poseído-inactivo | `Use <name>` — habilitado |
-| bloqueado | `Not in your collection` — sin acción, **sin botón de compra ni precio** (brief §12) |
+| activo, sin variantes | línea `● On desktop` (punto en el acento del pet) — **sin botón** |
+| activo (Frin), variante mostrada == la activa | línea `● On desktop` — **sin botón** |
+| activo (Frin), variante mostrada != la activa | botón `Use <name>` (re-activa con la otra variante) — sin línea |
+| poseído-inactivo | botón `Use <name>` — sin línea |
+| bloqueado | línea `Not in your collection` — **sin botón, sin compra ni precio** (brief §12) |
 
-`<name>` es el nombre propio del pet, **nunca traducido** ("Use Frin" /
-"Usar Frin").
+El botón usa el `softFill` + borde `line` + texto `deepInk` del acento
+del pet — nunca casi-negro (DEC-121). No se dibuja ningún botón
+deshabilitado. `<name>` es el nombre propio, **nunca traducido**
+("Use Frin" / "Usar Frin").
 
 `Esc` cierra la ventana.
 
@@ -429,16 +471,27 @@ chicas — NO presupuestos finales):
   ≈ 0 %, RSS en la misma banda que un arranque pet-only fresco — sin
   acumulación. `Close()` libera el renderer + todas las texturas +
   caches.
-- **Costo transitorio al abrir la Collection**: se carga el pack de
-  cada pet NO activo visible para extraer su frame de preview; el
-  `PetDefinition` se descarta de inmediato, solo queda una textura
-  chica. Desde 06.1 esto incluye a los pets **locked** (su arte ahora
-  se muestra, más callada — §6.3), así que el dev-set carga dos packs
-  (Nidir ~61 MB + Frin ~72 MB) en vez de uno. Pagado una sola vez
-  mientras la Collection está abierta; liberado en `Close()`. Con
-  muchos pets poseídos/visibles esto escalaría — un thumbnail
-  precompilado o un loader en background sería el fix; se registra como
-  limitación (DEC-113/DEC-117).
+- **Costo al abrir la Collection (06.2 — DEC-119)**: `LoadBundle` lee
+  los 4 artefactos `.nvprev` (~1,44 MB en total) y los sube como
+  texturas chicas. **Ya NO se abre ningún `.nvpack`.** Antes de 06.2 se
+  cargaba el pack completo (~46–76 MB) de cada pet visible no activo —
+  con los locks incluidos, dos packs — para un frame de preview.
+  Medido (Release, esta máquina):
+
+  | | 06.1 (packs completos) | 06.2 (`.nvprev`) |
+  |---|---|---|
+  | RSS con la Collection abierta | ~324 MB | **~180 MB** (baseline pet-only ~166 MB) |
+  | cambio de variante Frin (fetch) | 55–100 ms de I/O+parseo en el hilo de render | **lookup sub-ms** (+ redibujo completo ~8–10 ms) |
+  | bytes de pack leídos por sesión de Collection | hasta ~244 MB | 0 |
+  | 20 ciclos abrir/cerrar | sin fuga | sin fuga (RSS asienta ~128 MB, CPU 0 %) |
+
+  El `"Use <pet>"` real sigue cargando el pack de runtime completo de
+  forma transaccional — correcto (selección de preview ≠ carga del pet
+  activo).
+- **Nitidez del texto (06.2 — DEC-120)**: los glyphs se rasterizan a
+  densidad de backing nativa y se blittean a **píxel entero del
+  dispositivo** (`GlyphBlitOrigin` redondea el origen). No hay
+  reescalado de texto ni segundo muestreo.
 - **Microinteracción de hover (06.1)**: el micro-lift + wash es un
   cambio de estado **instantáneo**, sin tween temporizado — no agrega
   ningún deadline de render (DEC-118). El modelo event-driven de Block
@@ -471,7 +524,7 @@ Las capturas de pantalla de QA de este bloque son diagnóstico de
 DESARROLLO de nuestra propia ventana (AGENTS.md §5) — nunca se
 comitean, nunca son comportamiento del producto.
 
-## 14. Localización EN/ES (06.1)
+## 14. Localización EN/ES (06.1 / 06.2)
 
 Contrato de idioma de producto — ver DEC-115/DEC-116.
 
@@ -494,11 +547,21 @@ Contrato de idioma de producto — ver DEC-115/DEC-116.
   `ProductWindow::SetLanguage` (la vista redibuja). El id del widget con
   foco es semántico, así que el foco se conserva si ese widget sigue
   existiendo (brief §21).
-- **Copy editorial** (`productui::PetEditorial`): `ProvisionalSpecies`
-  da una etiqueta de especie de una palabra (Rabbit/Black dragon/Wolf ·
-  Conejo/Dragón negro/Lobo), tomada de la prosa de PRD_V1 §3 y marcada
-  **PROVISIONAL**. `ShortDescription` (línea de personalidad) NO se
-  escribe en este bloque: siempre `""`. El hero reserva el espacio.
+- **Copy editorial** (`productui::PetEditorial`, DEC-122): tabla pura
+  por id de catálogo + idioma (data-driven, no hard-codeada en la
+  vista). `Species(petId, lang)` y `ShortDescription(petId, lang)`
+  sirven la copy bilingüe **aprobada por el owner** para los tres pets
+  con arte real:
+
+  | pet | especie EN / ES | descripción EN / ES |
+  |---|---|---|
+  | bunny | Rabbit / Conejo | Small, curious, and never in a hurry. / Pequeño, curioso y sin ninguna prisa. |
+  | nidir | Black dragon / Dragón negro | Quiet wings. Bright eyes. Fire when it matters. / Alas quietas. Ojos brillantes. Fuego cuando hace falta. |
+  | frin | White wolf / Lobo blanco | Watchful, calm, and happiest close by. / Atento, tranquilo y más feliz cerca. |
+
+  El resto del roster devuelve `""` (el hero omite la línea) hasta que
+  se le escriba copy propia. Los nombres propios nunca están en la
+  tabla.
 
 ## 15. Intencionalmente diferido
 
@@ -513,9 +576,10 @@ Contrato de idioma de producto — ver DEC-115/DEC-116.
 | Preferencia de fullscreen, launch-at-login, dark mode | futuro |
 | Corrección visual de `lie_to_sit` de Frin | deuda conocida, congelada (brief §21) |
 | Idiomas más allá de EN/ES | futuro (el catálogo de claves está listo; agregar un idioma es una columna más) |
-| Personalidades/lore por Nimvlet | futuro con dirección de contenido — 06.1 solo dejó `ProvisionalSpecies` y espacio reservado |
+| Personalidades/lore extensas por Nimvlet | futuro con dirección de contenido — 06.2 autoró una especie + una línea por Bunny/Nidir/Frin (DEC-122); el resto del roster sin copy |
 | Menú `Language` en Windows/Linux | con el System Shell nativo de esas plataformas (futuro) |
 | Microanimación de hover temporizada (120–160 ms) | descartada a propósito (DEC-118) — la performance manda |
+| Mover `PetEditorial` / accent / preview a datos del catálogo o del pack | futuro (hoy son tablas en `src/productui`, escalables pero no data del catálogo) |
 
 Nada de lo anterior está implementado ni insinuado en el código de
-Block 06 / 06.1.
+Block 06 / 06.1 / 06.2.

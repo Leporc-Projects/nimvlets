@@ -5,11 +5,14 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 06.1 — Collection Visual Polish +
-EN/ES Localization** (composición hero + gallery, acento de identidad
-por pet, idioma inglés/español; ver
-[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)), sobre **Block 06 —
-Product Shell + Collection + Native Quick Menu**,
+Este repositorio está en **Block 06.2 — Collection Identity + Instant
+Previews + Retina Text** (hero stage con acento por pet, botón de
+acción tintado, previews compiladas livianas `.nvprev` en vez del pack
+completo, texto nítido en Retina, copy editorial EN/ES; ver
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)), sobre **Block 06.1 —
+Collection Visual Polish + EN/ES Localization** (composición hero +
+gallery, acento de identidad por pet, idioma inglés/español) y
+**Block 06 — Product Shell + Collection + Native Quick Menu**,
 construido sobre Block 05 (Behavior Runtime + Frin Vertical Slice),
 Block 04.3 (corrección post-QA de Nidir/Bunny), Block 04.2 (assets
 reales + pipeline
@@ -152,19 +155,26 @@ Combiná `NIMVLETS_DEV_SELECT_PET` con `NIMVLETS_DEV_APPDATA_DIR` para
 probar cualquier pet sin arriesgar tu estado persistido real — ver
 "Owner manual QA" más abajo para la lista completa de comandos.
 
-### Product UI (Block 06 / 06.1)
+### Product UI (Block 06 / 06.1 / 06.2)
 
 El menú de la barra de macOS (icono monocromo arriba a la derecha)
 abre la **Collection**: un álbum de tus Nimvlets con una composición
 **hero + gallery** — el Nimvlet seleccionado es el protagonista, con su
-arte grande sobre una forma de acento sutil, su especie, estado,
-selector tipográfico de variante (Frin) y una acción; los demás en una
-gallery discreta. Switch de pet en vivo. El click balance (visible SOLO
-acá). El mismo menú tiene Show/Hide, Lock Position, Size
-(Small/Medium/Large — Large = 1.15), Opacity (100/85/70/55 %),
-**Language ▸ (English / Español)** y Quit. Cambiar de idioma actualiza
-todo al instante, sin reiniciar. Cerrar la Collection NO termina la
-app. Ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
+arte grande sobre un *hero stage* teñido con su acento de identidad, su
+especie, una línea de descripción, estado, selector tipográfico de
+variante (Frin) y un botón de acción con el tinte del pet; los demás en
+una gallery discreta sobre un segundo plano. Switch de pet en vivo. El
+click balance (visible SOLO acá). El mismo menú tiene Show/Hide, Lock
+Position, Size (Small/Medium/Large — Large = 1.15), Opacity
+(100/85/70/55 %), **Language ▸ (English / Español)** y Quit. Cambiar de
+idioma actualiza todo al instante, sin reiniciar. Cerrar la Collection
+NO termina la app. Ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
+
+El arte del hero/gallery sale de artefactos `.nvprev` livianos
+(`assets/dev/<pack>.nvprev`, ~0,3–0,4 MB c/u) — **la Collection ya no
+abre el `.nvpack` de animación completo** (~46–76 MB) para una preview
+estática. Regenerar tras regenerar cualquier pack:
+`python3 tools/compile_pet_previews.py`.
 
 ```bash
 # QA / capturas: abrir la Collection al arrancar (sin clickear el menú).
@@ -186,6 +196,18 @@ NIMVLETS_DEV_ACTIVATE=frin/female ./build/macos-debug/src/app/nimvlets_spike
 # QA: abrir y cerrar la ventana de Collection N veces (smoke de ciclo
 # de vida — el runtime del pet lo sobrevive).
 NIMVLETS_DEV_COLLECTION_CYCLES=8 ./build/macos-debug/src/app/nimvlets_spike
+
+# QA (Block 06.2): poner el foco de TECLADO sobre un chip de variante
+# del hero (captura de "keyboard-focused variant").
+NIMVLETS_DEV_OPEN_COLLECTION=frin/male NIMVLETS_DEV_VARIANT_FOCUS=female \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# QA (Block 06.2): volcar el framebuffer de la Collection a un BMP a
+# densidad nativa (SDL_RenderReadPixels — sin captura de pantalla del
+# SO) y salir. Combinable con lo de arriba.
+NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
 ```
 
 This opens a small, borderless, always-on-top, transparent window
@@ -322,11 +344,12 @@ src/graphics     SDL rendering: turns a content::FrameDefinition into a texture
 src/platform     native macOS (AppKit) / Windows (Win32) / Linux (X11+Wayland) window glue,
                  plus LinuxBackendPolicy — pure X11-vs-Wayland capability logic, built on every OS
 src/app          the spike executable: event loop + wiring
-tests/           CTest-driven unit tests for src/core, src/content, src/catalog, and src/persistence
+tests/           CTest-driven unit tests for src/core, src/content, src/catalog, src/persistence, src/productui/*_core
 tools/           dev tooling (stats_loc.py, prep_dev_sprite.py, compile_pet_pack.py, compile_pet_catalog.py,
+                 compile_pet_preview.py, compile_pet_previews.py,
                  generate_bunny_pack.py, generate_nidir_pack.py, generate_frin_pack.py,
                  validate_frame_sequence.py, test_asset_pipeline.py)
-assets/dev/      compiled runtime packs (*.nvpack) + compiled catalog (*.nvcat) -- see assets/dev/README.md
+assets/dev/      compiled runtime packs (*.nvpack) + catalog (*.nvcat) + Product UI previews (*.nvprev) -- see assets/dev/README.md
 assets/source/nimvlets/  real Nimvlet source art (frames, spritesheets, DESCRIPTION.txt — see
                  assets/source/nimvlets/README.md and docs/NIDIR_CONTENT.md/BUNNY_CONTENT.md/FRIN_CONTENT.md)
 cmake/           CMake helper modules (warnings, SDL3 fetch)

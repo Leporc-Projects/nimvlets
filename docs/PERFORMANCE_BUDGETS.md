@@ -719,3 +719,49 @@ liberado en `Close()`, y sigue siendo la misma limitación conocida
 lo resolvería. El término dominante de fondo (`FrameDefinition::pixels`
 residente por `core::AlphaMask`) sigue pendiente, igual que desde Block
 05.
+
+## Mediciones reales de Block 06.2 (previews livianas `.nvprev`, nitidez Retina)
+
+macOS Release, Apple Silicon nativo, una máquina, muestras chicas,
+directorio de app-data aislado. Block 06.2 **elimina** la carga de
+packs de animación para las previews (DEC-119): al abrir la Collection
+solo se leen los 4 artefactos `.nvprev` (~1,44 MB en total) y se suben
+como texturas chicas.
+
+| Escenario | Idle CPU | RSS |
+|---|---|---|
+| Pet-only en reposo (Bunny), asentado | **≈0.0%** | ≈166 MB |
+| Collection ABIERTA, en reposo (pet oculto) | **≈0.0%** | **≈180 MB** *(06.1: ~206–330)* |
+| `LoadBundle` (4 `.nvprev`) al abrir | — | +1,37 MB de textura |
+| 20 ciclos open/close de la Collection | **≈0.0%** tras terminar | RSS asienta **≈128 MB** (por debajo del baseline pet-only) |
+| Cambio de variante Frin Macho ⇆ Hembra | — | *fetch = lookup en un mapa, sub-ms* (+ redibujo completo ~8–10 ms) |
+
+### Antes / después del cambio de variante Frin
+
+Con packs completos (06.1), el `Acquire` de la variante destino era, en
+frío/tibio: lectura de 72–76 MB **45–100 ms**, parseo (decodificar
+todos los frames) 7–12 ms, en el hilo de render. Con `.nvprev` (06.2) la
+preview de las 4 variantes ya está residente tras `LoadBundle`, así que
+`Get(petId, variantId)` es un lookup en `std::unordered_map` sobre una
+`SDL_Texture*` — el costo observable del "cambio" es solo el redibujo
+event-driven de la Collection (~8–10 ms, dominado por rasterizar el
+texto que cambió y los spans de las primitivas del hero stage).
+
+### Lo que estas cifras SÍ dicen
+
+- **El RSS con la Collection abierta bajó ~145 MB** (≈324 → ≈180). El
+  incremento sobre el baseline pet-only (~166 MB) es la ventana +
+  renderer + 1,37 MB de previews + cache de texto + framebuffers de GPU.
+- **No hay leak.** 20 ciclos open/close: `LoadBundle` corre 20 veces
+  (log), y el RSS asienta ~128 MB — *por debajo* del baseline pet-only,
+  no acumula. `Close()` sigue liberando renderer + texturas + caches.
+- **No hay loop de render oculto** (DEC-112 intacto): CPU ≈0% con la
+  Collection abierta o cerrada; `RenderIfNeeded` sigue siendo no-op
+  salvo `dirty_`/`EXPOSED`; ningún deadline nuevo en el `waitMs` del
+  pet.
+- El `"Use <pet>"` real todavía carga el pack de runtime completo
+  (~76 MB para Frin hembra) de forma transaccional al pet activo — eso
+  es correcto y esperado (selección de preview ≠ activar el pet).
+- El término dominante de fondo (`FrameDefinition::pixels` del pet
+  activo residente para `core::AlphaMask`) sigue pendiente desde Block
+  05 — no lo toca este bloque.
