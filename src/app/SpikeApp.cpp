@@ -1514,6 +1514,11 @@ int SpikeApp::Run() {
                 }
             }
         }
+        // Solo-DEV: fuerza el estado de hover/foco sobre una entrada de
+        // la gallery para la captura de "hover/focus state".
+        if (const char* hov = std::getenv("NIMVLETS_DEV_HERO_HOVER"); hov != nullptr && hov[0] != '\0') {
+            productWindow_.SetGalleryHoverForQA(hov);
+        }
     }
 
     // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para

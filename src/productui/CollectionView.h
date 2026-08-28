@@ -64,6 +64,14 @@ class CollectionView {
         selectedVariantId_ = variantId;
         dirty_ = true;
     }
+    // Solo-DEV: fija el estado de hover + foco visible sobre una entrada
+    // de la gallery (para la captura de "hover/focus state").
+    void SetGalleryHoverForQA(const std::string& petId) {
+        hoverId_ = petId.empty() ? std::string() : ("item:" + petId);
+        focus_.Focus(hoverId_);
+        focusVisible_ = !petId.empty();
+        dirty_ = true;
+    }
 
     void Render(
         UiPainter& painter, TextCache& text, PetPreviewCache& previews, const catalog::PetCatalog& catalog,

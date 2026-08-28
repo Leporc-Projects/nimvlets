@@ -79,9 +79,10 @@ class ProductWindow {
     // y no-op si no hay nada que hacer.
     void RenderIfNeeded();
 
-    // Solo-DEV (QA / capturas): elige el hero / su variante sin click.
+    // Solo-DEV (QA / capturas): elige el hero / su variante / el hover.
     void SelectHeroForQA(const std::string& petId) { view_.SelectHeroForQA(petId); }
     void SetHeroVariantForQA(const std::string& variantId) { view_.SetHeroVariantForQA(variantId); }
+    void SetGalleryHoverForQA(const std::string& petId) { view_.SetGalleryHoverForQA(petId); }
 
  private:
     void RecomputeScale();
