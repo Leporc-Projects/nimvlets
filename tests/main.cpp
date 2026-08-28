@@ -10,6 +10,7 @@
 #include "DirectionTest.h"
 #include "DisplayControlsTest.h"
 #include "FocusListTest.h"
+#include "TextLayoutTest.h"
 #include "FormatTest.h"
 #include "LocalizationTest.h"
 #include "PetAccentTest.h"
@@ -51,6 +52,7 @@ int main() {
     nimvlets::tests::RegisterCollectionModelTests(runner);
     nimvlets::tests::RegisterCollectionLayoutTests(runner);
     nimvlets::tests::RegisterFocusListTests(runner);
+    nimvlets::tests::RegisterTextLayoutTests(runner);
     nimvlets::tests::RegisterFormatTests(runner);
     nimvlets::tests::RegisterQuickMenuModelTests(runner);
     nimvlets::tests::RegisterPetSwitchingTests(runner);

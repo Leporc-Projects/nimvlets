@@ -14,8 +14,15 @@ namespace theme {
 
 constexpr UiColor kBackground{0xF6, 0xF3, 0xEE, 0xFF};   // blanco hueso cálido
 constexpr UiColor kText{0x26, 0x22, 0x1E, 0xFF};         // casi-negro, no #000
-constexpr UiColor kTextMuted{0x8C, 0x85, 0x78, 0xFF};    // texto secundario / estado
-constexpr UiColor kTextFaint{0xB2, 0xAA, 0x9C, 0xFF};    // etiqueta de sección, locked
+// Secundario / estado. Subido de #8C8578 (contraste 3.3:1 sobre el
+// fondo — el owner lo reportó demasiado pálido, Block 06.2 §10) a
+// #6E685C = ~5.0:1, ahora pasa WCAG AA para texto normal, sin volverse
+// casi-negro.
+constexpr UiColor kTextMuted{0x6E, 0x68, 0x5C, 0xFF};
+// Etiqueta de sección / separadores. Subido de #B2AA9C (2.1:1) a
+// #8A8172 = ~3.5:1: sigue siendo un escalón claro por debajo de
+// kTextMuted (jerarquía intacta), pero legible.
+constexpr UiColor kTextFaint{0x8A, 0x81, 0x72, 0xFF};
 
 constexpr UiColor kHairline{0xE4, 0xDE, 0xD3, 0xFF};     // bordes discretos
 constexpr UiColor kHoverWash{0xEF, 0xEA, 0xE1, 0xFF};    // fondo sutil al pasar el mouse

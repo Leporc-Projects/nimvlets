@@ -119,6 +119,35 @@ int main() {
     big.pointSize = 40.0;
     Check(MeasureTextWidth(big) > measured, "larger point size measures wider");
 
+    // Densidad de backing Retina (Block 06.2 §8/§27): el mismo texto
+    // lógico se rasteriza a ~2x los píxeles cuando scale = 2.0. Prueba
+    // que RasterizeText escala con la densidad de pantalla (pixeles =
+    // pointSize * scale) — la base del arreglo de nitidez; si esto
+    // fallara, el texto estaría rasterizado a 1x y agrandado por SDL.
+    {
+        TextRasterRequest at1 = req;
+        at1.scale = 1.0;
+        at1.utf8 = "Companions";
+        TextRasterRequest at2 = at1;
+        at2.scale = 2.0;
+        RasterizedText r1;
+        RasterizedText r2;
+        const bool ok1 = RasterizeText(at1, r1);
+        const bool ok2 = RasterizeText(at2, r2);
+        Check(ok1 && ok2, "RasterizeText succeeded at scale 1.0 and 2.0");
+        // ~2x en ambos ejes. Las métricas de Core Text no son
+        // perfectamente lineales con el tamaño de punto (hinting,
+        // redondeo de advance), así que la tolerancia es un porcentaje
+        // del doble exacto, no un ±px fijo: basta con demostrar que el
+        // bitmap se rasteriza a densidad de backing, no a 1x agrandado.
+        const double wRatio = static_cast<double>(r2.width) / static_cast<double>(r1.width);
+        const double hRatio = static_cast<double>(r2.height) / static_cast<double>(r1.height);
+        Check(wRatio > 1.85 && wRatio < 2.15,
+              "scale 2.0 glyph bitmap is ~2x wider than scale 1.0 (native backing density)");
+        Check(hRatio > 1.85 && hRatio < 2.15, "scale 2.0 glyph bitmap is ~2x taller than scale 1.0");
+        Check(r2.baseline > r1.baseline, "scale 2.0 baseline sits lower in pixels than scale 1.0");
+    }
+
     std::printf("%s\n", g_failures == 0 ? "all text-rasterizer checks passed" : "text-rasterizer checks FAILED");
     return g_failures == 0 ? 0 : 1;
 }

@@ -99,14 +99,13 @@ float DrawText(
     }
 
     const float widthLogical = static_cast<float>(g.width) / scale;
-    float leftPx = anchorX * scale;
-    if (align == HAlign::kCenter) {
-        leftPx = anchorX * scale - static_cast<float>(g.width) * 0.5f;
-    } else if (align == HAlign::kRight) {
-        leftPx = anchorX * scale - static_cast<float>(g.width);
-    }
-    const float topPx = baselineY * scale - static_cast<float>(g.baseline);
-    painter.BlitPixels(g.texture, leftPx, topPx, color.a);
+    // Colocación acotada a píxel entero del dispositivo: el bitmap ya
+    // está a densidad nativa y se dibuja 1:1, así que un origen
+    // fraccionario (típico en runs centrados/derechos) lo dejaría
+    // blando en Retina (Block 06.2 §9). Ver productui/TextLayout.h.
+    const GlyphOrigin origin =
+        GlyphBlitOrigin(anchorX, baselineY, scale, g.width, g.baseline, align);
+    painter.BlitPixels(g.texture, origin.x, origin.y, color.a);
     return widthLogical;
 }
 

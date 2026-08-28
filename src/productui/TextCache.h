@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "platform/TextRasterizer.h"
+#include "productui/TextLayout.h"
 #include "productui/UiPaint.h"
 #include "productui/UiTheme.h"
 
@@ -54,8 +55,7 @@ class TextCache {
 };
 
 // --- Helpers de dibujo de texto ----------------------------------
-
-enum class HAlign { kLeft, kCenter, kRight };
+// (HAlign vive en productui/TextLayout.h — puro y testeable.)
 
 // Dibuja `utf8` con su BASELINE en la y lógica `baselineY`, alineado en
 // x respecto de `anchorX`. `maxWidthLogical > 0` recorta con "…".
