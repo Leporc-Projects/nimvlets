@@ -2739,5 +2739,196 @@ def _read_lying_base_and_sit_to_lie_final_frame(path: str) -> tuple[tuple, tuple
     return lying_base, sit_to_lie_final_frame
 
 
+def _read_nvprev(path: str) -> dict:
+    """Lector del formato "NVPREV1" (tools/compile_pet_preview.py) —
+    espejo intencional de src/productui/PreviewArtifact.cpp, mismo
+    patrón que los otros lectores mínimos de este archivo."""
+    import struct
+
+    with open(path, "rb") as f:
+        buf = f.read()
+    if buf[:8] != b"NVPREV1\0":
+        raise ValueError(f"bad magic: {buf[:8]!r}")
+    pos = 8
+    (version,) = struct.unpack_from("<I", buf, pos)
+    pos += 4
+
+    def rstr(p: int) -> tuple[str, int]:
+        (n,) = struct.unpack_from("<I", buf, p)
+        p += 4
+        return buf[p : p + n].decode("utf-8"), p + n
+
+    pet_id, pos = rstr(pos)
+    variant_id, pos = rstr(pos)
+    source_pack, pos = rstr(pos)
+    width, height, pixel_bytes = struct.unpack_from("<III", buf, pos)
+    pos += 12
+    pixels = buf[pos : pos + pixel_bytes]
+    return {
+        "version": version,
+        "pet_id": pet_id,
+        "variant_id": variant_id,
+        "source_pack": source_pack,
+        "width": width,
+        "height": height,
+        "pixel_bytes": pixel_bytes,
+        "pixels": pixels,
+        "trailing_bytes": len(buf) - (pos + pixel_bytes),
+    }
+
+
+class PetPreviewCompileTest(unittest.TestCase):
+    """tools/compile_pet_preview.py: la preview liviana (NVPREV1) que el
+    Product UI usa en vez de abrir el pack completo (Block 06.2 §4-§6).
+    Todos los fixtures son packs sintéticos chicos compilados a un
+    directorio temporal — nunca los assets reales."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_preview_compile_")
+        import compile_pet_pack  # noqa: E402
+        import compile_pet_preview  # noqa: E402
+        import compile_pet_previews  # noqa: E402
+
+        self.compile_pet_pack = compile_pet_pack
+        self.compile_pet_preview = compile_pet_preview
+        self.compile_pet_previews = compile_pet_previews
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _tiny_pack(self, w: int = 24, h: int = 24, alpha_rect=(4, 6, 18, 20)) -> str:
+        """Compila un .nvpack de un estado / un frame estático, con un
+        recuadro opaco reconocible, y devuelve su ruta."""
+        frame_name = "base.png"
+        prep_dev_sprite.write_png_rgba(
+            os.path.join(self.tmpdir, frame_name), w, h, _solid_frame(w, h, (200, 120, 40), alpha_rect))
+        manifest = {
+            "id": "preview_test_pet",
+            "display_name": "Preview Test Pet",
+            "canvas_width": w,
+            "canvas_height": h,
+            "states": [
+                {
+                    "id": "default",
+                    "base_animation": {
+                        "id": "idle_base",
+                        "kind": "static",
+                        "frames": [{"source": frame_name, "duration_ms": 0}],
+                    },
+                    "click_actions": [],
+                }
+            ],
+        }
+        manifest_path = os.path.join(self.tmpdir, "pack_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        out = os.path.join(self.tmpdir, "preview_test_pet_pack.nvpack")
+        self.compile_pet_pack.compile_pack(manifest_path, out)
+        return out
+
+    def test_preview_matches_pack_rest_frame_verbatim(self) -> None:
+        pack_path = self._tiny_pack()
+        pack = read_pet_pack.read_pack(pack_path)
+        rest = self.compile_pet_preview._rest_frame(pack)
+
+        out = os.path.join(self.tmpdir, "p.nvprev")
+        self.compile_pet_preview.compile_preview(pack_path, "testpet", "v1", out)
+        prev = _read_nvprev(out)
+
+        self.assertEqual(prev["version"], 1)
+        self.assertEqual(prev["pet_id"], "testpet")
+        self.assertEqual(prev["variant_id"], "v1")
+        self.assertEqual((prev["width"], prev["height"]), (rest["width"], rest["height"]))
+        self.assertEqual(prev["pixel_bytes"], rest["width"] * rest["height"] * 4)
+        self.assertEqual(prev["trailing_bytes"], 0)
+        # Sin downscale (el frame ya entra en --max-edge), los píxeles del
+        # preview son IDÉNTICOS a los del frame de reposo del pack.
+        self.assertEqual(prev["pixels"], rest["pixels"])
+
+    def test_preview_uses_state0_base_animation_frame0(self) -> None:
+        # El frame de reposo que el compilador elige es el frame 0 de la
+        # base_animation del PRIMER estado, resuelto en dirección "right"
+        # — la misma regla que productui::PetPreviewCache en C++.
+        pack_path = self._tiny_pack()
+        pack = read_pet_pack.read_pack(pack_path)
+        expected = pack["states"][0]["base_animation"]["frames"][0]
+        rest = self.compile_pet_preview._rest_frame(pack)
+        self.assertEqual(rest["pixels"], expected["pixels"])
+        self.assertEqual((rest["width"], rest["height"]), (expected["width"], expected["height"]))
+
+    def test_alpha_channel_is_preserved(self) -> None:
+        pack_path = self._tiny_pack()
+        out = os.path.join(self.tmpdir, "p.nvprev")
+        self.compile_pet_preview.compile_preview(pack_path, "testpet", "", out)
+        prev = _read_nvprev(out)
+        alphas = set(prev["pixels"][3::4])
+        # Hay pixeles totalmente transparentes (fuera del recuadro) y
+        # totalmente opacos (dentro) — el alpha no se aplastó.
+        self.assertIn(0, alphas)
+        self.assertIn(255, alphas)
+
+    def test_max_edge_downscale_guard(self) -> None:
+        pack_path = self._tiny_pack(w=48, h=48, alpha_rect=(2, 2, 46, 46))
+        pack = read_pet_pack.read_pack(pack_path)
+        rest = self.compile_pet_preview._rest_frame(pack)
+        self.assertGreater(max(rest["width"], rest["height"]), 16)
+
+        out = os.path.join(self.tmpdir, "p.nvprev")
+        self.compile_pet_preview.compile_preview(pack_path, "t", "", out, max_edge=16)
+        prev = _read_nvprev(out)
+        self.assertLessEqual(max(prev["width"], prev["height"]), 16)
+        self.assertEqual(prev["pixel_bytes"], prev["width"] * prev["height"] * 4)
+        self.assertEqual(len(prev["pixels"]), prev["pixel_bytes"])
+
+    def test_deterministic_output(self) -> None:
+        pack_path = self._tiny_pack()
+        a = os.path.join(self.tmpdir, "a.nvprev")
+        b = os.path.join(self.tmpdir, "b.nvprev")
+        self.compile_pet_preview.compile_preview(pack_path, "t", "v", a)
+        self.compile_pet_preview.compile_preview(pack_path, "t", "v", b)
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            self.assertEqual(fa.read(), fb.read())
+
+    def test_rejects_missing_pack(self) -> None:
+        with self.assertRaises(self.compile_pet_preview.PreviewCompileError):
+            self.compile_pet_preview.compile_preview(
+                os.path.join(self.tmpdir, "nope.nvpack"), "t", "", os.path.join(self.tmpdir, "o.nvprev"))
+
+    def test_rejects_empty_pet_id(self) -> None:
+        pack_path = self._tiny_pack()
+        with self.assertRaises(self.compile_pet_preview.PreviewCompileError):
+            self.compile_pet_preview.compile_preview(pack_path, "", "", os.path.join(self.tmpdir, "o.nvprev"))
+
+    def test_preview_path_convention_matches_cpp_rule(self) -> None:
+        f = self.compile_pet_previews.preview_path_for_pack
+        self.assertEqual(f("assets/dev/frin_male_pack.nvpack"), "assets/dev/frin_male_pack.nvprev")
+        self.assertEqual(f("bunny_pack.nvpack"), "bunny_pack.nvprev")
+        self.assertEqual(f("weird_name"), "weird_name.nvprev")
+
+    def test_batch_compiles_every_manifest_entry(self) -> None:
+        # Un manifest de scratch con dos entradas apuntando a packs
+        # sintéticos; compile_all escribe un .nvprev hermano de cada uno.
+        pack_a = self._tiny_pack()
+        pack_b = os.path.join(self.tmpdir, "second_pack.nvpack")
+        shutil.copyfile(pack_a, pack_b)
+        manifest = {
+            "schema_version": 2,
+            "entries": [
+                {"pet_id": "a", "variant_id": "", "pack_path": pack_a},
+                {"pet_id": "b", "variant_id": "x", "pack_path": pack_b},
+            ],
+        }
+        manifest_path = os.path.join(self.tmpdir, "cat_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+        results = self.compile_pet_previews.compile_all(manifest_path)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(os.path.isfile(pack_a.replace(".nvpack", ".nvprev")))
+        self.assertTrue(os.path.isfile(pack_b.replace(".nvpack", ".nvprev")))
+        self.assertEqual(_read_nvprev(pack_a.replace(".nvpack", ".nvprev"))["pet_id"], "a")
+        self.assertEqual(_read_nvprev(pack_b.replace(".nvpack", ".nvprev"))["variant_id"], "x")
+
+
 if __name__ == "__main__":
     unittest.main()

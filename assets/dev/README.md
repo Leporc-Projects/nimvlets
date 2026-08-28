@@ -37,6 +37,17 @@ no se justificaba frente a ningún beneficio real).
   Binario, no pensado para leerse directamente. Regenerar tras editar
   el manifest:
   `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
+- **`<pack>.nvprev`** (Block 06.2) — la vista previa estática y liviana
+  (`"NVPREV1"`, ~0.3–0.4 MB c/u) que el Product UI usa para dibujar el
+  arte del hero/gallery de la Collection **sin abrir el `.nvpack`
+  completo** del pet (ver `docs/PRODUCT_UI.md` §11 y
+  `docs/DECISION_LOG.md` DEC-119). Cada `.nvprev` vive al lado de su
+  pack, con el mismo nombre y extensión `.nvprev` — esa convención es
+  la que `productui::PreviewPathForPack` usa en runtime, así que el
+  catálogo no necesita ningún campo nuevo. Contiene solo el frame de
+  reposo canónico ya extraído del pack. Regenerar tras regenerar
+  cualquier pack:
+  `python3 tools/compile_pet_previews.py`.
 
 Todos los `.nvpack` de arriba son binarios grandes (arte real a
 resolución de hasta 320px por lado, ver `docs/NIDIR_CONTENT.md` §8) —
