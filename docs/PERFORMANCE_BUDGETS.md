@@ -765,3 +765,42 @@ texto que cambió y los spans de las primitivas del hero stage).
 - El término dominante de fondo (`FrameDefinition::pixels` del pet
   activo residente para `core::AlphaMask`) sigue pendiente desde Block
   05 — no lo toca este bloque.
+
+## Mediciones reales de Block 07 (Shop + wallet)
+
+macOS Release, Apple Silicon nativo, una máquina, muestras chicas,
+directorio de app-data aislado, pet oculto. El Shop es una **sección
+más** de la misma ventana de Product UI — no una ventana ni un renderer
+nuevos, y **reusa el mismo bundle `.nvprev`** cargado una vez al abrir
+(no se lee nada extra por sección).
+
+| Escenario | Idle CPU | RSS |
+|---|---|---|
+| Product UI abierto en la sección **Collection**, en reposo | **≈0.0%** | ≈180 MB |
+| Product UI abierto en la sección **Shop**, en reposo | **≈0.0%** | ≈185 MB |
+| Cambiar Collection ⇆ Shop (pestaña de nav) | — | *swap de vista + redibujo event-driven; NINGÚN pack se carga, `.nvprev` se reusa* |
+| `LoadBundle` al abrir | — | 4 `.nvprev`, 1,37 MB de textura (igual que Block 06.2) |
+| Compra confirmada (`EvaluatePurchase` + flush) | pico ≤ ~1 ms de cómputo + un `Save()` (temp+rename de <120 B) | sin crecimiento |
+| Activar el pet recién comprado | igual que un switch de runtime normal (`TrySwitchActivePet`) | igual que un switch normal |
+
+### Lo que estas cifras SÍ dicen
+
+- **El Shop no agrega costo de idle ni de memoria** más allá del pet
+  seleccionado. CPU ≈0% con el Shop abierto en reposo, igual que la
+  Collection; `RenderIfNeeded` sigue siendo no-op salvo
+  `dirty_`/`EXPOSED` en la vista ACTIVA; el `waitMs` del event loop del
+  pet no gana ningún término nuevo (DEC-112 intacto). Sin polling de
+  economía de fondo.
+- **Cambiar de sección no carga packs.** `ProductWindow` tiene las dos
+  vistas (`CollectionView` + `ShopView`) y una `section_`; una pestaña
+  de nav solo cambia cuál se dibuja. Las previews `.nvprev` ya
+  residentes se comparten.
+- **La compra es barata.** `EvaluatePurchase` es lógica pura sobre unos
+  pocos vectores de strings. La persistencia inmediata es un único
+  `SerializeAppState` (decenas de bytes) + un `rename` atómico — el
+  mismo camino que el flush de shutdown, no un camino nuevo. El
+  per-click NO se convierte en escritura por click (sigue con el
+  debounce de ~2s).
+- 20 ciclos open/close del Product UI (con el Shop en el medio): sin
+  leak, RSS asienta como en Block 06.2. `Close()` libera renderer +
+  texturas + las dos vistas.

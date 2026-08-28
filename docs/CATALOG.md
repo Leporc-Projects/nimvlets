@@ -1,4 +1,4 @@
-# Nimvlets — Catálogo de pets + switching en runtime (Block 04)
+# Nimvlets — Catálogo de pets + switching en runtime (Block 04 / 06 / 07)
 
 Esto describe la capa genérica y data-driven, construida en Block 04,
 que le permite al runtime saber qué Nimvlets existen, resolver cuál
@@ -60,15 +60,17 @@ plataforma que el resto de formatos de este repositorio).
 
 ```
 magic       : 8 bytes, "NVCATLG1"
-schemaVersion: uint32   (2 desde Block 06; ver §11)
+schemaVersion: uint32   (3 desde Block 07; ver §11–§12)
 entryCount  : uint32
 entries[entryCount]:
-  petId          : string  (uint32 byte-length + UTF-8 bytes)
-  variantId      : string
-  displayName    : string
-  packPath       : string
-  isDefault      : uint8 (0/1)
-  initiallyOwned : uint8 (0/1)   -- agregado en schema v2 (Block 06), ver §11
+  petId              : string  (uint32 byte-length + UTF-8 bytes)
+  variantId          : string
+  displayName        : string
+  packPath           : string
+  isDefault          : uint8 (0/1)
+  initiallyOwned      : uint8 (0/1)   -- agregado en schema v2 (Block 06), ver §11
+  priceClicks         : uint64        -- agregado en schema v3 (Block 07), ver §12
+  publiclyPurchasable : uint8 (0/1)   -- agregado en schema v3 (Block 07), ver §12
 ```
 
 **Determinista:** orden de campos fijo, sin iteración de map/set en
@@ -86,6 +88,9 @@ datos):
   permitidas (no es un duplicado, es el caso de variante).
 - la cantidad de entradas con `isDefault=true` debe ser exactamente
   una — cero o más de una se rechazan.
+- una entrada con `publiclyPurchasable=1` y `priceClicks=0` se rechaza
+  (precio cero no soportado — brief §26). El compilador Python la
+  rechaza también, y además rechaza un `price_clicks` negativo.
 
 **Deliberadamente NO valida** que cada `packPath` apunte a un archivo
 que realmente existe: eso requeriría tocar el filesystem desde un
@@ -329,12 +334,13 @@ usuario ni requiere display.
 - **Sin migración de schema del catálogo.** El `.nvcat` es un artefacto
   de build que se recompila desde su manifest en el mismo commit, no
   datos del usuario — a diferencia de `persistence::AppState`, que sí
-  migra v1→v2 en Block 06 (ver DEC-109). Un `schemaVersion` inesperado
-  se rechaza.
+  migra v1→v4 (ver DEC-109/DEC-116/DEC-124). Un `schemaVersion`
+  inesperado se rechaza; Block 07 subió a v3 (§12) y v2 ya no se
+  acepta.
 - **Sin verificación de existencia de `packPath` en el loader C++.**
   Ver §3/§5 para por qué, y dónde sí se descubre un pack faltante.
 
-## 11. Propiedad de pets (Block 06)
+## 11. Propiedad de pets (Block 06 → Block 07 autorizaciones)
 
 Block 06 sube el schema `NVCATLG1` a **v2** agregando un byte
 `initiallyOwned` por entrada, y agrega la capa de Collection encima del
@@ -352,25 +358,32 @@ switching de §6.
   ya existen.
 
 - **`catalog::CollectionModel`** (puro, sin SDL) — la vista de álbum:
-  `BuildCollectionModel(catalog, ownedPetIds, activeId)` agrupa las
-  filas del catálogo por `petId` lógico (las dos entradas de Frin
-  colapsan a un `CollectionItem` con dos variantes — un Nimvlet lógico,
-  brief §11) y deriva el estado de cada una:
-  `kActive` / `kOwnedInactive` / `kLocked`.
-  `CanActivate()` gatea el switching (un pet locked nunca puede
-  activarse en este bloque — sin compra hasta Block 07).
+  `BuildCollectionModel(catalog, owned, activeId)` agrupa las filas del
+  catálogo por `petId` lógico (las dos entradas de Frin colapsan a un
+  `CollectionItem` con dos variantes — un Nimvlet lógico, brief §11) y
+  deriva el estado de cada una: `kActive` / `kOwnedInactive` /
+  `kLocked`. `CanActivate()` gatea el switching.
   `EnsureActivePetOwned()` impone el invariante "el pet del escritorio
   siempre es propio". `SeedOwnershipFromCatalog()` produce la semilla.
 
-- **La propiedad es por `petId`, no por variante**: poseer `"frin"` da
-  acceso a macho y hembra.
+**Actualización Block 07 — `ownedPetIds` superseded.** La propiedad
+deja de ser "un conjunto de `petId`" y pasa a ser **autorizaciones
+capaces de variantes** (`catalog::PetEntitlement`) — ver §12 abajo,
+`docs/PERSISTENCE.md` §3 y DEC-123/DEC-124. Los símbolos de arriba se
+generalizaron: `BuildCollectionModel(catalog, entitlements, activeId)`,
+`CanActivate(model, petId, variantId)` (gate de variante exacta),
+`SeedEntitlementsFromCatalog()` (siembra como **pet entero**),
+`EnsureActiveEntitlementOwned()`. El enum de estados de
+`CollectionModel` **NO** cambió; cada `CollectionVariant` gana un flag
+`owned`.
 
-- **Frontera para el Shop (Block 07)**: cuando exista una compra, solo
-  agrega un `petId` a `AppState::ownedPetIds` y descuenta
-  `clickBalance`. `CollectionModel` y su enum de estados NO necesitan
-  rediseño (brief §9).
+- **Frontera para Block 09 (onboarding / shop oculto)**: escribe
+  `AppState::ownedEntitlements` con su propia lógica (una sola variante
+  de Frin, la otra por separado) sin tocar el catálogo ni el modelo.
+  Nada en Block 07 lo implementa.
 
-Ver `docs/PRODUCT_UI.md` §5–§6 y `docs/PERSISTENCE.md` §3 para el resto.
+Ver `docs/PRODUCT_UI.md` §5–§6/§16–§19 y `docs/PERSISTENCE.md` §3 para
+el resto.
 
 **Actualización (histórica, hasta Block 05):** hasta Block 04.3, Bunny
 seguía siendo un fixture de QA sintético (no arte real) y no existía
@@ -382,3 +395,42 @@ compartiendo `petId`, exactamente el mecanismo que este documento ya
 anticipaba desde Block 04. El catálogo actual (`assets/dev/
 pet_catalog_manifest.json`) tiene 4 entradas: Bunny (default), Nidir,
 Frin/male, Frin/female.
+
+## 12. Metadatos de economía + Shop (Block 07)
+
+Block 07 sube `NVCATLG1` a **v3** agregando, por entrada, `priceClicks`
+(`u64`) y `publiclyPurchasable` (`u8`) — el precio de compra y la
+elegibilidad para el Shop público como **DATO**, nunca una rama por pet
+en el runtime/UI (brief §10). Sin ruta de migración (es un artefacto de
+build); v2 ya no se acepta.
+
+- **`catalog::PetEntitlement { petId, variantId }`** — la autorización
+  genérica. `variantId == ""` = el **pet entero**; no vacío = **solo
+  esa variante**. `Covers()`, `CanonicalizePetEntitlements()` (orden +
+  dedup + subsunción, sin conocer el catálogo), `OwnsIdentity()`. Ver
+  `docs/PRODUCT_UI.md` §19.
+
+- **`catalog::ShopModel`** (puro) — `BuildShopModel(catalog, balance,
+  entitlements)` produce una fila por pet lógico con al menos una
+  entrada `publiclyPurchasable`. **Frin no aparece nunca** (sus dos
+  entradas están `publiclyPurchasable: false` — brief §11). Cada
+  `ShopItem` lleva `priceClicks`, `status`
+  (`kAffordable`/`kInsufficientBalance`/`kOwned`), `clicksShort` y
+  `entitlementTarget` (`{petId, variantId}` de la entrada pública —
+  para Bunny/Nidir es `{petId, ""}`).
+
+- **`catalog::EvaluatePurchase`** (puro, sin GUI) — la política de
+  compra: `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` /
+  `kNotPurchasable` (no público o precio 0) / `kInvalidTarget`. En
+  cualquier fallo el estado resultante == el de entrada (nunca parcial);
+  la resta solo corre tras `balance >= precio` → sin underflow. `src/app`
+  aplica el resultado de forma atómica (balance + propiedad en el mismo
+  `AppState`, un solo write — `docs/PERSISTENCE.md` §6, DEC-126).
+
+- **Precios PROVISIONALES de QA/economía** (no balanceo final): Bunny
+  120, Nidir 300. Frin `price_clicks: 0`, `publicly_purchasable:
+  false`. El manifest de dev (`assets/dev/pet_catalog_manifest.json`)
+  los declara con `schema_version: 3`. Regenerar tras editar:
+  `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
+
+Ver `docs/PRODUCT_UI.md` §16–§19 y DEC-125/DEC-126/DEC-127.

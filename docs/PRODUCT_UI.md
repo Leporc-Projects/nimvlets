@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Quick Menu (Block 06 / 06.1 / 06.2)
+# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -7,6 +7,19 @@ menús de macOS, y los controles de usuario (mostrar/ocultar, bloquear
 posición, tamaño, opacidad). Es el primer bloque en el que Nimvlets se
 siente como una aplicación de escritorio coherente y no solo un runtime
 de pet.
+
+**Actualización Block 07 (wallet + Shop + autorizaciones capaces de
+variantes).** El click counter pasa a ser un **wallet real** y se
+agrega una segunda sección al Product UI, el **Shop**, alcanzable por
+una navegación de texto "Collection · Shop". Comprar consume clicks y
+otorga propiedad permanente, visible al instante en las dos secciones y
+activable sin reiniciar. La propiedad deja de ser "un conjunto de
+`petId`" y pasa a ser **autorizaciones** (`catalog::PetEntitlement`: un
+`petId`, opcionalmente una variante concreta) — ver §16–§19,
+`docs/CATALOG.md` §12 y DEC-123..DEC-127. **Frin no aparece en el Shop
+normal.** Las descripciones de los tres pets con arte real se alargaron
+a un par de frases (§6.4-editorial). Lo demás de Block 06/06.1/06.2
+queda **congelado** (brief §2).
 
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
@@ -50,12 +63,14 @@ Dentro de alcance:
 - separación de ciclo de vida: cerrar la Collection NO termina la app,
   no resetea el pet ni el balance, no detiene el runtime.
 
-Explícitamente fuera de alcance (ver §11): compras / precios / gastar
-clicks, onboarding / selección de starter / el secreto de 44 s, la
-bandeja de Windows y su equivalente en Linux, conteo global de clicks,
-preferencia de fullscreen, launch-at-login, dark mode, una página de
-Settings avanzada, animaciones nuevas de pet, y la corrección visual de
-`lie_to_sit` de Frin (deuda conocida, congelada — AGENTS.md, brief §21).
+Explícitamente fuera de alcance de Block 06 (ver §11) — **compras /
+precios / gastar clicks se agregaron en Block 07, ver §16–§19**;
+sigue fuera: onboarding / selección de starter / el secreto de 44 s /
+el shop oculto de starters, la bandeja de Windows y su equivalente en
+Linux, conteo global de clicks, preferencia de fullscreen,
+launch-at-login, dark mode, una página de Settings avanzada,
+animaciones nuevas de pet, y la corrección visual de `lie_to_sit` de
+Frin (deuda conocida, congelada — AGENTS.md, brief §21).
 
 ## 2. Tres capas, un proceso
 
@@ -69,9 +84,11 @@ Nimvlets (un proceso, un event loop — src/app/SpikeApp.cpp)
 |
 +-- Product UI             ventana normal (con marco, enfocable,
 |   (src/productui/)        redimensionable). Se abre/cierra bajo demanda.
-|   +-- Collection          (Shop y Settings son bloques futuros — NO
-|   +-- [Shop]  Block 07     existen ni como pantallas vacías, brief §7.)
-|   +-- [Settings] Block 08
+|   +-- Collection          Navegación por pestañas de texto
+|   +-- Shop  (Block 07)     "Collection · Shop" — misma ventana, misma
+|   +-- [Settings] Block 08   cabecera compartida (§17). Settings sigue
+|                             siendo futuro — NO existe ni como pantalla
+|                             vacía (brief §17).
 |
 +-- System Shell           presencia nativa fuera de las ventanas.
     (src/platform/*)        macOS: NSStatusItem + menú rápido (real).
@@ -172,13 +189,15 @@ Ver `docs/CATALOG.md` §11 para el detalle. En resumen:
   cuando `ownershipSeeded` es false**, y lo pone en true.
 - **Invariante**: `catalog::EnsureActivePetOwned()` garantiza que el
   pet que está en el escritorio siempre sea propio (brief §9).
-- **Frontera para el Shop (Block 07)**: cuando exista una compra, solo
-  tiene que agregar un `petId` a `ownedPetIds` y descontar
-  `clickBalance` — el modelo de Collection (`kActive`/`kOwnedInactive`/
-  `kLocked`) NO necesita rediseño (brief §9). Un bloque futuro de
-  onboarding (Block 09) reemplaza la siembra por la elección real de
-  starter escribiendo `ownedPetIds` + `ownershipSeeded = true` con su
-  propia lógica, sin tocar el catálogo.
+- **Block 07 — autorizaciones capaces de variantes** (ver §19):
+  `ownedPetIds` (conjunto de `petId`) queda **superseded** por
+  `AppState::ownedEntitlements` (pares `{petId, variantId}`). La compra
+  del Shop agrega una autorización y descuenta `clickBalance` en un
+  solo `AppState` atómico; el enum de estados de `CollectionModel`
+  (`kActive`/`kOwnedInactive`/`kLocked`) NO necesitó rediseño. Un
+  bloque futuro de onboarding (Block 09) reemplaza la siembra por la
+  elección real de starter escribiendo `ownedEntitlements` +
+  `ownershipSeeded = true` con su propia lógica, sin tocar el catálogo.
 
 `catalog::CollectionModel` (puro) deriva la vista: agrupa las filas del
 catálogo por `petId` lógico (las dos entradas de Frin colapsan a una
@@ -547,39 +566,232 @@ Contrato de idioma de producto — ver DEC-115/DEC-116.
   `ProductWindow::SetLanguage` (la vista redibuja). El id del widget con
   foco es semántico, así que el foco se conserva si ese widget sigue
   existiendo (brief §21).
-- **Copy editorial** (`productui::PetEditorial`, DEC-122): tabla pura
-  por id de catálogo + idioma (data-driven, no hard-codeada en la
-  vista). `Species(petId, lang)` y `ShortDescription(petId, lang)`
-  sirven la copy bilingüe **aprobada por el owner** para los tres pets
-  con arte real:
+- **Copy editorial** (`productui::PetEditorial`, DEC-122 → DEC-127):
+  tabla pura por id de catálogo + idioma (data-driven, no hard-codeada
+  en la vista). `Species(petId, lang)` y `ShortDescription(petId, lang)`
+  sirven la copy bilingüe **aprobada por el owner**. Block 07 (brief
+  §19) alargó las descripciones a un **par de frases** — un poco más de
+  carácter, sin volverse un volcado de lore; la vista las envuelve con
+  `TextCache::DrawTextWrapped` (word-wrap greedy) en la columna del
+  hero, con alto reservado para hasta 3 líneas.
 
-  | pet | especie EN / ES | descripción EN / ES |
+  | pet | especie EN / ES | descripción EN / ES (Block 07) |
   |---|---|---|
-  | bunny | Rabbit / Conejo | Small, curious, and never in a hurry. / Pequeño, curioso y sin ninguna prisa. |
-  | nidir | Black dragon / Dragón negro | Quiet wings. Bright eyes. Fire when it matters. / Alas quietas. Ojos brillantes. Fuego cuando hace falta. |
-  | frin | White wolf / Lobo blanco | Watchful, calm, and happiest close by. / Atento, tranquilo y más feliz cerca. |
+  | bunny | Rabbit / Conejo | Small, curious, and never in a hurry. Bunny prefers quiet corners, tiny adventures, and staying close while you work. / Pequeño, curioso y sin ninguna prisa. Bunny prefiere los rincones tranquilos, las pequeñas aventuras y quedarse cerca mientras trabajas. |
+  | nidir | Black dragon / Dragón negro | Quiet wings, bright eyes, and fire when it matters. Nidir watches the desktop like a tiny guardian, calm until something catches his attention. / Alas quietas, ojos brillantes y fuego cuando hace falta. Nidir vigila el escritorio como un pequeño guardián, tranquilo hasta que algo llama su atención. |
+  | frin | White wolf / Lobo blanco | Watchful, calm, and happiest close by. Frin carries the patience of a quiet wolf, always alert without needing to make a fuss. / Atento, tranquilo y más feliz cerca. Frin tiene la paciencia de un lobo sereno, siempre alerta sin necesidad de hacer ruido. |
 
   El resto del roster devuelve `""` (el hero omite la línea) hasta que
-  se le escriba copy propia. Los nombres propios nunca están en la
-  tabla.
+  se le escriba copy propia. La copy aprobada de Block 07 SÍ nombra al
+  pet en su segunda frase (levanta la restricción de DEC-122); nunca
+  nombra a OTRO Nimvlet ni a "Nimvlets".
+
+- **Strings de Shop + wallet (Block 07)** — nuevas `StringKey`, EN/ES:
+  `kShop` ("Shop"/"Tienda"), `kGetPetPrefix` ("Get "/"Obtener " — se
+  concatena con un nombre propio SIN traducir), `kInYourCollection`,
+  `kCancel`, `kConfirm`, `kNeedMoreClicksOne`/`kNeedMoreClicksMany`
+  ("Need 1 more click"/"Need {n} more clicks" — "Te falta 1 clic"/"Te
+  faltan {n} clics"), `kSpendPromptOne`/`kSpendPromptMany` ("Spend {n}
+  clicks to add {pet} to your collection?"). `productui::Format`
+  rellena los placeholders `{n}`/`{pet}` — sin ninguna rama de idioma
+  fuera de la tabla. Singular correcto (`1 click`/`1 clic`). "Shop" SÍ
+  se traduce; "Nimvlets" y los nombres propios de pet no.
 
 ## 15. Intencionalmente diferido
 
 | Feature | Bloque |
 |---|---|
-| Shop: comprar Nimvlets, precios, gastar clicks | Block 07 |
+| ~~Shop: comprar Nimvlets, precios, gastar clicks~~ | **hecho en Block 07 — ver §16–§19** |
 | Página de Settings avanzada | Block 08 |
-| Onboarding / selección de starter / secreto de 44 s / shop oculto de starters | Block 09 |
+| Onboarding / selección de starter / secreto de 44 s / shop oculto de starters (incluida la 2ª variante de Frin) | Block 09 — la arquitectura de autorizaciones ya lo soporta (§19), NADA en Block 07 lo implementa ni lo insinúa |
 | Bandeja de Windows / equivalente de Linux para el System Shell | futuro, hardware mediante |
 | Texto de producto en Windows/Linux (DirectWrite / fontconfig) | futuro |
 | Conteo global de clicks, permiso de input global | futuro, opt-in explícito (AGENTS.md §14) |
 | Preferencia de fullscreen, launch-at-login, dark mode | futuro |
 | Corrección visual de `lie_to_sit` de Frin | deuda conocida, congelada (brief §21) |
 | Idiomas más allá de EN/ES | futuro (el catálogo de claves está listo; agregar un idioma es una columna más) |
-| Personalidades/lore extensas por Nimvlet | futuro con dirección de contenido — 06.2 autoró una especie + una línea por Bunny/Nidir/Frin (DEC-122); el resto del roster sin copy |
-| Menú `Language` en Windows/Linux | con el System Shell nativo de esas plataformas (futuro) |
+| **Fondo escénico ilustrado por Nimvlet en el hero** | futuro — nota arquitectónica en §16.4; NO se generan ni envían imágenes en Block 07, no se agrega un sistema de escenas, sin red en runtime |
+| Personalidades/lore extensas por Nimvlet | futuro con dirección de contenido — Block 07 alargó la descripción a un par de frases para Bunny/Nidir/Frin (DEC-127); el resto del roster sin copy |
+| Menú `Language` / entrada al Shop en el menú de la barra (Windows/Linux, o macOS) | congelado — el Product UI provee el Shop, el menú NO cambia (brief §22) |
 | Microanimación de hover temporizada (120–160 ms) | descartada a propósito (DEC-118) — la performance manda |
-| Mover `PetEditorial` / accent / preview a datos del catálogo o del pack | futuro (hoy son tablas en `src/productui`, escalables pero no data del catálogo) |
+| Mover `PetEditorial` / accent / preview / precio a datos del catálogo o del pack | futuro (hoy `PetEditorial`/`PetAccent` son tablas en `src/productui`; el precio y `publiclyPurchasable` SÍ están en el catálogo desde Block 07 — DEC-125) |
+| Notificación al ganar clicks / toast de compra exitosa | descartado a propósito (brief §3/§15) — el balance y el estado se actualizan en vivo, sin toast |
 
 Nada de lo anterior está implementado ni insinuado en el código de
-Block 06 / 06.1 / 06.2.
+Block 06 / 06.1 / 06.2 / 07.
+
+## 16. El Shop (Block 07)
+
+El Shop es una **sección separada** del Product UI — no reemplaza a la
+Collection ni la conoce. Se siente como "conocer a otro Nimvlet", no
+una plantilla de tienda (brief §8): **sin** sidebar, card wall,
+dashboard, carrito, búsqueda, filtros, categorías, banners ni
+countdowns. Reusa la composición hero + gallery de la Collection, el
+acento de identidad por pet, el hero stage, la tipografía del sistema y
+las previews `.nvprev` livianas (§6.4 — el Shop **no abre ningún
+`.nvpack`** para navegar).
+
+```
+Nimvlets                                          312 clicks   <- cabecera COMPARTIDA
+Collection  ·  Shop                                             <- pestañas de texto (§17)
+
+ ╭─ hero stage teñido con el acento del pet ─╮
+ │   [ ARTE GRANDE ]   Nidir                  │   <- HERO: el Nimvlet del Shop
+ │   del Nimvlet       ──                     │      seleccionado
+ │                     Black dragon           │      (nombre / regla de acento /
+ │                     Quiet wings, bright…    │       especie / descripción /
+ │                     300 clicks             │       precio / acción-o-estado)
+ ╰─────────────────────[ Get Nidir ]──────────╯
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  <- divisor = borde del 2º plano
+                    [art]                        <- GALLERY: los demás pets del Shop
+                    Bunny                           (un click promueve a hero)
+                    In your collection
+```
+
+### 16.1 Contenido del Shop — DATO, no ramas
+
+Qué pets aparecen, su precio, y a qué autorización dan derecho son
+**datos del catálogo** (`NVCATLG1` v3 — `docs/CATALOG.md` §12): por
+entrada, `priceClicks` (`u64`) y `publiclyPurchasable` (`u8`). NUNCA
+hay un `if (pet == "nidir")` en el runtime/UI (brief §10). Una entrada
+`publiclyPurchasable` con precio 0 la rechazan el compilador y el
+loader.
+
+`catalog::ShopModel` (puro) — `BuildShopModel(catalog, balance,
+entitlements)` produce una fila por pet lógico con al menos una entrada
+`publiclyPurchasable`. **Frin nunca aparece** (sus dos entradas están
+`publiclyPurchasable: false`) — aunque su entrada de catálogo exista, el
+modelo no la lista (brief §11). Cada `ShopItem` lleva `priceClicks`,
+`status` (`kAffordable` / `kInsufficientBalance` / `kOwned`),
+`clicksShort` y `entitlementTarget`.
+
+**Precios PROVISIONALES de QA/economía** (no balanceo final): Bunny
+120, Nidir 300, Frin no público. Con la semilla de dev el owner posee
+Bunny + Frin y Nidir está locked, así que el Shop ejercita `kOwned`
+(Bunny), `kAffordable`/`kInsufficientBalance` (Nidir según el balance)
+y la ausencia total (Frin) con solo el contenido real que ya existe.
+
+### 16.2 Estados del hero del Shop
+
+La línea de estado, el botón y la confirmación son **mutuamente
+excluyentes**:
+
+| Estado | Muestra |
+|---|---|
+| `kAffordable`, sin confirmar | precio + botón `Get <name>` (relleno/tinta del acento del pet — nunca casi-negro) |
+| `kAffordable`, confirmando | precio + `¿Gastar N clics para añadir <name> a tu colección?` + `Cancelar` · `Confirmar` |
+| `kInsufficientBalance` | precio + línea contenida `Need N more clicks` (tono atenuado), **sin botón**, sin ninguna insinuación de "gana clics así" |
+| `kOwned` | `● In your collection` (punto en el acento), **sin precio, sin botón** |
+
+`<name>` es el nombre propio, **nunca traducido** ("Get Nidir" /
+"Obtener Nidir").
+
+### 16.3 `.nvprev` / performance
+
+El Shop reusa `PetPreviewCache::LoadBundle` de Block 06.2 — el mismo
+bundle liviano cargado una vez al abrir el Product UI sirve a las dos
+secciones; cambiar de sección o de hero del Shop es un lookup en un
+mapa sobre texturas ya residentes, sin I/O, sin abrir packs, dentro del
+redibujo event-driven normal. `ProductWindow::RenderIfNeeded()` sigue
+siendo un no-op salvo `dirty_`/`EXPOSED`; el cálculo de `waitMs` del
+event loop del pet NO se toca (sin término de deadline para la ventana
+de producto). Idle del Shop abierto ≈ 0 % CPU, igual que la Collection.
+
+### 16.4 Fondo escénico del hero — nota arquitectónica, NO implementada
+
+El owner mencionó (brief §20) que un futuro hero podría usar un fondo
+ilustrado único del universo Nimvlets. **Block 07 no genera ni envía
+esas imágenes** y no agrega un sistema de escenas. El `PetAccent` +
+hero stage actuales ya son un "seam" de datos de presentación por pet;
+agregar más adelante un `backdrop` estático opcional (un asset local
+optimizado, sin red en runtime) no se vuelve más difícil por nada de lo
+que hace Block 07.
+
+## 17. Navegación Collection ↔ Shop
+
+`productui::ProductSection { kCollection, kShop }`, dueño en
+`ProductWindow`. La cabecera es **compartida** (`SectionNav` puro +
+`SectionHeaderView` SDL): título "Nimvlets" + balance de clics + una
+fila de pestañas de texto compacta `Collection · Shop`, idéntica en las
+dos secciones. Reemplaza al viejo título/subtítulo de sección de Block
+06 ("Collection" / "Your companions").
+
+- **Mouse y teclado**: los ids `nav:collection` / `nav:shop` encabezan
+  el anillo de foco de cada sección; Tab/Enter/Space navegan; el chrome
+  de foco sigue el patrón "focus-visible por modalidad" de Block 06.2.
+- Tocar una pestaña cambia de sección **en la misma ventana**. **El
+  runtime del pet no se toca** — no se recrea, no se recarga ningún
+  pack (brief §17).
+- El foco se conserva razonablemente al cambiar de idioma (ids
+  semánticos).
+- Al **reabrir** el Product UI se vuelve a Collection — no se recuerda
+  la última sección (sin una razón de bajo costo para hacerlo, brief
+  §17). No se sobre-construye routing.
+- El **menú rápido de la barra NO cambia** (brief §22): el Shop se
+  alcanza solo desde la navegación del Product UI, no hay un item
+  "Shop…" en el `NSStatusItem`.
+
+## 18. Wallet + transacción de compra
+
+Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
+**gastables**:
+
+- **Confirmación inline, no accidental** (brief §12): "Get <pet>" abre
+  una pregunta contenida en la columna del hero (no un modal gigante).
+  El foco arranca en **Cancelar**; `Esc` o "Cancelar" la cierran sin
+  tocar nada; solo "Confirmar" emite la compra. Un click perdido nunca
+  gasta.
+- **Política pura** `catalog::EvaluatePurchase` (testeable sin GUI —
+  brief §14): `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` /
+  `kNotPurchasable` (no público o precio 0) / `kInvalidTarget`. En
+  cualquier fallo el estado resultante == el de entrada; **nunca una
+  mutación parcial**. La resta solo corre tras `balance >= precio` →
+  **sin underflow posible**.
+- **Transacción atómica** `SpikeApp::HandlePurchaseRequest`: si es
+  `kSuccess`, muta `clickBalance` **y** `ownedEntitlements` en el MISMO
+  `AppState`, sin escrituras intermedias, y **flushea de inmediato**
+  (`FlushPersistedState()` — un solo `SerializeAppState` + un solo
+  `rename` atómico). Un crash no puede persistir "gasté el balance pero
+  no tengo el pet". El per-click normal SIGUE con el debounce de ~2s
+  (`docs/PERSISTENCE.md` §6); la persistencia inmediata es la única
+  excepción, y es solo llamar al flush existente.
+- **Consistencia inmediata** (brief §16): tras una compra exitosa el
+  Shop pasa a `In your collection` y la Collection marca el pet como
+  poseído, sin reiniciar el Product UI ni la app. Activar el pet recién
+  comprado usa el switch transaccional de runtime que ya existía
+  (`TrySwitchActivePet`); cambiar entre contenido ya poseído sigue
+  siendo gratis.
+- **Balance visible**: discreto, arriba a la derecha, en la cabecera
+  compartida. `312 clicks` / `1 click` (singular) — `312 clics` / `1
+  clic`. Se actualiza en vivo con cada click del pet y tras una compra.
+  Sin icono de "monedas", sin wallet premium, sin toast de éxito.
+
+## 19. Autorizaciones capaces de variantes (`catalog::PetEntitlement`)
+
+`AppState::ownedPetIds` (conjunto de `petId`) queda **superseded** por
+`AppState::ownedEntitlements`:
+
+- **`catalog::PetEntitlement { petId, variantId }`** — `variantId == ""`
+  = el **pet entero** (cualquier variante); no vacío = **solo esa
+  variante**. `Covers(PetIdentity)` es el gate de activación;
+  `CanonicalizePetEntitlements` (orden + dedup + subsunción: `(p,"")`
+  descarta `(p,<var>)`) mantiene la lista determinista, sin conocer el
+  catálogo.
+- **`persistence::OwnedEntitlement`** — el mismo par, como dato plano en
+  `src/persistence` (sin dependencia de `src/catalog`); `src/app`
+  puentea, la misma división que `activePetId` (string) vs.
+  `PetIdentity`.
+- **`CollectionModel`** — cada `CollectionVariant` lleva un flag
+  `owned`; `CanActivate(model, petId, variantId)` exige la variante
+  EXACTA. Una variante no poseída de un Frin por lo demás poseído se
+  muestra en el selector **atenuada**, no es activable, y **sin ninguna
+  ruta de compra visible** (el shop oculto de starters es futuro — brief
+  §6). Tras la migración el owner tiene las dos variantes de Frin, así
+  que ese estado no le aparece.
+- **Migración** (AppState `v3 → v4`, DEC-124): cada `petId` poseído se
+  vuelve una autorización de **pet entero** `(petId, "")` — un Frin de
+  Block 06 sigue dando macho y hembra. Ver `docs/PERSISTENCE.md` §3.
+- **Frontera para Block 09**: onboarding y shop oculto escriben
+  `ownedEntitlements` con su propia lógica (una sola variante de Frin,
+  la otra por separado) sin tocar el catálogo ni el modelo. **Nada en
+  Block 07 lo implementa.**

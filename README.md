@@ -5,11 +5,18 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 06.2 — Collection Identity + Instant
-Previews + Retina Text** (hero stage con acento por pet, botón de
-acción tintado, previews compiladas livianas `.nvprev` en vez del pack
-completo, texto nítido en Retina, copy editorial EN/ES; ver
-[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md)), sobre **Block 06.1 —
+Este repositorio está en **Block 07 — Shop + Wallet Economy** (el click
+counter se vuelve un wallet real: una segunda sección del Product UI,
+el **Shop**, alcanzable por una navegación de texto `Collection · Shop`;
+comprar consume clicks y otorga propiedad permanente, con confirmación
+inline para no gastar por accidente; la propiedad pasa a ser
+**autorizaciones capaces de variantes** — un `petId` y opcionalmente
+una variante concreta; descripciones editoriales un poco más largas;
+ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §16–§19), sobre
+**Block 06.2 — Collection Identity + Instant Previews + Retina Text**
+(hero stage con acento por pet, botón de acción tintado, previews
+compiladas livianas `.nvprev` en vez del pack completo, texto nítido en
+Retina, copy editorial EN/ES), sobre **Block 06.1 —
 Collection Visual Polish + EN/ES Localization** (composición hero +
 gallery, acento de identidad por pet, idioma inglés/español) y
 **Block 06 — Product Shell + Collection + Native Quick Menu**,
@@ -155,20 +162,37 @@ Combiná `NIMVLETS_DEV_SELECT_PET` con `NIMVLETS_DEV_APPDATA_DIR` para
 probar cualquier pet sin arriesgar tu estado persistido real — ver
 "Owner manual QA" más abajo para la lista completa de comandos.
 
-### Product UI (Block 06 / 06.1 / 06.2)
+### Product UI (Block 06 / 06.1 / 06.2 / 07)
 
 El menú de la barra de macOS (icono monocromo arriba a la derecha)
-abre la **Collection**: un álbum de tus Nimvlets con una composición
+abre el Product UI: una ventana normal con dos secciones, **Collection**
+y **Shop**, alcanzables por una fila de texto `Collection · Shop`
+(mouse o teclado; el runtime del pet no se toca al cambiar).
+
+La **Collection** es un álbum de tus Nimvlets con una composición
 **hero + gallery** — el Nimvlet seleccionado es el protagonista, con su
 arte grande sobre un *hero stage* teñido con su acento de identidad, su
-especie, una línea de descripción, estado, selector tipográfico de
-variante (Frin) y un botón de acción con el tinte del pet; los demás en
-una gallery discreta sobre un segundo plano. Switch de pet en vivo. El
-click balance (visible SOLO acá). El mismo menú tiene Show/Hide, Lock
+especie, una descripción (un par de frases desde Block 07), estado,
+selector tipográfico de variante (Frin) y un botón de acción con el
+tinte del pet; los demás en una gallery discreta sobre un segundo
+plano. Switch de pet en vivo.
+
+El **Shop** (Block 07) lista los Nimvlets **públicamente comprables**
+con su precio en clics y su estado (poseído / asequible / saldo
+insuficiente). "Get <pet>" abre una confirmación inline
+("¿Gastar N clics…?" · Cancelar / Confirmar) — un solo click perdido
+nunca gasta. Al confirmar, el balance baja, la propiedad es permanente
+y aparece al instante en las dos secciones; el pet recién comprado se
+puede activar sin reiniciar. **Frin no aparece en el Shop normal.**
+Precios provisionales de QA: Bunny 120, Nidir 300.
+
+El **click balance** (visible SOLO acá) está en la cabecera compartida,
+arriba a la derecha. El menú de la barra NO cambia — Show/Hide, Lock
 Position, Size (Small/Medium/Large — Large = 1.15), Opacity
-(100/85/70/55 %), **Language ▸ (English / Español)** y Quit. Cambiar de
-idioma actualiza todo al instante, sin reiniciar. Cerrar la Collection
-NO termina la app. Ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
+(100/85/70/55 %), **Language ▸ (English / Español)** y Quit; el Shop se
+alcanza solo desde el Product UI. Cambiar de idioma actualiza todo al
+instante, sin reiniciar. Cerrar el Product UI NO termina la app. Ver
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md).
 
 El arte del hero/gallery sale de artefactos `.nvprev` livianos
 (`assets/dev/<pack>.nvprev`, ~0,3–0,4 MB c/u) — **la Collection ya no
@@ -207,6 +231,30 @@ NIMVLETS_DEV_OPEN_COLLECTION=frin/male NIMVLETS_DEV_VARIANT_FOCUS=female \
 # SO) y salir. Combinable con lo de arriba.
 NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# --- Shop (Block 07) ---------------------------------------------------
+# NIMVLETS_DEV_SECTION=shop|collection  -> sección visible al abrir.
+# NIMVLETS_DEV_SHOP_PET=<petId>         -> hero del Shop.
+# NIMVLETS_DEV_SHOP_CONFIRM=1           -> abre la confirmación inline.
+# NIMVLETS_DEV_BUY=<petId>              -> confirma una compra (no
+#   interactivo) ANTES de abrir el UI: EvaluatePurchase -> mutación
+#   atómica de balance + propiedad -> flush inmediato. Combinar con
+#   NIMVLETS_DEV_CLICK_TEST_COUNT=<n> para tener saldo y con
+#   NIMVLETS_DEV_APPDATA_DIR para no tocar el estado real.
+
+# Shop en estado "asequible" (saldo 500, Nidir 300):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
+  NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_SHOP_PET=nidir \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/shop.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Shop tras comprar Nidir (balance 200, "In your collection"):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa2 NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
+  NIMVLETS_DEV_BUY=nidir NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_SHOP_PET=nidir \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/shop_owned.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 ```
 

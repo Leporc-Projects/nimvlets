@@ -4383,3 +4383,169 @@ la descripción de una frase aprobadas:
 El resto del roster sigue devolviendo `""` hasta que se le escriba copy
 propia (el hero omite la línea). Los nombres propios nunca están en la
 tabla.
+
+---
+
+### DEC-123 — Modelo de propiedad capaz de variantes: `catalog::PetEntitlement`
+**Status:** DECIDIDO · Block 07. **Supersede** el `AppState::ownedPetIds`
+(conjunto de `petId`) de Block 06 (DEC-108) para la propiedad; el enum
+de estados de `CollectionModel` (`kActive`/`kOwnedInactive`/`kLocked`)
+NO cambia.
+
+**Contexto.** Block 06 modelaba la propiedad como un conjunto de
+`petId`: poseer `"frin"` daba las dos variantes. La verdad de producto
+final (PRD §4) es que el onboarding otorga UNA variante de Frin y la
+otra se obtiene por separado en el shop oculto de starters. Un conjunto
+de `petId` no puede expresar "posee solo Frin macho".
+
+**Decisión.** `catalog::PetEntitlement { petId, variantId }` (misma
+forma que `PetIdentity`, tipo propio por semántica distinta):
+`variantId == ""` = **el pet entero** (cualquier variante, presente o
+futura); no vacío = **solo esa variante**. `Covers(PetIdentity)`
+resuelve el gate de activación. `CanonicalizePetEntitlements` deja la
+lista determinista: descarta `petId` vacío, ordena por
+`(petId, variantId)`, dedup, y aplica **subsunción** — si existe
+`(p, "")` se descartan las `(p, <var>)`. Sin conocimiento del catálogo
+(lógica de strings pura), así que sirve igual al serializer y a
+`src/app`.
+
+`CollectionModel` consume autorizaciones: cada `CollectionVariant`
+lleva un flag `owned`; `CanActivate(model, petId, variantId)` exige la
+variante EXACTA. `SeedEntitlementsFromCatalog` siembra **pet entero**
+por cada `initiallyOwned` (mismo alcance que el `ownedPetIds` de dev de
+Block 06). `EnsureActiveEntitlementOwned` agrega la autorización exacta
+de la identidad activa si falta.
+
+Block 07 NO implementa onboarding ni el shop oculto — solo deja el
+modelo listo (brief §4/§31).
+
+---
+
+### DEC-124 — AppState schema v4: propiedad como autorizaciones; migración desde v1/v2/v3
+**Status:** DECIDIDO · Block 07. Extiende DEC-109/DEC-116.
+
+**Decisión.** `kCurrentSchemaVersion` 3 → 4. `AppState::ownedPetIds`
+(`string[]`) → `AppState::ownedEntitlements`
+(`persistence::OwnedEntitlement { petId, variantId }[]` — datos planos,
+sin dependencia de `src/catalog`; `src/app` puentea a
+`catalog::PetEntitlement`). El bloque v2/v3 (lock/size/opacity/
+language) NO cambia de layout; solo la lista de propiedad pasa de
+`string[]` a pares `(petId, variantId)`.
+
+`DeserializeAppState` generaliza la migración hacia adelante: lee
+cualquier versión en `[1, kCurrentSchemaVersion]` (hoy 1, 2, 3 y 4). Un
+archivo v2/v3 se lee con su layout y **cada `petId` poseído se migra a
+una autorización de PET ENTERO** `(petId, "")` — así un Frin de Block
+06 (que exponía macho y hembra) sigue dando las dos variantes (brief
+§5). El click balance, la posición de ventana, el idioma, las
+preferencias de tamaño/opacidad/lock y el pet/variante activo
+**sobreviven** intactos. `schemaVersion` se marca como el actual para
+que el próximo `Save()` lo reescriba como v4. Una versión más nueva
+desconocida (v5+) o basura sigue tratándose como dato inutilizable.
+
+`NormalizeOwnedEntitlements` (en el serializer) impone orden + dedup
+sobre una copia para que el formato sea determinista byte a byte;
+`src/app` aplica además la canonicalización semántica completa
+(`catalog::CanonicalizePetEntitlements`, con subsunción) antes de cada
+`Save()`.
+
+---
+
+### DEC-125 — Catálogo schema "NVCATLG1" v3: precio + visibilidad de Shop como DATO
+**Status:** DECIDIDO · Block 07. Extiende DEC-107 (schema v2 / propiedad
+de dev).
+
+**Contexto.** El brief §10 es explícito: el precio de compra y la
+elegibilidad para el Shop público deben ser DATO, nunca una rama
+`if (pet == "nidir")` en el runtime/UI.
+
+**Decisión.** `NVCATLG1` v2 → v3: por entrada se agregan `priceClicks`
+(`u64`) y `publiclyPurchasable` (`u8`). El `.nvcat` es un artefacto de
+build (se recompila desde su manifest en el mismo commit), así que —
+igual que en v1→v2 — NO hay ruta de migración: `tools/
+compile_pet_catalog.py` sube a `schema_version: 3` y una versión
+distinta se rechaza. Una entrada `publiclyPurchasable` con
+`priceClicks == 0` la rechazan tanto el compilador como el loader C++
+(precio cero no soportado — brief §26).
+
+**Precios PROVISIONALES de QA/economía** (no balanceo final,
+documentados como tales): Bunny 120, Nidir 300. **Frin queda
+`publiclyPurchasable: false` en las DOS variantes** — su obtención es
+onboarding + shop oculto de starters, trabajo futuro que NO se
+implementa ni se insinúa (brief §11). El `.nvprev` liviano de Block
+06.2 no cambia: el Shop reusa las mismas previews (sin abrir ningún
+`.nvpack` para navegar).
+
+---
+
+### DEC-126 — Compra del Shop: política pura + transacción atómica de wallet
+**Status:** DECIDIDO · Block 07.
+
+**Decisión.**
+- **`catalog::EvaluatePurchase`** (puro, sin GUI — brief §14): evalúa
+  una compra contra el catálogo + balance + autorizaciones y devuelve
+  el estado RESULTANTE sin mutar nada. Categorías: `kSuccess` /
+  `kAlreadyOwned` / `kInsufficientBalance` / `kNotPurchasable`
+  (no público, o precio 0) / `kInvalidTarget` (petId no está en el
+  catálogo). En cualquier fallo `newBalance` == balance de entrada y
+  `newEntitlements` == autorizaciones de entrada — nunca una mutación
+  parcial. La resta solo corre tras verificar `balance >= precio`, así
+  que **no hay underflow posible**.
+- **`SpikeApp::HandlePurchaseRequest`**: si es `kSuccess`, muta
+  `clickBalance` **y** `ownedEntitlements` en el MISMO `AppState`, sin
+  escrituras intermedias, y llama a `FlushPersistedState()` — un solo
+  `SerializeAppState` + un solo `rename` atómico persisten los dos
+  juntos. Un crash no puede dejar "gasté el balance pero no tengo el
+  pet". El per-click normal SIGUE usando el debounce de ~2s (perder
+  ~2s de clicks es trivial); la persistencia inmediata es la única
+  excepción, y es solo llamar al flush que ya existía (brief §13).
+- **Confirmación inline** (`ShopView::confirming_`, estado local de la
+  vista): "Get <pet>" abre la pregunta; el foco arranca en "Cancel";
+  Esc o "Cancel" la cierran sin tocar nada; "Confirm" emite la compra.
+  Un solo click perdido nunca gasta (brief §12). No es un modal
+  gigante — cabe en la columna del hero.
+
+---
+
+### DEC-127 — Shop como sección separada del Product UI; navegación por pestañas de texto
+**Status:** DECIDIDO · Block 07. Extiende DEC-112/DEC-117 (arquitectura
+event-driven + composición hero + gallery de la Collection).
+
+**Contexto.** El brief §6/§7/§16 pide que el Shop sea una sección
+DISTINTA de la Collection, "meet another Nimvlet, not an online store
+template" — sin sidebar, card wall, dashboard, carrito, búsqueda,
+filtros, categorías, banners ni countdowns.
+
+**Decisión.**
+- `productui::ProductSection { kCollection, kShop }`, dueño en
+  `ProductWindow`. Una fila de pestañas de texto compacta
+  "Collection · Shop" reemplaza al viejo título/subtítulo de sección de
+  Block 06 (`SectionNav` puro + `SectionHeaderView` SDL, compartidos
+  por las dos secciones — la navegación se ve idéntica). Tocar una
+  pestaña cambia de sección EN LA MISMA ventana; el runtime del pet no
+  se toca. Mouse + teclado; los ids `nav:collection`/`nav:shop`
+  encabezan el anillo de foco. Al reabrir el Product UI se vuelve a
+  Collection (sin recordar la última sección — sin razón de bajo costo
+  para hacerlo, brief §17).
+- El Shop reusa la composición hero + gallery, el acento por pet, el
+  hero stage y las previews `.nvprev`. Estados del hero (de
+  `ShopModel`): asequible → botón "Get <pet>" en el acento del pet;
+  saldo insuficiente → precio + línea contenida "Need N more clicks",
+  sin acción; poseído → "In your collection", sin precio ni botón.
+- Layout puro y testeable (`ShopLayout` + `ShopLayoutTest`), igual que
+  `CollectionLayout`.
+- **Copy editorial más larga** (brief §19): las descripciones de
+  Bunny/Nidir/Frin pasan de una frase a un par de frases (aprobadas por
+  el owner, EN/ES, data-driven en `PetEditorial`). La vista las
+  envuelve con `TextCache::DrawTextWrapped` (word-wrap greedy) en la
+  columna del hero; el layout reserva alto para hasta 3 líneas. La
+  restricción "el nombre propio nunca aparece dentro del copy" de
+  DEC-122 se levanta: la copy aprobada nombra al pet en su segunda
+  frase.
+- **Nota arquitectónica, NO implementada** (brief §20): un futuro hero
+  podría usar un fondo escénico ilustrado por Nimvlet. No se generan ni
+  se envían imágenes en Block 07, no se agrega un sistema de escenas.
+  El `PetAccent` + hero stage actuales ya son un "seam" de datos de
+  presentación por pet; agregar un backdrop estático opcional más
+  adelante no se vuelve más difícil. Sin red en runtime; los backdrops
+  futuros serían assets locales optimizados.

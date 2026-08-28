@@ -31,11 +31,15 @@ no se justificaba frente a ningún beneficio real).
 - **`pet_catalog_manifest.json`** — el manifest del catálogo (ver
   `docs/CATALOG.md`): hand-written, no generado — no hay paso de
   derivación para un catálogo como sí lo hay para frames de pixeles.
+  Schema v3 desde Block 07: cada entrada declara además `price_clicks`
+  (precio de compra en el Shop) y `publicly_purchasable`. Precios
+  provisionales de QA: Bunny 120, Nidir 300; Frin `publicly_purchasable:
+  false` en las dos variantes (no aparece en el Shop normal).
 - **`pet_catalog.nvcat`** — el catálogo compilado que `src/app` carga
   de verdad al arrancar (`catalog::LoadCatalogFromFile`), construido
-  desde `pet_catalog_manifest.json` por `tools/compile_pet_catalog.py`.
-  Binario, no pensado para leerse directamente. Regenerar tras editar
-  el manifest:
+  desde `pet_catalog_manifest.json` por `tools/compile_pet_catalog.py`
+  ("NVCATLG1" v3). Binario, no pensado para leerse directamente.
+  Regenerar tras editar el manifest:
   `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
 - **`<pack>.nvprev`** (Block 06.2) — la vista previa estática y liviana
   (`"NVPREV1"`, ~0.3–0.4 MB c/u) que el Product UI usa para dibujar el

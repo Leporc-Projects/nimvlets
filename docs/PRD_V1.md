@@ -88,9 +88,19 @@ yet — pets are only reachable via the `NIMVLETS_DEV_SELECT_PET`/
 **Block 06 built the Collection** — a real Product UI window with an
 album of owned/active/locked Nimvlets, live pet switching, and the
 click balance shown *only inside that window*. Persisted economy
-(balance, owned set) exists since Block 03/06. Shop (spending clicks)
-is still Block 07 — no purchase behaviour anywhere yet. See
-`docs/PRODUCT_UI.md`.
+(balance, owned set) exists since Block 03/06.
+
+**Block 07 built the Shop** — a separate Product UI section, reached by a
+"Collection · Shop" text nav, that lists the publicly purchasable
+Nimvlets with a price in clicks, distinguishes owned / affordable /
+insufficient-balance, requires a deliberate inline confirmation, spends
+clicks, and grants permanent ownership (immediately visible in both
+sections; the pet activates without a restart). Ownership is now
+**variant-capable** (`catalog::PetEntitlement`: a petId, optionally a
+specific variant) so the future onboarding can grant one Frin variant
+and the hidden starter shop the other — neither is implemented here, and
+**Frin is not listed in the normal Shop**. Provisional QA prices: Bunny
+120, Nidir 300. See `docs/PRODUCT_UI.md` §7–§13 and DEC-123..DEC-127.
 
 ## 6. Global click mode (future, opt-in — not implemented)
 

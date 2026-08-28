@@ -681,3 +681,44 @@ generaron con `NIMVLETS_DEV_PRODUCT_SHOT=<path>` (vuelca el framebuffer
 del renderer de la Collection vía `SDL_RenderReadPixels` + `SDL_SaveBMP`,
 a densidad nativa — cómputo local, sin ninguna captura de pantalla del
 SO, AGENTS.md §5).
+
+### 12.6 Adenda Block 07 (Shop + wallet)
+
+**Sin cambios de plataforma.** Block 07 es enteramente `src/productui`
++ `src/catalog` + `src/persistence` + `src/app`: agrega el Shop como
+sección del Product UI, la navegación `Collection · Shop`, el wallet
+gastable y las autorizaciones capaces de variantes. `src/platform/*`
+queda intacto; Windows/Linux compilan con los mismos stubs honestos.
+
+Los dos checks nativos de macOS se corrieron y **siguen PASS**, sin
+regresión de Block 06:
+
+- `nimvlets_macos_text_check` — todos los sub-checks PASS, incluida la
+  relación de píxeles 1x vs 2x (el path Retina de DEC-120). El
+  word-wrap nuevo (`TextCache::DrawTextWrapped`) usa `DrawText` /
+  `MeasureText` sin tocar el rasterizador.
+- `nimvlets_macos_clickthrough_check` — `ALL CHECKS PASSED (0
+  failures)`; la ventana del pet y su per-pixel hit-test no cambian
+  (`core::EvaluateClickThrough` intacto).
+
+Checklist del owner (macOS), además del de 06.1/06.2:
+
+20. **Navegación Collection ⇆ Shop**: la fila `Collection · Shop`
+    responde con mouse y con teclado (Tab llega a las pestañas, Enter
+    cambia). El pet en el escritorio no parpadea ni se recarga al
+    cambiar de sección.
+21. **Compra**: en el Shop, "Get <pet>" abre la pregunta inline; el
+    foco arranca en "Cancelar"; `Esc` la cierra sin gastar; "Confirmar"
+    baja el balance y el pet pasa a "In your collection" en las dos
+    secciones al instante. Reiniciar Nimvlets: el balance reducido y la
+    propiedad nueva siguen ahí.
+22. **Frin**: NO aparece en el Shop (ni como comprable ni con precio).
+23. **EN/ES**: cambiar de idioma re-etiqueta la nav, el precio, "Get" /
+    "Obtener", la pregunta de confirmación y "In your collection" al
+    instante, sin reiniciar.
+
+Las 8 capturas de QA de Block 07 (5 EN + 2 ES + 1 Collection ES) se
+generaron con `NIMVLETS_DEV_PRODUCT_SHOT` + los hooks
+`NIMVLETS_DEV_SECTION` / `NIMVLETS_DEV_SHOP_PET` / `NIMVLETS_DEV_SHOP_CONFIRM`
+/ `NIMVLETS_DEV_BUY` contra un directorio de app-data aislado — mismo
+mecanismo de cómputo local que 06.2, sin captura de pantalla del SO.

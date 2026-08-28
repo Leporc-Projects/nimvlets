@@ -12,8 +12,10 @@ DEC-028 para por qué se tomó cada decisión de abajo.
 Persistido, con significado real en el runtime hoy:
 
 - **Click balance** (`AppState::clickBalance`, `uint64`) — la única
-  moneda (AGENTS.md §2). Se incrementa en cada click válido; nunca se
-  decrementa en este bloque (todavía no existe un Shop donde gastarlo).
+  moneda (AGENTS.md §2). Se incrementa en cada click válido y, desde
+  **Block 07**, se **decrementa** en una compra del Shop (nunca por
+  debajo de 0 — la política de compra verifica `balance >= precio`
+  antes de restar; ver `docs/PRODUCT_UI.md` §18).
 - **Active pet id** (`AppState::activePetId`) — se mantiene
   sincronizado con la verdad: cualquier pet que se haya cargado
   realmente (`content::PetDefinition::id`). Este bloque no implementa
@@ -28,13 +30,19 @@ Persistido, con significado real en el runtime hoy:
   actualiza cada vez que termina un drag; se usa para reabrir la
   ventana donde el usuario la dejó (ver §7).
 
-**Agregado en Block 06 (schema v2) y Block 06.1 (schema v3) — ver §3:**
+**Agregado en Block 06 (schema v2), Block 06.1 (schema v3) y Block 07
+(schema v4) — ver §3:**
 
-- **Propiedad** (`AppState::ownedPetIds`, `AppState::ownershipSeeded`) —
-  qué Nimvlets posee el owner, por `petId`. `ownershipSeeded` distingue
+- **Propiedad** — Block 06/06.1 la modelaban como `AppState::ownedPetIds`
+  (conjunto de `petId`). **Block 07 (schema v4) la reemplaza por
+  `AppState::ownedEntitlements`**: pares `{petId, variantId}` capaces de
+  expresar "posee solo Frin macho" (`persistence::OwnedEntitlement` —
+  datos planos, sin dependencia de `src/catalog`; `src/app` puentea a
+  `catalog::PetEntitlement`). `ownershipSeeded` (sin cambios) distingue
   "nunca se inicializó" de "posee cero". Semilla desde
-  `catalog::CatalogEntry::initiallyOwned` solo en el primer arranque.
-  Ver `docs/CATALOG.md` §11 y `docs/PRODUCT_UI.md` §5.
+  `catalog::CatalogEntry::initiallyOwned` (como **pet entero**) solo en
+  el primer arranque. Ver `docs/CATALOG.md` §11–§12 y
+  `docs/PRODUCT_UI.md` §19.
 - **Preferencias del menú rápido** (`AppState::lockPosition`,
   `sizeChoice`, `opacityPercent`) — controles de usuario expuestos por
   el menú de la barra (`docs/PRODUCT_UI.md` §8). `core::DisplayControls`
@@ -48,13 +56,15 @@ Persistido, con significado real en el runtime hoy:
   relanzar la app el pet siempre arranca visible (esconder ≠ salir,
   brief §17).
 
-No persistido, y no planeado: historial de compras, precios, estado de
-onboarding/selección de starter, cualquier cosa con forma de Shop,
+No persistido, y no planeado: **historial** de compras (solo el estado
+final — balance + autorizaciones), precios (viven en el catálogo, no en
+el estado del usuario), estado de onboarding/selección de starter,
 procedencia/analítica de cualquier tipo.
 
 Genérico por construcción: `activePetId`/`activeVariantId` son simples
-strings, no un enum de Nimvlets conocidos — agregar un nuevo pet id o
-variante más adelante nunca requiere tocar `src/persistence`.
+strings y `ownedEntitlements` son pares de strings, no enums de Nimvlets
+conocidos — agregar un nuevo pet id o variante más adelante nunca
+requiere tocar `src/persistence`.
 
 ## 2. Política de ubicación de almacenamiento
 
@@ -111,22 +121,23 @@ igual que todo otro formato en disco de este repositorio).
 
 ```
 magic             : 8 bytes, "NVSTATE1"   (el magic NO cambia entre schemas)
-schemaVersion     : uint32                (3 desde Block 06.1)
--- cuerpo compartido v1/v2/v3 (Block 03):
+schemaVersion     : uint32                (4 desde Block 07)
+-- cuerpo compartido v1+ (Block 03):
 clickBalance      : uint64
 activePetId       : string   (uint32 byte-length + UTF-8 bytes)
 activeVariantId   : string
 hasWindowPosition : uint8   (0/1)
 lastWindowX       : int32   (solo tiene sentido si hasWindowPosition)
 lastWindowY       : int32
--- añadido de v2 (Block 06):
+-- bloque v2+ (Block 06):
 ownershipSeeded   : uint8   (0/1)
-ownedPetIdCount   : uint32
-ownedPetIds       : string[ownedPetIdCount]   (ordenados, sin duplicados)
+-- propiedad: el layout de la lista cambia en v4
+[schemaVersion <= 3]  ownedPetIdCount : uint32 ; ownedPetIds : string[]   (ordenados, sin duplicados)
+[schemaVersion >= 4]  ownedEntitlementCount : uint32 ; (petId:string, variantId:string)[]   (canónico: ordenado por (petId,variantId), sin duplicados, sin petId vacío; "" en variantId = pet entero)
 lockPosition      : uint8   (0/1)
 sizeChoice        : string  ("small"/"medium"/"large"; "" => "medium")
 opacityPercent    : uint32  (0 => sin preferencia => 100)
--- añadido de v3 (Block 06.1):
+-- añadido de v3 (Block 06.1), sin cambios en v4:
 language          : string  ("en"/"es"; "" => nunca elegido => se resuelve del locale del OS, sin persistir)
 ```
 
@@ -136,19 +147,26 @@ iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
 **Versionado + migración hacia adelante (Block 06 DEC-109, Block 06.1
-DEC-116):** `DeserializeAppState` lee cualquier versión en
-`[1, kCurrentSchemaVersion]` — hoy **1, 2 y 3**. Un archivo más viejo se
-lee con su layout (el "cuerpo compartido" + los bloques v2 que
-correspondan) y los campos de versiones posteriores quedan en su
-default (`language = ""`); `outState.schemaVersion` se fija a la versión
-actual, así que el próximo `Save()` lo reescribe al formato actual.
-Migración de una sola vez, sin lógica de conversión más allá de "los
-campos nuevos arrancan en su default" — el click balance, la posición
-de ventana, la propiedad y las preferencias de tamaño/opacidad/lock del
-owner **sobreviven** cada actualización. Una versión más nueva
-desconocida (v4+) o basura sigue tratándose como datos corruptos (ver
-§5), nunca se adivina. La costura sigue siendo limpia: `schemaVersion`
-se lee y verifica primero.
+DEC-116, Block 07 DEC-124):** `DeserializeAppState` lee cualquier
+versión en `[1, kCurrentSchemaVersion]` — hoy **1, 2, 3 y 4**. Un
+archivo más viejo se lee con su layout y los campos de versiones
+posteriores quedan en su default; `outState.schemaVersion` se fija a la
+versión actual, así que el próximo `Save()` lo reescribe al formato
+actual.
+
+La única conversión con lógica real es la de **propiedad en v4**: un
+archivo v2/v3 trae `ownedPetIds` (petIds sueltos) y cada uno se migra a
+una autorización de **PET ENTERO** `(petId, "")` — así un Frin de Block
+06 (que exponía macho y hembra) sigue dando las dos variantes. El resto
+es "los campos nuevos arrancan en su default". El click balance, la
+posición de ventana, el idioma, la propiedad, el pet/variante activo y
+las preferencias de tamaño/opacidad/lock **sobreviven** cada
+actualización. Una versión más nueva desconocida (v5+) o basura sigue
+tratándose como datos corruptos (ver §5), nunca se adivina.
+`NormalizeOwnedEntitlements` (orden + dedup, sobre una copia) mantiene
+la salida determinista byte a byte; `src/app` aplica además la
+canonicalización semántica completa (subsunción de variantes) antes de
+cada `Save()`.
 
 ## 4. Comportamiento de escritura atómica
 
@@ -236,6 +254,16 @@ testeable con timestamps fabricados exactamente igual que
   incondicionalmente, sin importar el deadline de debounce
   (`SpikeApp::Shutdown()` llama a `FlushPersistedState()` antes de
   desmontar cualquier otra cosa).
+- **Una compra del Shop (Block 07) flushea de INMEDIATO**, no por el
+  debounce (DEC-126). Racional: perder ~2s de *clicks* ante un crash es
+  trivial y el debounce vale la pena; una compra cambia *propiedad* —
+  un crash entre gastar el balance y el flush perdería la compra (o,
+  peor, dejaría el balance intacto sin el pet). `HandlePurchaseRequest`
+  muta `clickBalance` **y** `ownedEntitlements` en el mismo `AppState` y
+  llama al `FlushPersistedState()` que ya existe — un solo
+  `SerializeAppState` + un solo `rename` atómico persisten los dos
+  JUNTOS. El per-click NO cambia: sigue con `MarkDirty` + debounce, no
+  se convierte en una escritura a disco por click (brief §13).
 
 `PersistenceScheduler::NextFlushDeadlineMs()` se integra en el cálculo
 de deadline de `SDL_WaitEventTimeout` que ya existe en
@@ -250,6 +278,7 @@ también despierta cuando hay un flush pendiente por vencer.
 |---|---|
 | Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; sincroniza `activePetId` con el pack que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
 | Click | `clickCount_` (diagnóstico solo de sesión) y `appState_.clickBalance` (persistido) se incrementan ambos; se marca el scheduler como dirty. Deliberadamente dos contadores separados — ver `docs/DECISION_LOG.md` DEC-026. |
+| **Compra del Shop (Block 07)** | `EvaluatePurchase` (puro); si es `kSuccess`, `appState_.clickBalance` -= precio y `appState_.ownedEntitlements` += la autorización, en el mismo struct; se marca dirty y se **flushea de inmediato** (un solo write atómico — DEC-126). Sin `kSuccess` no se toca nada. |
 | Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |
 | Despertar del event loop, deadline de flush alcanzado | `FlushPersistedState()` — no hace nada salvo que esté realmente dirty. |
 | Shutdown limpio | `FlushPersistedState()` incondicionalmente (ignora el deadline; sigue sin hacer nada si no hay nada dirty). |
@@ -330,16 +359,20 @@ DEC-028.
 
 ## 10. Intencionalmente no implementado
 
-- **Sin UI ni lógica de selección de pet.** `activePetId`/
-  `activeVariantId` persisten y hacen round-trip, pero nada se ramifica
-  sobre ellos para elegir qué pack cargar.
-- **Sin migración de schema.** Exactamente un `schemaVersion`
-  soportado; cualquier otro se trata como inutilizable, no se
-  actualiza.
-- **Sin estado de desbloqueo/compra/economía.** Todavía no existe un
-  Shop donde gastar `clickBalance`.
+- **Sin historial de transacciones.** Solo se persiste el estado FINAL
+  del wallet: `clickBalance` + `ownedEntitlements`. No hay log de
+  compras, timestamps, ni precios pagados (los precios viven en el
+  catálogo, no en el estado del usuario).
+- **Sin estado de onboarding / selección de starter.** La arquitectura
+  de autorizaciones (`ownedEntitlements` con variantes) lo soporta,
+  pero Block 07 no lo escribe (Block 09).
 - **Sin validación de límites de pantalla/monitor para la posición de
   ventana** (ver §7).
 - **Sin encriptación, sin sincronización en la nube, sin cuenta.**
   Almacenamiento puramente local, sin autenticación, de un único
   archivo — ver AGENTS.md §5 y `docs/PRIVACY_SECURITY.md`.
+
+*(Histórico: hasta Block 06 esta sección decía "sin migración de
+schema" y "sin economía/compra". Ambas cosas cambiaron — la migración
+hacia adelante existe desde Block 06 / DEC-109 y se generalizó en Block
+07 / DEC-124; el Shop y el gasto de clicks existen desde Block 07.)*
