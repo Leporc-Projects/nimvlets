@@ -292,6 +292,12 @@ bool SpikeApp::Init() {
         language_ = core::ParseLanguage(appState_.language);
         SDL_Log("nimvlets: UI language = '%s' (persisted choice)", core::LanguageId(language_));
     }
+    // Override solo-DEV para QA / capturas: fuerza el idioma de esta
+    // sesión sin persistir nada. "en" / "es". Ver README.md.
+    if (const char* devLang = std::getenv("NIMVLETS_DEV_LANGUAGE"); devLang != nullptr && devLang[0] != '\0') {
+        language_ = core::ParseLanguage(devLang);
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_LANGUAGE='%s' (not persisted)", devLang);
+    }
 
     // Selección solo-DEV (ver kDevSelectPetEnvVar) -- resuelta ANTES
     // que la persistida, así que un valor válido siempre gana sobre lo

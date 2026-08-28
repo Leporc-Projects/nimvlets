@@ -26,24 +26,29 @@ constexpr float kSectionTitleTop = 70.0f;
 constexpr float kSectionSubtitleTop = 90.0f;
 constexpr float kLabelH = 16.0f;
 
-constexpr float kHeroTop = 120.0f;
-constexpr float kHeroArt = 210.0f;
-constexpr float kHeroTextGap = 34.0f;   // arte -> bloque de texto
+constexpr float kHeroTop = 118.0f;
+constexpr float kHeroArt = 202.0f;
+constexpr float kHeroTextGap = 36.0f;   // arte -> bloque de texto
 constexpr float kHeroNameH = 30.0f;
-constexpr float kHeroSpeciesTop = 40.0f;  // desde el tope del bloque de texto
-constexpr float kHeroStatusTop = 62.0f;
-constexpr float kHeroChipsTop = 100.0f;
+// Offsets relativos al TOPE del bloque de texto (que se centra
+// verticalmente contra el arte — ver `blockTop` más abajo).
+constexpr float kHeroSpeciesRel = 38.0f;
+constexpr float kHeroStatusRel = 59.0f;
+constexpr float kHeroChipsRel = 92.0f;
 constexpr float kHeroChipH = 26.0f;
 constexpr float kHeroChipPadX = 10.0f;
 constexpr float kHeroChipGap = 22.0f;    // incluye el "·" separador
 constexpr float kHeroButtonH = 36.0f;
 constexpr float kHeroButtonPadX = 22.0f;
-constexpr float kHeroButtonTopWithChips = 150.0f;
-constexpr float kHeroButtonTopNoChips = 100.0f;
+constexpr float kHeroButtonRelWithChips = 138.0f;
+constexpr float kHeroButtonRelNoChips = 92.0f;
+constexpr float kHeroBlockHWithChips = 174.0f;  // alto aprox. del bloque de texto para centrarlo
+constexpr float kHeroBlockHNoChips = 128.0f;
 
-constexpr float kDividerGap = 26.0f;
-constexpr float kGalleryGap = 22.0f;
-constexpr float kGalleryArt = 84.0f;
+constexpr float kDividerGap = 22.0f;
+constexpr float kGalleryGap = 20.0f;
+constexpr float kGalleryColMax = 208.0f;  // el cluster de gallery no se estira a lo ancho
+constexpr float kGalleryArt = 90.0f;
 constexpr float kGalleryNameH = 17.0f;
 constexpr float kGalleryStatusH = 14.0f;
 constexpr float kGalleryArtToName = 12.0f;
@@ -172,16 +177,23 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
 
     const float textX = h.art.Right() + kHeroTextGap;
     const float textW = std::max(140.0f, kMargin + contentW - textX);
-    h.nameAnchor = UiRect{textX, heroTop + 2.0f, textW, kHeroNameH};
-    h.speciesAnchor = UiRect{textX, heroTop + kHeroSpeciesTop, textW, kLabelH};
-    h.statusAnchor = UiRect{textX, heroTop + kHeroStatusTop, textW, kLabelH};
+
+    // El bloque de texto se centra verticalmente contra el arte, así el
+    // hero no queda "pesado arriba" cuando el pet no tiene chips de
+    // variante (brief §8/§26).
+    const float blockH = heroItem.HasVariants() ? kHeroBlockHWithChips : kHeroBlockHNoChips;
+    const float blockTop = heroTop + std::max(0.0f, (kHeroArt - blockH) * 0.5f);
+
+    h.nameAnchor = UiRect{textX, blockTop, textW, kHeroNameH};
+    h.speciesAnchor = UiRect{textX, blockTop + kHeroSpeciesRel, textW, kLabelH};
+    h.statusAnchor = UiRect{textX, blockTop + kHeroStatusRel, textW, kLabelH};
 
     const std::string selectedVariant = ResolveVariant(heroItem, in.selectedVariantId);
     h.selectedVariantId = selectedVariant;
 
     if (heroItem.HasVariants()) {
         float chipX = textX;
-        const float chipY = heroTop + kHeroChipsTop;
+        const float chipY = blockTop + kHeroChipsRel;
         for (const CollectionVariant& v : heroItem.variants) {
             HeroVariantChip chip;
             chip.variantId = v.variantId;
@@ -214,7 +226,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     }
     h.actionFocusId = "use";
     const float buttonTop =
-        heroTop + (heroItem.HasVariants() ? kHeroButtonTopWithChips : kHeroButtonTopNoChips);
+        blockTop + (heroItem.HasVariants() ? kHeroButtonRelWithChips : kHeroButtonRelNoChips);
     const float buttonW =
         kHeroButtonPadX * 2.0f + static_cast<float>(h.actionLabel.size()) * kApproxCharW;
     h.actionButton = UiRect{textX, buttonTop, buttonW, kHeroButtonH};
@@ -237,7 +249,11 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     float galleryBottom = out.dividerRect.Bottom() + kGalleryGap;
     if (count > 0) {
         const int cols = std::min(count, 3);
-        const float colW = contentW / static_cast<float>(cols);
+        // Las columnas no se estiran a todo el ancho: un cluster
+        // centrado se lee más tranquilo que dos items flotando lejos
+        // (brief §11/§26).
+        const float colW = std::min(kGalleryColMax, contentW / static_cast<float>(cols));
+        const float galleryLeft = kMargin + (contentW - colW * static_cast<float>(cols)) * 0.5f;
         const float galleryTop = out.dividerRect.Bottom() + kGalleryGap;
 
         for (int i = 0; i < count; ++i) {
@@ -247,7 +263,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
             const float rowH = kGalleryArt + kGalleryArtToName + kGalleryNameH + kGalleryNameToStatus +
                                kGalleryStatusH + 20.0f;
 
-            const float colX = kMargin + static_cast<float>(col) * colW;
+            const float colX = galleryLeft + static_cast<float>(col) * colW;
             const float lift = (item.petId == in.hoverPetId) ? kHoverLift : 0.0f;
             const float baseY = galleryTop + static_cast<float>(row) * rowH - lift;
 
