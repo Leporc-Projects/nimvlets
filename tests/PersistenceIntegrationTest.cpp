@@ -1,10 +1,14 @@
 #include "PersistenceIntegrationTest.h"
 
+#include "catalog/PetCatalog.h"
+#include "catalog/PetEntitlement.h"
+#include "catalog/PurchasePolicy.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 // Test de integración: ejercita persistence::AppState, AppStateStore y
 // PersistenceScheduler conectados exactamente igual que
@@ -175,6 +179,63 @@ bool TestFailedFlushKeepsPendingChangeForNextAttempt() {
     return true;
 }
 
+// Block 07: refleja SpikeApp::HandlePurchaseRequest — evalúa la compra,
+// muta balance + propiedad en el MISMO AppState, y flushea de inmediato
+// (una sola escritura atómica). Tras recargar, el balance reducido Y la
+// propiedad nueva sobreviven JUNTOS (brief §13/§26).
+bool TestPurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload() {
+    using nimvlets::catalog::CatalogEntry;
+    using nimvlets::catalog::EvaluatePurchase;
+    using nimvlets::catalog::PetCatalog;
+    using nimvlets::catalog::PetEntitlement;
+    using nimvlets::catalog::PetIdentity;
+    using nimvlets::catalog::PurchaseResult;
+
+    std::vector<CatalogEntry> entries;
+    CatalogEntry nidir;
+    nidir.identity = PetIdentity{"nidir", ""};
+    nidir.displayName = "Nidir";
+    nidir.packPath = "n.nvpack";
+    nidir.isDefault = true;
+    nidir.priceClicks = 300;
+    nidir.publiclyPurchasable = true;
+    entries.push_back(nidir);
+    const PetCatalog catalog(std::move(entries));
+
+    TempTestDirectory dir;
+    const AppStateStore store(dir.path());
+    PersistenceScheduler scheduler(2000.0);
+
+    AppState state;
+    state.ownershipSeeded = true;
+    state.clickBalance = 512;
+    state.ownedEntitlements = {nimvlets::persistence::OwnedEntitlement{"bunny", ""}};
+
+    // --- "confirmar compra" ---
+    const auto outcome = EvaluatePurchase(catalog, "nidir", state.clickBalance,
+                                          {PetEntitlement{"bunny", ""}});
+    NIMVLETS_CHECK(outcome.result == PurchaseResult::kSuccess);
+    state.clickBalance = outcome.newBalance;  // 512 - 300 = 212
+    state.ownedEntitlements.clear();
+    for (const auto& e : outcome.newEntitlements) {
+        state.ownedEntitlements.push_back(nimvlets::persistence::OwnedEntitlement{e.petId, e.variantId});
+    }
+    scheduler.MarkDirty(0.0);
+    // Flush INMEDIATO (no se espera al debounce) — un solo Save().
+    FlushIfDirty(store, state, scheduler, 1.0);
+    NIMVLETS_CHECK(!scheduler.IsDirty());
+
+    // --- "reiniciar Nimvlets" ---
+    const AppState reloaded = store.Load();
+    NIMVLETS_CHECK(reloaded.clickBalance == 212);  // balance reducido persistió
+    NIMVLETS_CHECK((reloaded.ownedEntitlements ==
+                    std::vector<nimvlets::persistence::OwnedEntitlement>{
+                        nimvlets::persistence::OwnedEntitlement{"bunny", ""},
+                        nimvlets::persistence::OwnedEntitlement{"nidir", ""}}));
+    NIMVLETS_CHECK(reloaded.ownershipSeeded);
+    return true;
+}
+
 }  // namespace
 
 void RegisterPersistenceIntegrationTests(testing::TestRunner& runner) {
@@ -183,6 +244,8 @@ void RegisterPersistenceIntegrationTests(testing::TestRunner& runner) {
     runner.Add("PersistenceIntegration/DragEndUpdatesWindowPositionAndMarksDirty", TestDragEndUpdatesWindowPositionAndMarksDirty);
     runner.Add("PersistenceIntegration/CleanShutdownFlushesRegardlessOfDeadline", TestCleanShutdownFlushesRegardlessOfDeadline);
     runner.Add("PersistenceIntegration/FailedFlushKeepsPendingChangeForNextAttempt", TestFailedFlushKeepsPendingChangeForNextAttempt);
+    runner.Add("PersistenceIntegration/PurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload",
+               TestPurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload);
 }
 
 }  // namespace nimvlets::tests

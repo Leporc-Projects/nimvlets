@@ -12,7 +12,7 @@ así que no hay nada de prep_dev_sprite.py que compartir aquí).
 
 Esquema del manifest (JSON):
     {
-      "schema_version": 2,                    # opcional, default 2
+      "schema_version": 3,                    # opcional, default 3
       "entries": [
         {
           "pet_id": "bunny_dev",
@@ -20,7 +20,9 @@ Esquema del manifest (JSON):
           "display_name": "Bunny (dev fixture)",
           "pack_path": "assets/dev/bunny_pack.nvpack",
           "is_default": true,                 # opcional, default false
-          "initially_owned": true             # opcional, default false
+          "initially_owned": true,            # opcional, default false
+          "price_clicks": 120,               # opcional, default 0
+          "publicly_purchasable": true        # opcional, default false
         }
       ]
     }
@@ -28,8 +30,16 @@ Esquema del manifest (JSON):
 `initially_owned` (Block 06, schema v2) es la SEMILLA de propiedad de
 desarrollo/default: el runtime la usa una sola vez, cuando el archivo
 de estado todavía no pasó por la inicialización de propiedad, para
-poblar `ownedPetIds`. No es autoridad de runtime — ver docs/CATALOG.md
-§11 y docs/PRODUCT_UI.md §5.
+sembrar las autorizaciones de propiedad. No es autoridad de runtime —
+ver docs/CATALOG.md §11 y docs/PRODUCT_UI.md §5.
+
+`price_clicks` / `publicly_purchasable` (Block 07, schema v3) son el
+precio en clics y la elegibilidad para el Shop público, como DATO
+(nunca una rama por pet en el runtime/UI — brief §10). Una entrada con
+`publicly_purchasable: true` DEBE tener `price_clicks > 0` (precio cero
+no soportado — brief §26). Frin queda `publicly_purchasable: false` en
+las dos variantes: su obtención es onboarding + shop oculto, trabajo
+futuro que NO se implementa acá (brief §11). Ver docs/CATALOG.md §12.
 
 `pack_path` se guarda tal cual en el binario compilado — a diferencia
 de los `source` de frames en compile_pet_pack.py (resueltos relativos
@@ -53,6 +63,8 @@ Falla ruidosamente (salida no-cero, mensaje específico en stderr) ante:
     - un pack_path que no apunta a un archivo existente (chequeo de
       cordura en tiempo de compilación, no una garantía del formato
       binario en sí -- ver docs/CATALOG.md)
+    - un price_clicks negativo, o publicly_purchasable=true con
+      price_clicks == 0
 
 Sin dependencias de terceros (json/struct/os son standard library).
 """
@@ -65,7 +77,7 @@ import struct
 import sys
 
 _MAGIC = b"NVCATLG1"
-_CURRENT_SCHEMA_VERSION = 2
+_CURRENT_SCHEMA_VERSION = 3
 
 
 class CatalogCompileError(Exception):
@@ -103,6 +115,16 @@ def _compile_entry(entry_manifest: dict, index: int) -> tuple[bytes, str, str, b
     is_default = bool(entry_manifest.get("is_default", False))
     initially_owned = bool(entry_manifest.get("initially_owned", False))
 
+    price_clicks = int(entry_manifest.get("price_clicks", 0))
+    if price_clicks < 0:
+        raise CatalogCompileError(f"{context} ('{pet_id}'): price_clicks must not be negative")
+    publicly_purchasable = bool(entry_manifest.get("publicly_purchasable", False))
+    if publicly_purchasable and price_clicks == 0:
+        raise CatalogCompileError(
+            f"{context} ('{pet_id}'): publicly_purchasable is true but price_clicks is 0 "
+            "(zero-price purchases are not supported)"
+        )
+
     out = bytearray()
     out += _pack_string(pet_id)
     out += _pack_string(variant_id)
@@ -110,6 +132,8 @@ def _compile_entry(entry_manifest: dict, index: int) -> tuple[bytes, str, str, b
     out += _pack_string(pack_path)
     out += struct.pack("<B", 1 if is_default else 0)
     out += struct.pack("<B", 1 if initially_owned else 0)
+    out += struct.pack("<Q", price_clicks)
+    out += struct.pack("<B", 1 if publicly_purchasable else 0)
     return bytes(out), pet_id, variant_id, is_default
 
 

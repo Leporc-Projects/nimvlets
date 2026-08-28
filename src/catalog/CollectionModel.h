@@ -4,30 +4,33 @@
 #include <vector>
 
 #include "catalog/PetCatalog.h"
+#include "catalog/PetEntitlement.h"
 #include "catalog/PetIdentity.h"
 
 namespace nimvlets::catalog {
 
-// La vista de "álbum de compañeros" que el Product UI de Block 06
-// dibuja: qué Nimvlets existen, cuáles posee el owner, cuál está en el
-// escritorio, y — para Frin — sus variantes como UN solo Nimvlet
-// lógico. Puro: sin SDL, sin AppKit, sin I/O — construido a partir de
-// un PetCatalog ya cargado + el conjunto de petIds poseídos + la
-// identidad activa. Ver docs/PRODUCT_UI.md §4 y block brief §8-§11.
+// La vista de "álbum de compañeros" que el Product UI dibuja: qué
+// Nimvlets existen, cuáles posee el owner (y — para Frin — qué variantes
+// concretas), cuál está en el escritorio. Puro: sin SDL, sin AppKit, sin
+// I/O — construido a partir de un PetCatalog ya cargado + las
+// AUTORIZACIONES de propiedad (PetEntitlement, Block 07 — antes un
+// simple conjunto de petIds) + la identidad activa. Ver
+// docs/PRODUCT_UI.md §4 y §6.
 //
-// Deliberadamente NO es un grid de ecommerce ni un modelo de Shop:
-// nada acá conoce precios ni compras (Block 07). Los tres estados de
-// propiedad ya existen ahora para que el modelo no necesite rediseño
-// cuando llegue el Shop.
+// La Collection sigue siendo UN ítem lógico por Nimvlet. Lo que Block 07
+// agrega es propiedad a nivel de VARIANTE: Frin puede tener Macho
+// poseído y Hembra no (o al revés, o ambas, o ninguna). El Shop es una
+// sección aparte — ver ShopModel.h; nada acá conoce precios ni compras.
 
 enum class OwnershipStatus {
     // Poseído y actualmente en el escritorio ("On desktop"). Exactamente
     // uno de estos existe en un modelo bien formado.
     kActive,
-    // Poseído pero no activo ("Use").
+    // Poseído (al menos una variante) pero no activo ("Use").
     kOwnedInactive,
-    // No está en la colección del owner ("Not in your collection").
-    // Este bloque NO puede desbloquearlo (sin compra todavía).
+    // Ninguna variante en la colección del owner ("Not in your
+    // collection"). El Shop puede cambiar esto (Block 07); un pet locked
+    // sigue sin poder activarse.
     kLocked,
 };
 
@@ -36,12 +39,16 @@ enum class OwnershipStatus {
 struct CollectionVariant {
     std::string variantId;    // "" = el pet no tiene variantes
     std::string displayName;  // normalmente el mismo displayName del pet
+    // ¿El owner tiene derecho a poner ESTA variante en el escritorio?
+    // Para un pet sin variantes = ¿posee el pet? Para Frin, por
+    // variante. Una variante no poseída se muestra en el selector pero
+    // NO es activable, y sin ninguna ruta de compra visible (brief §6).
+    bool owned = false;
 };
 
 // Una fila del álbum: UN Nimvlet lógico. Las dos entradas de catálogo
 // de Frin ({"frin","male"} y {"frin","female"}) colapsan a un solo
-// CollectionItem con dos variantes — nunca dos filas no relacionadas
-// (block brief §11).
+// CollectionItem con dos variantes.
 struct CollectionItem {
     std::string petId;
     std::string displayName;
@@ -57,6 +64,12 @@ struct CollectionItem {
     std::string selectedVariantId;
 
     bool HasVariants() const { return variants.size() > 1; }
+
+    // true si TODA variante está poseída (el caso normal tras la
+    // migración de un Frin de Block 06). Un pet locked -> false.
+    bool AllVariantsOwned() const;
+    // true si `variantId` existe y su `owned` es true.
+    bool VariantOwned(const std::string& variantId) const;
 };
 
 struct CollectionModel {
@@ -71,39 +84,43 @@ struct CollectionModel {
 
     // La fila con status kActive, o nullptr si el modelo está mal
     // formado (nunca debería pasar con un catálogo válido — el pet
-    // activo siempre es propio, ver EnsureActivePetOwned).
+    // activo/variante siempre es propio, ver EnsureActiveEntitlementOwned).
     const CollectionItem* Active() const;
 };
 
-// Construye el modelo. `ownedPetIds` puede venir en cualquier orden y
-// con duplicados; `activeId` es la identidad que el runtime tiene
-// realmente activa. Determinista y puro. NO impone el invariante "el
-// activo es propio" — para eso ver EnsureActivePetOwned, que src/app
-// llama antes, al resolver el arranque.
+// Construye el modelo. `owned` puede venir en cualquier orden y con
+// duplicados. `activeId` es la identidad que el runtime tiene realmente
+// activa. Determinista y puro. NO impone el invariante "el activo es
+// propio" — para eso ver EnsureActiveEntitlementOwned, que src/app llama
+// antes, al resolver el arranque.
 CollectionModel BuildCollectionModel(
     const PetCatalog& catalog,
-    const std::vector<std::string>& ownedPetIds,
+    const std::vector<PetEntitlement>& owned,
     const PetIdentity& activeId);
 
-// true solo si `petId` está en `model` y su status permite activarlo:
-// kActive (ya activo — activar de nuevo es un no-op inofensivo) o
-// kOwnedInactive. Un pet kLocked NUNCA puede activarse en este bloque
-// (block brief §9: "locked pet cannot become active").
-bool CanActivate(const CollectionModel& model, const std::string& petId);
+// true solo si `petId` está en `model`, su status permite activarlo
+// (kActive o kOwnedInactive) Y la variante pedida es poseída. Con
+// `variantId` vacío en un pet CON variantes, exige que la variante por
+// defecto (selectedVariantId) sea poseída. Un pet kLocked NUNCA puede
+// activarse, y una variante no poseída de un pet por lo demás poseído
+// TAMPOCO (brief §6: "it must not be activatable").
+bool CanActivate(const CollectionModel& model, const std::string& petId, const std::string& variantId = "");
 
-// Invariante "el pet activo siempre es propio" (block brief §9/§27).
-// Agrega `activePetId` a `ownedPetIds` si falta; ordena y deduplica.
-// Devuelve true si tuvo que cambiar algo. No-op si `activePetId` está
-// vacío. src/app lo llama al resolver el pet de arranque, ANTES de
-// construir el modelo.
-bool EnsureActivePetOwned(std::vector<std::string>& ownedPetIds, const std::string& activePetId);
+// Invariante "el pet/variante activo siempre es propio" (brief §5).
+// Si `active` no está cubierto por `ents`, agrega la autorización
+// EXACTA de esa identidad ({petId, variantId}); canonicaliza. Devuelve
+// true si tuvo que cambiar algo. No-op si `active.petId` está vacío.
+// src/app lo llama al resolver el pet de arranque y tras cada switch,
+// ANTES de construir el modelo.
+bool EnsureActiveEntitlementOwned(std::vector<PetEntitlement>& ents, const PetIdentity& active);
 
-// La semilla de propiedad de desarrollo/default (block brief §12): los
-// petIds de las entradas `initiallyOwned` del catálogo, deduplicados y
-// ordenados. src/app la usa SOLO cuando AppState::ownershipSeeded
-// todavía es false — nunca en cada arranque. Un bloque futuro de
-// onboarding (Block 09) reemplaza esta llamada por la elección real de
-// starter sin tocar el catálogo ni este archivo.
-std::vector<std::string> SeedOwnershipFromCatalog(const PetCatalog& catalog);
+// La semilla de propiedad de desarrollo/default: por cada entrada
+// `initiallyOwned` del catálogo, una autorización de PET ENTERO
+// ({petId, ""}) — así un Frin sembrado da acceso a macho y hembra,
+// exactamente como el `ownedPetIds` de Block 06 (brief §5).
+// Canonicalizada. src/app la usa SOLO cuando
+// AppState::ownershipSeeded todavía es false. Un bloque futuro de
+// onboarding (Block 09) la reemplaza sin tocar el catálogo.
+std::vector<PetEntitlement> SeedEntitlementsFromCatalog(const PetCatalog& catalog);
 
 }  // namespace nimvlets::catalog

@@ -19,25 +19,29 @@ namespace nimvlets::persistence {
 // Determinista: llamar esto dos veces sobre un AppState sin cambios
 // produce una salida idéntica byte a byte — sin timestamps, sin
 // padding, sin orden de iteración de map/set en ningún lugar del
-// formato. `ownedPetIds` se escribe siempre en orden canónico
-// (ascendente, sin duplicados, sin string vacío) sin importar cómo
-// venga en `state` — ver NormalizeOwnedPetIds.
+// formato. `ownedEntitlements` se escribe siempre en orden canónico
+// (ordenado por (petId, variantId), sin duplicados, sin petId vacío)
+// sin importar cómo venga en `state` — ver NormalizeOwnedEntitlements.
 std::vector<std::uint8_t> SerializeAppState(const AppState& state);
 
-// Ordena ascendente, elimina duplicados y descarta cualquier string
-// vacío de `ids`. src/app lo usa al mutar AppState::ownedPetIds; el
-// serializer lo aplica sobre una copia para que la salida sea siempre
-// canónica. Idempotente.
-void NormalizeOwnedPetIds(std::vector<std::string>& ids);
+// Ordena por (petId, variantId), elimina duplicados exactos y descarta
+// cualquier entrada con petId vacío. src/app aplica además la
+// canonicalización SEMÁNTICA completa (subsunción de variantes) vía
+// catalog::CanonicalizePetEntitlements antes de asignar; el serializer
+// solo necesita un orden determinista, y lo aplica sobre una copia.
+// Idempotente.
+void NormalizeOwnedEntitlements(std::vector<OwnedEntitlement>& ents);
 
 // Falla ruidosamente (retorna false, `outError` con un mensaje
 // específico) ante un magic inválido, datos truncados, o un
 // schemaVersion que esta build no sabe leer. Con migración hacia
 // adelante lee cualquier versión en [1, kCurrentSchemaVersion] (hoy
-// 1, 2 y 3): un archivo más viejo se lee con su layout, los campos de
-// versiones posteriores quedan en su default, y `outState.schemaVersion`
-// se fija a la versión actual, así que el próximo Save() lo reescribe
-// al formato actual. Una versión más nueva desconocida (o basura) sigue
+// 1, 2, 3 y 4): un archivo más viejo se lee con su layout, los campos
+// de versiones posteriores quedan en su default (o se derivan del
+// viejo, como la propiedad al pasar de `ownedPetIds` v1-3 a
+// `ownedEntitlements` v4), y `outState.schemaVersion` se fija a la
+// versión actual, así que el próximo Save() lo reescribe al formato
+// actual. Una versión más nueva desconocida (o basura) sigue
 // tratándose como "no se puede usar este dato". `outState` queda en un
 // estado no especificado si falla; siempre verificar el valor de
 // retorno.

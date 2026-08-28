@@ -127,21 +127,29 @@ bool ReadCommonV1Body(ByteReader& reader, AppState& outState) {
 
 }  // namespace
 
-void NormalizeOwnedPetIds(std::vector<std::string>& ids) {
-    std::sort(ids.begin(), ids.end());
-    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-    // Un id vacío nunca es un pet real — se descarta en vez de
-    // persistirse (defensivo: un archivo hecho a mano podría traerlo).
-    ids.erase(std::remove(ids.begin(), ids.end(), std::string()), ids.end());
+void NormalizeOwnedEntitlements(std::vector<OwnedEntitlement>& ents) {
+    // Una entrada con petId vacío nunca es un pet real — se descarta en
+    // vez de persistirse (defensivo: un archivo hecho a mano podría
+    // traerla).
+    ents.erase(std::remove_if(ents.begin(), ents.end(),
+                              [](const OwnedEntitlement& e) { return e.petId.empty(); }),
+               ents.end());
+    std::sort(ents.begin(), ents.end(), [](const OwnedEntitlement& a, const OwnedEntitlement& b) {
+        if (a.petId != b.petId) {
+            return a.petId < b.petId;
+        }
+        return a.variantId < b.variantId;
+    });
+    ents.erase(std::unique(ents.begin(), ents.end()), ents.end());
 }
 
 std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
-    // Copia local solo para poder normalizar el orden de ownedPetIds
-    // sin exigir que el caller ya lo haya hecho — la salida es siempre
-    // canónica (ordenada, sin duplicados), así que el formato sigue
-    // siendo determinista byte a byte.
-    std::vector<std::string> ownedIds = state.ownedPetIds;
-    NormalizeOwnedPetIds(ownedIds);
+    // Copia local solo para poder normalizar el orden de
+    // ownedEntitlements sin exigir que el caller ya lo haya hecho — la
+    // salida es siempre canónica (ordenada, sin duplicados), así que el
+    // formato sigue siendo determinista byte a byte.
+    std::vector<OwnedEntitlement> ownedEnts = state.ownedEntitlements;
+    NormalizeOwnedEntitlements(ownedEnts);
 
     std::vector<std::uint8_t> out;
     out.insert(out.end(), kMagic, kMagic + sizeof(kMagic));
@@ -159,9 +167,13 @@ std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
 
     // --- Añadido de v2 (Block 06) ---
     AppendUint8(out, state.ownershipSeeded ? 1 : 0);
-    AppendUint32(out, static_cast<std::uint32_t>(ownedIds.size()));
-    for (const std::string& id : ownedIds) {
-        AppendString(out, id);
+    // v4 (Block 07): la lista de propiedad pasa de petIds sueltos a
+    // pares (petId, variantId). El resto del bloque v2 (lock/size/
+    // opacity) y el v3 (language) no cambian de layout.
+    AppendUint32(out, static_cast<std::uint32_t>(ownedEnts.size()));
+    for (const OwnedEntitlement& ent : ownedEnts) {
+        AppendString(out, ent.petId);
+        AppendString(out, ent.variantId);
     }
     AppendUint8(out, state.lockPosition ? 1 : 0);
     AppendString(out, state.sizeChoice);
@@ -222,14 +234,30 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
             return false;
         }
         state.ownershipSeeded = seeded != 0;
-        state.ownedPetIds.reserve(ownedCount);
-        for (std::uint32_t i = 0; i < ownedCount; ++i) {
-            std::string id;
-            if (!reader.ReadString(id)) {
-                outError = reader.Error();
-                return false;
+        state.ownedEntitlements.reserve(ownedCount);
+        if (schemaVersion >= 4) {
+            // v4: pares (petId, variantId).
+            for (std::uint32_t i = 0; i < ownedCount; ++i) {
+                OwnedEntitlement ent;
+                if (!reader.ReadString(ent.petId) || !reader.ReadString(ent.variantId)) {
+                    outError = reader.Error();
+                    return false;
+                }
+                state.ownedEntitlements.push_back(std::move(ent));
             }
-            state.ownedPetIds.push_back(std::move(id));
+        } else {
+            // v2/v3: petIds sueltos. Migración: cada petId poseído se
+            // vuelve una autorización de PET ENTERO ({petId, ""}) — así
+            // un Frin de Block 06 (que exponía macho y hembra) sigue
+            // dando las dos variantes (brief §5).
+            for (std::uint32_t i = 0; i < ownedCount; ++i) {
+                std::string id;
+                if (!reader.ReadString(id)) {
+                    outError = reader.Error();
+                    return false;
+                }
+                state.ownedEntitlements.push_back(OwnedEntitlement{std::move(id), std::string()});
+            }
         }
         std::uint8_t locked = 0;
         if (!reader.ReadUint8(locked) || !reader.ReadString(state.sizeChoice) ||
@@ -238,7 +266,7 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
             return false;
         }
         state.lockPosition = locked != 0;
-        NormalizeOwnedPetIds(state.ownedPetIds);
+        NormalizeOwnedEntitlements(state.ownedEntitlements);
     }
 
     // Bloque v3 (Block 06.1): idioma del Product UI.
@@ -249,9 +277,11 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
         }
     }
 
-    // schemaVersion == 1: los campos v2/v3 quedan en su default.
+    // schemaVersion == 1: los campos v2/v3/v4 quedan en su default.
     // schemaVersion == 2: `language` queda "" (src/app lo resuelve
-    // desde el locale del OS en el próximo arranque).
+    // desde el locale del OS en el próximo arranque); la propiedad se
+    // migra a autorizaciones de pet entero.
+    // schemaVersion == 3: idem propiedad; `language` se conserva.
 
     outState = std::move(state);
     outError.clear();

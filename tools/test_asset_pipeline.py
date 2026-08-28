@@ -41,6 +41,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -2928,6 +2929,171 @@ class PetPreviewCompileTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(pack_b.replace(".nvpack", ".nvprev")))
         self.assertEqual(_read_nvprev(pack_a.replace(".nvpack", ".nvprev"))["pet_id"], "a")
         self.assertEqual(_read_nvprev(pack_b.replace(".nvpack", ".nvprev"))["variant_id"], "x")
+
+
+def _read_nvcat(path: str) -> dict:
+    """Lector del formato "NVCATLG1" v3 (tools/compile_pet_catalog.py) —
+    espejo intencional de src/catalog/PetCatalogLoader.cpp. Solo para
+    los tests: verifica lo que el compilador realmente escribió."""
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data[:8] == b"NVCATLG1", data[:8]
+    pos = 8
+
+    def u32() -> int:
+        nonlocal pos
+        v = struct.unpack_from("<I", data, pos)[0]
+        pos += 4
+        return v
+
+    def u64() -> int:
+        nonlocal pos
+        v = struct.unpack_from("<Q", data, pos)[0]
+        pos += 8
+        return v
+
+    def u8() -> int:
+        nonlocal pos
+        v = data[pos]
+        pos += 1
+        return v
+
+    def s() -> str:
+        nonlocal pos
+        n = u32()
+        v = data[pos : pos + n].decode("utf-8")
+        pos += n
+        return v
+
+    schema_version = u32()
+    count = u32()
+    entries = []
+    for _ in range(count):
+        entries.append(
+            {
+                "pet_id": s(),
+                "variant_id": s(),
+                "display_name": s(),
+                "pack_path": s(),
+                "is_default": bool(u8()),
+                "initially_owned": bool(u8()),
+                "price_clicks": u64(),
+                "publicly_purchasable": bool(u8()),
+            }
+        )
+    return {"schema_version": schema_version, "entries": entries}
+
+
+class PetCatalogCompileTest(unittest.TestCase):
+    """tools/compile_pet_catalog.py: el catálogo binario "NVCATLG1" v3
+    que src/app carga al arrancar. Block 07 agrega price_clicks +
+    publicly_purchasable por entrada (brief §10)."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_catalog_compile_")
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        import compile_pet_catalog  # noqa: E402
+
+        self.compile_pet_catalog = compile_pet_catalog
+        # pack_path se valida contra el filesystem al compilar — se crean
+        # archivos vacíos con las rutas esperadas.
+        for name in ("b.nvpack", "n.nvpack", "f.nvpack"):
+            with open(os.path.join(self.tmpdir, name), "wb"):
+                pass
+
+    def _compile(self, entries: list, schema_version: int = 3) -> dict:
+        manifest = {"schema_version": schema_version, "entries": entries}
+        mpath = os.path.join(self.tmpdir, "manifest.json")
+        with open(mpath, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        opath = os.path.join(self.tmpdir, "out.nvcat")
+        old = os.getcwd()
+        os.chdir(self.tmpdir)
+        try:
+            self.compile_pet_catalog.compile_catalog(mpath, opath)
+        finally:
+            os.chdir(old)
+        return _read_nvcat(opath)
+
+    def test_shop_metadata_round_trips(self) -> None:
+        cat = self._compile(
+            [
+                {
+                    "pet_id": "bunny",
+                    "display_name": "Bunny",
+                    "pack_path": "b.nvpack",
+                    "is_default": True,
+                    "initially_owned": True,
+                    "price_clicks": 120,
+                    "publicly_purchasable": True,
+                },
+                {
+                    "pet_id": "nidir",
+                    "display_name": "Nidir",
+                    "pack_path": "n.nvpack",
+                    "price_clicks": 300,
+                    "publicly_purchasable": True,
+                },
+                {
+                    "pet_id": "frin",
+                    "variant_id": "male",
+                    "display_name": "Frin",
+                    "pack_path": "f.nvpack",
+                    "initially_owned": True,
+                },
+            ]
+        )
+        self.assertEqual(cat["schema_version"], 3)
+        self.assertEqual(cat["entries"][0]["price_clicks"], 120)
+        self.assertTrue(cat["entries"][0]["publicly_purchasable"])
+        self.assertEqual(cat["entries"][1]["price_clicks"], 300)
+        self.assertTrue(cat["entries"][1]["publicly_purchasable"])
+        # Frin: default (0) — nunca público en el Shop normal (brief §11).
+        self.assertEqual(cat["entries"][2]["price_clicks"], 0)
+        self.assertFalse(cat["entries"][2]["publicly_purchasable"])
+
+    def test_defaults_are_zero_price_and_not_public(self) -> None:
+        cat = self._compile(
+            [{"pet_id": "p", "display_name": "P", "pack_path": "b.nvpack", "is_default": True}]
+        )
+        self.assertEqual(cat["entries"][0]["price_clicks"], 0)
+        self.assertFalse(cat["entries"][0]["publicly_purchasable"])
+
+    def test_public_with_zero_price_is_rejected(self) -> None:
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(
+                [
+                    {
+                        "pet_id": "p",
+                        "display_name": "P",
+                        "pack_path": "b.nvpack",
+                        "is_default": True,
+                        "publicly_purchasable": True,
+                        "price_clicks": 0,
+                    }
+                ]
+            )
+
+    def test_negative_price_is_rejected(self) -> None:
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(
+                [
+                    {
+                        "pet_id": "p",
+                        "display_name": "P",
+                        "pack_path": "b.nvpack",
+                        "is_default": True,
+                        "price_clicks": -5,
+                    }
+                ]
+            )
+
+    def test_schema_version_2_is_rejected(self) -> None:
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(
+                [{"pet_id": "p", "display_name": "P", "pack_path": "b.nvpack", "is_default": True}],
+                schema_version=2,
+            )
 
 
 if __name__ == "__main__":

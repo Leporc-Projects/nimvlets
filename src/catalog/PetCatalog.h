@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,26 @@ struct CatalogEntry {
     std::string displayName;
     std::string packPath;
     bool isDefault = false;
+
+    // --- Metadatos de economía (Block 07, schema "NVCATLG1" v3) -------
+    //
+    // El precio y la visibilidad en el Shop son DATO, nunca una rama
+    // `if (pet == "nidir")` en el runtime/UI (brief §10). Mínimos a
+    // propósito: sin campos especulativos de economía.
+
+    // Precio de compra en clics. 0 = sin precio / no a la venta. Una
+    // entrada con publiclyPurchasable=true DEBE tener price > 0 (el
+    // compilador y la política de compra rechazan precio cero — brief
+    // §26). Los valores actuales son PROVISIONALES de QA/economía, no
+    // balanceo final (ver docs/CATALOG.md §12).
+    std::uint64_t priceClicks = 0;
+
+    // true = esta entrada aparece en el Shop público normal como
+    // comprable. Frin queda en false en las DOS variantes: su ruta de
+    // obtención es onboarding + shop oculto de starters, trabajo futuro
+    // que NO se implementa ni se insinúa acá (brief §11). El modelo de
+    // Shop nunca la lista solo porque su entrada de catálogo exista.
+    bool publiclyPurchasable = false;
 
     // SEMILLA de propiedad para desarrollo/default (Block 06, schema
     // "NVCATLG1" v2). NO es autoridad de runtime: solo se consulta una

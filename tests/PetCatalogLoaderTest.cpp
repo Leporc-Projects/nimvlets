@@ -33,6 +33,10 @@ void AppendUint32(std::vector<std::uint8_t>& buf, std::uint32_t v) {
     AppendBytes(buf, &v, sizeof(v));
 }
 
+void AppendUint64(std::vector<std::uint8_t>& buf, std::uint64_t v) {
+    AppendBytes(buf, &v, sizeof(v));
+}
+
 void AppendString(std::vector<std::uint8_t>& buf, const std::string& s) {
     AppendUint32(buf, static_cast<std::uint32_t>(s.size()));
     AppendBytes(buf, s.data(), s.size());
@@ -43,9 +47,10 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
-// Schema actual del formato "NVCATLG1" — Block 06 lo subió a 2
-// (agrega el byte `initiallyOwned` por entrada).
-constexpr std::uint32_t kSchema = 2;
+// Schema actual del formato "NVCATLG1" — Block 07 lo subió a 3 (agrega
+// `priceClicks` u64 + `publiclyPurchasable` u8 por entrada); Block 06
+// lo había subido a 2 (`initiallyOwned` u8).
+constexpr std::uint32_t kSchema = 3;
 
 void AppendHeader(std::vector<std::uint8_t>& buf, std::uint32_t schemaVersion, std::uint32_t entryCount) {
     AppendMagic(buf);
@@ -60,13 +65,17 @@ void AppendEntry(
     const std::string& displayName,
     const std::string& packPath,
     bool isDefault,
-    bool initiallyOwned = false) {
+    bool initiallyOwned = false,
+    std::uint64_t priceClicks = 0,
+    bool publiclyPurchasable = false) {
     AppendString(buf, petId);
     AppendString(buf, variantId);
     AppendString(buf, displayName);
     AppendString(buf, packPath);
     AppendUint8(buf, isDefault ? 1 : 0);
     AppendUint8(buf, initiallyOwned ? 1 : 0);
+    AppendUint64(buf, priceClicks);
+    AppendUint8(buf, publiclyPurchasable ? 1 : 0);
 }
 
 std::vector<std::uint8_t> BuildSingleEntryCatalog() {
@@ -124,6 +133,66 @@ bool TestInitiallyOwnedFlagRoundTrips() {
     NIMVLETS_CHECK(!catalog.Entries()[1].initiallyOwned);
     NIMVLETS_CHECK(catalog.Entries()[2].initiallyOwned);
     NIMVLETS_CHECK(!catalog.Entries()[2].isDefault);
+    return true;
+}
+
+// `priceClicks` + `publiclyPurchasable` (schema v3, Block 07) hacen
+// round-trip por entrada.
+bool TestShopMetadataRoundTrips() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 3);
+    AppendEntry(buf, "bunny", "", "Bunny", "b.nvpack", /*isDefault=*/true, /*initiallyOwned=*/true,
+                /*priceClicks=*/120, /*publiclyPurchasable=*/true);
+    AppendEntry(buf, "nidir", "", "Nidir", "n.nvpack", false, false, /*priceClicks=*/300,
+                /*publiclyPurchasable=*/true);
+    AppendEntry(buf, "frin", "male", "Frin", "f.nvpack", false, true, /*priceClicks=*/0,
+                /*publiclyPurchasable=*/false);
+
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK(catalog.Entries()[0].priceClicks == 120);
+    NIMVLETS_CHECK(catalog.Entries()[0].publiclyPurchasable);
+    NIMVLETS_CHECK(catalog.Entries()[1].priceClicks == 300);
+    NIMVLETS_CHECK(catalog.Entries()[1].publiclyPurchasable);
+    NIMVLETS_CHECK(catalog.Entries()[2].priceClicks == 0);
+    NIMVLETS_CHECK(!catalog.Entries()[2].publiclyPurchasable);
+    return true;
+}
+
+// Una entrada pública con precio 0 nunca es válida (el loader la
+// rechaza — brief §26): un ítem de Shop así sería inoperable.
+bool TestPublicWithZeroPriceIsRejected() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 1);
+    AppendEntry(buf, "p", "", "P", "p.nvpack", /*isDefault=*/true, /*initiallyOwned=*/false,
+                /*priceClicks=*/0, /*publiclyPurchasable=*/true);
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(error.find("price") != std::string::npos);
+    return true;
+}
+
+// El schema v2 (Block 06) ya NO se acepta: el .nvcat es un artefacto de
+// build que se recompila en el mismo commit, no datos del usuario — sin
+// ruta de migración (a diferencia de AppState). Ver docs/CATALOG.md §10.
+bool TestSchemaV2IsRejected() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, 2, 1);
+    // cuerpo estilo v2 (sin los campos de economía) — igual se rechaza
+    // por la versión antes de intentar parsearlo.
+    AppendString(buf, "p");
+    AppendString(buf, "");
+    AppendString(buf, "P");
+    AppendString(buf, "p.nvpack");
+    AppendUint8(buf, 1);
+    AppendUint8(buf, 0);
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(error.find("schema") != std::string::npos);
     return true;
 }
 
@@ -257,6 +326,9 @@ void RegisterPetCatalogLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetCatalogLoader/ValidSingleEntryCatalogLoadsSuccessfully", TestValidSingleEntryCatalogLoadsSuccessfully);
     runner.Add("PetCatalogLoader/SamePetIdDifferentVariantsBothLoad", TestSamePetIdDifferentVariantsBothLoad);
     runner.Add("PetCatalogLoader/InitiallyOwnedFlagRoundTrips", TestInitiallyOwnedFlagRoundTrips);
+    runner.Add("PetCatalogLoader/ShopMetadataRoundTrips", TestShopMetadataRoundTrips);
+    runner.Add("PetCatalogLoader/PublicWithZeroPriceIsRejected", TestPublicWithZeroPriceIsRejected);
+    runner.Add("PetCatalogLoader/SchemaV2IsRejected", TestSchemaV2IsRejected);
     runner.Add("PetCatalogLoader/EntriesLoadInDeterministicOrder", TestEntriesLoadInDeterministicOrder);
     runner.Add("PetCatalogLoader/BadMagicIsRejected", TestBadMagicIsRejected);
     runner.Add("PetCatalogLoader/EmptyBufferIsRejected", TestEmptyBufferIsRejected);

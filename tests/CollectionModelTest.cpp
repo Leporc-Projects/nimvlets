@@ -1,6 +1,7 @@
 #include "CollectionModelTest.h"
 
 #include "catalog/CollectionModel.h"
+#include "catalog/PetEntitlement.h"
 
 #include <string>
 #include <vector>
@@ -9,20 +10,22 @@ using nimvlets::catalog::BuildCollectionModel;
 using nimvlets::catalog::CanActivate;
 using nimvlets::catalog::CatalogEntry;
 using nimvlets::catalog::CollectionModel;
-using nimvlets::catalog::EnsureActivePetOwned;
+using nimvlets::catalog::EnsureActiveEntitlementOwned;
 using nimvlets::catalog::OwnershipStatus;
 using nimvlets::catalog::PetCatalog;
+using nimvlets::catalog::PetEntitlement;
 using nimvlets::catalog::PetIdentity;
-using nimvlets::catalog::SeedOwnershipFromCatalog;
+using nimvlets::catalog::SeedEntitlementsFromCatalog;
+
+using Ents = std::vector<PetEntitlement>;
 
 namespace nimvlets::tests {
 
 namespace {
 
-// El catálogo de dev real de Block 06 reconstruido a mano (sin pasar
-// por el .nvcat — eso ya lo cubre PetCatalogLoaderTest.cpp): Bunny
-// (default, initiallyOwned), Nidir (no owned -> queda locked), y las
-// DOS entradas de Frin compartiendo petId (male/female, initiallyOwned).
+// El catálogo de dev real reconstruido a mano (sin pasar por el .nvcat):
+// Bunny (default, initiallyOwned), Nidir (no owned -> locked), y las DOS
+// entradas de Frin compartiendo petId (male/female, initiallyOwned).
 PetCatalog MakeDevCatalog() {
     std::vector<CatalogEntry> entries;
 
@@ -58,13 +61,18 @@ PetCatalog MakeDevCatalog() {
     return PetCatalog(std::move(entries));
 }
 
+// Poseer el pet entero.
+PetEntitlement Whole(const std::string& petId) { return PetEntitlement{petId, ""}; }
+// Poseer una variante concreta.
+PetEntitlement Variant(const std::string& petId, const std::string& variantId) {
+    return PetEntitlement{petId, variantId};
+}
+
 bool TestThreeOwnershipStatesDeriveCorrectly() {
     const PetCatalog catalog = MakeDevCatalog();
-    const std::vector<std::string> owned = {"bunny", "frin"};
+    const Ents owned = {Whole("bunny"), Whole("frin")};
     const CollectionModel model = BuildCollectionModel(catalog, owned, PetIdentity{"bunny", ""});
 
-    // Tres filas lógicas: Bunny, Nidir, Frin (las dos entradas de Frin
-    // colapsan a una).
     NIMVLETS_CHECK(model.items.size() == 3);
     NIMVLETS_CHECK(model.items[0].petId == "bunny");
     NIMVLETS_CHECK(model.items[1].petId == "nidir");
@@ -78,7 +86,7 @@ bool TestThreeOwnershipStatesDeriveCorrectly() {
 
 bool TestFrinCollapsesToOneItemWithTwoVariants() {
     const PetCatalog catalog = MakeDevCatalog();
-    const CollectionModel model = BuildCollectionModel(catalog, {"frin"}, PetIdentity{"bunny", ""});
+    const CollectionModel model = BuildCollectionModel(catalog, {Whole("frin")}, PetIdentity{"bunny", ""});
 
     const auto* frin = model.Find("frin");
     NIMVLETS_CHECK(frin != nullptr);
@@ -87,7 +95,6 @@ bool TestFrinCollapsesToOneItemWithTwoVariants() {
     NIMVLETS_CHECK(frin->variants[0].variantId == "male");
     NIMVLETS_CHECK(frin->variants[1].variantId == "female");
 
-    // Bunny no tiene variantes: exactamente una, con id vacío.
     const auto* bunny = model.Find("bunny");
     NIMVLETS_CHECK(bunny != nullptr);
     NIMVLETS_CHECK(!bunny->HasVariants());
@@ -96,103 +103,169 @@ bool TestFrinCollapsesToOneItemWithTwoVariants() {
     return true;
 }
 
-// El pet activo lleva su variante activa persistida como seleccionada;
-// un pet inactivo cae a la primera del catálogo.
+// Frin: macho poseído, hembra no -> el ítem es kOwnedInactive; el flag
+// `owned` por variante distingue las dos. (Este es el escenario que el
+// onboarding futuro produce; el owner actual, tras la migración, tiene
+// las dos.)
+bool TestFrinOneVariantOwned() {
+    const PetCatalog catalog = MakeDevCatalog();
+    const CollectionModel model =
+        BuildCollectionModel(catalog, {Whole("bunny"), Variant("frin", "male")}, PetIdentity{"bunny", ""});
+    const auto* frin = model.Find("frin");
+    NIMVLETS_CHECK(frin != nullptr);
+    NIMVLETS_CHECK(frin->status == OwnershipStatus::kOwnedInactive);
+    NIMVLETS_CHECK(frin->VariantOwned("male"));
+    NIMVLETS_CHECK(!frin->VariantOwned("female"));
+    NIMVLETS_CHECK(!frin->AllVariantsOwned());
+    return true;
+}
+
+// Frin: ninguna variante poseída -> kLocked, las dos `owned == false`.
+bool TestFrinNoVariantsOwned() {
+    const PetCatalog catalog = MakeDevCatalog();
+    const CollectionModel model =
+        BuildCollectionModel(catalog, {Whole("bunny")}, PetIdentity{"bunny", ""});
+    const auto* frin = model.Find("frin");
+    NIMVLETS_CHECK(frin->status == OwnershipStatus::kLocked);
+    NIMVLETS_CHECK(!frin->VariantOwned("male"));
+    NIMVLETS_CHECK(!frin->VariantOwned("female"));
+    return true;
+}
+
+// Frin: pet entero poseído -> las dos variantes `owned == true`.
+bool TestFrinBothVariantsOwnedViaWholePet() {
+    const PetCatalog catalog = MakeDevCatalog();
+    const CollectionModel model =
+        BuildCollectionModel(catalog, {Whole("bunny"), Whole("frin")}, PetIdentity{"bunny", ""});
+    const auto* frin = model.Find("frin");
+    NIMVLETS_CHECK(frin->status == OwnershipStatus::kOwnedInactive);
+    NIMVLETS_CHECK(frin->VariantOwned("male"));
+    NIMVLETS_CHECK(frin->VariantOwned("female"));
+    NIMVLETS_CHECK(frin->AllVariantsOwned());
+    return true;
+}
+
 bool TestSelectedVariantFollowsActiveIdentity() {
     const PetCatalog catalog = MakeDevCatalog();
 
     const CollectionModel femaleActive =
-        BuildCollectionModel(catalog, {"bunny", "frin"}, PetIdentity{"frin", "female"});
+        BuildCollectionModel(catalog, {Whole("bunny"), Whole("frin")}, PetIdentity{"frin", "female"});
     const auto* frinActive = femaleActive.Find("frin");
     NIMVLETS_CHECK(frinActive->status == OwnershipStatus::kActive);
     NIMVLETS_CHECK(frinActive->selectedVariantId == "female");
 
     const CollectionModel bunnyActive =
-        BuildCollectionModel(catalog, {"bunny", "frin"}, PetIdentity{"bunny", ""});
+        BuildCollectionModel(catalog, {Whole("bunny"), Whole("frin")}, PetIdentity{"bunny", ""});
     const auto* frinInactive = bunnyActive.Find("frin");
     NIMVLETS_CHECK(frinInactive->status == OwnershipStatus::kOwnedInactive);
     NIMVLETS_CHECK(frinInactive->selectedVariantId == "male");  // primera del catálogo
     return true;
 }
 
-// Un variantId activo que no existe en el catálogo no debe "casi
-// calzar": cae a la primera variante, sin crashear.
 bool TestUnknownActiveVariantFallsBackToFirst() {
     const PetCatalog catalog = MakeDevCatalog();
     const CollectionModel model =
-        BuildCollectionModel(catalog, {"frin"}, PetIdentity{"frin", "nonexistent"});
+        BuildCollectionModel(catalog, {Whole("frin")}, PetIdentity{"frin", "nonexistent"});
     const auto* frin = model.Find("frin");
     NIMVLETS_CHECK(frin->status == OwnershipStatus::kActive);
     NIMVLETS_CHECK(frin->selectedVariantId == "male");
     return true;
 }
 
-bool TestLockedPetCannotActivate() {
+// CanActivate: gate a nivel de pet Y de variante exacta (brief §6).
+bool TestCanActivateGatesLockedAndUnownedVariant() {
     const PetCatalog catalog = MakeDevCatalog();
-    const CollectionModel model = BuildCollectionModel(catalog, {"bunny"}, PetIdentity{"bunny", ""});
+    const CollectionModel model = BuildCollectionModel(
+        catalog, {Whole("bunny"), Variant("frin", "male")}, PetIdentity{"bunny", ""});
 
-    NIMVLETS_CHECK(!CanActivate(model, "nidir"));   // locked
-    NIMVLETS_CHECK(CanActivate(model, "bunny"));    // active (no-op re-activate ok)
-    NIMVLETS_CHECK(!CanActivate(model, "frin"));    // owned? no -> locked here
-    NIMVLETS_CHECK(!CanActivate(model, "ghost"));   // not in catalog
+    NIMVLETS_CHECK(!CanActivate(model, "nidir"));            // locked
+    NIMVLETS_CHECK(CanActivate(model, "bunny"));             // active
+    NIMVLETS_CHECK(CanActivate(model, "frin", "male"));      // variante poseída
+    NIMVLETS_CHECK(!CanActivate(model, "frin", "female"));   // variante NO poseída
+    NIMVLETS_CHECK(CanActivate(model, "frin"));              // por defecto -> male, poseída
+    NIMVLETS_CHECK(!CanActivate(model, "ghost"));            // no en catálogo
     return true;
 }
 
-bool TestOwnedInactiveCanActivate() {
+// Con la variante por defecto (male) poseída, CanActivate(model,"frin")
+// sin variante explícita usa selectedVariantId -> true.
+bool TestCanActivateDefaultVariantResolves() {
     const PetCatalog catalog = MakeDevCatalog();
-    const CollectionModel model = BuildCollectionModel(catalog, {"bunny", "frin"}, PetIdentity{"bunny", ""});
-    NIMVLETS_CHECK(CanActivate(model, "frin"));
+    const CollectionModel model =
+        BuildCollectionModel(catalog, {Whole("bunny"), Whole("frin")}, PetIdentity{"bunny", ""});
+    NIMVLETS_CHECK(CanActivate(model, "frin"));           // default male, poseída
+    NIMVLETS_CHECK(CanActivate(model, "frin", "female"));
     return true;
 }
 
-// El invariante "el pet activo siempre es propio" (block brief §9): si
-// el pet activo persistido no está en ownedPetIds, se agrega.
-bool TestEnsureActivePetOwnedAddsMissing() {
-    std::vector<std::string> owned = {"bunny"};
-    const bool changed = EnsureActivePetOwned(owned, "frin");
+// Invariante "el activo siempre es propio": si el pet/variante activo no
+// está cubierto, se agrega la autorización EXACTA.
+bool TestEnsureActiveEntitlementOwnedAddsExact() {
+    Ents owned = {Whole("bunny")};
+    const bool changed = EnsureActiveEntitlementOwned(owned, PetIdentity{"frin", "female"});
     NIMVLETS_CHECK(changed);
-    NIMVLETS_CHECK((owned == std::vector<std::string>{"bunny", "frin"}));
+    NIMVLETS_CHECK((owned == Ents{Whole("bunny"), Variant("frin", "female")}));
 
-    // Idempotente: llamarlo de nuevo no cambia nada.
-    const bool changedAgain = EnsureActivePetOwned(owned, "frin");
-    NIMVLETS_CHECK(!changedAgain);
-    NIMVLETS_CHECK((owned == std::vector<std::string>{"bunny", "frin"}));
+    // Idempotente.
+    NIMVLETS_CHECK(!EnsureActiveEntitlementOwned(owned, PetIdentity{"frin", "female"}));
     return true;
 }
 
-bool TestEnsureActivePetOwnedNormalizes() {
-    std::vector<std::string> owned = {"nidir", "bunny", "bunny", ""};
-    const bool changed = EnsureActivePetOwned(owned, "bunny");
-    NIMVLETS_CHECK(changed);  // dedup + drop-empty cuenta como cambio
-    NIMVLETS_CHECK((owned == std::vector<std::string>{"bunny", "nidir"}));
+// Un "pet entero" ya cubre la identidad activa -> no cambia nada.
+bool TestEnsureActiveEntitlementOwnedNoOpWhenWholePetCovers() {
+    Ents owned = {Whole("frin")};
+    NIMVLETS_CHECK(!EnsureActiveEntitlementOwned(owned, PetIdentity{"frin", "male"}));
+    NIMVLETS_CHECK((owned == Ents{Whole("frin")}));
 
-    std::vector<std::string> empty;
-    NIMVLETS_CHECK(!EnsureActivePetOwned(empty, ""));  // activo vacío -> no-op
-    NIMVLETS_CHECK(empty.empty());
+    Ents empty;
+    NIMVLETS_CHECK(!EnsureActiveEntitlementOwned(empty, PetIdentity{"", ""}));  // activo vacío -> no-op
     return true;
 }
 
-bool TestSeedOwnershipFromCatalog() {
+// Un `owned` sin canonicalizar (desordenado / con duplicados / petId
+// vacío) se reescribe canónico aunque ya cubra al activo -> cuenta como
+// cambio (src/app lo persiste).
+bool TestEnsureActiveEntitlementOwnedCanonicalizes() {
+    Ents owned = {Variant("frin", "female"), Whole("bunny"), Whole("bunny"), PetEntitlement{"", "x"}};
+    const bool changed = EnsureActiveEntitlementOwned(owned, PetIdentity{"bunny", ""});
+    NIMVLETS_CHECK(changed);
+    NIMVLETS_CHECK((owned == Ents{Whole("bunny"), Variant("frin", "female")}));
+    return true;
+}
+
+bool TestSeedEntitlementsFromCatalog() {
     const PetCatalog catalog = MakeDevCatalog();
-    const std::vector<std::string> seed = SeedOwnershipFromCatalog(catalog);
-    // bunny + frin (las dos entradas de Frin colapsan a un petId), nidir NO.
-    NIMVLETS_CHECK((seed == std::vector<std::string>{"bunny", "frin"}));
+    const Ents seed = SeedEntitlementsFromCatalog(catalog);
+    // Pet ENTERO por cada initiallyOwned -> {bunny,""} + {frin,""}; nidir no.
+    NIMVLETS_CHECK((seed == Ents{Whole("bunny"), Whole("frin")}));
     return true;
 }
 
-// Un modelo construido tras la siembra + EnsureActivePetOwned nunca
-// tiene el pet activo como locked.
-bool TestActivePetIsNeverLockedAfterSeed() {
+// Tras la siembra + EnsureActiveEntitlementOwned, el modelo nunca tiene
+// el pet activo como locked, y la variante activa queda válida.
+bool TestActiveVariantValidAfterSeedAndInvariant() {
     const PetCatalog catalog = MakeDevCatalog();
-    std::vector<std::string> owned = SeedOwnershipFromCatalog(catalog);
-    // Simula: el pet activo persistido es Nidir, que NO está en la
-    // semilla — el invariante debe repararlo.
-    EnsureActivePetOwned(owned, "nidir");
+    Ents owned = SeedEntitlementsFromCatalog(catalog);
+    // El pet activo persistido es Nidir (no sembrado) con variante "".
+    EnsureActiveEntitlementOwned(owned, PetIdentity{"nidir", ""});
     const CollectionModel model = BuildCollectionModel(catalog, owned, PetIdentity{"nidir", ""});
     const auto* nidir = model.Find("nidir");
     NIMVLETS_CHECK(nidir->status == OwnershipStatus::kActive);
-    NIMVLETS_CHECK(model.Active() != nullptr);
-    NIMVLETS_CHECK(model.Active()->petId == "nidir");
+    NIMVLETS_CHECK(model.Active() != nullptr && model.Active()->petId == "nidir");
+    return true;
+}
+
+// El caso de la migración de un owner de Block 06: su Frin (pet entero)
+// sobrevive con las DOS variantes activables.
+bool TestMigratedFrinOwnerHasBothVariants() {
+    const PetCatalog catalog = MakeDevCatalog();
+    // Lo que produce la migración v3->v4: petIds -> pet entero.
+    const Ents owned = {Whole("bunny"), Whole("frin")};
+    const CollectionModel model = BuildCollectionModel(catalog, owned, PetIdentity{"frin", "male"});
+    NIMVLETS_CHECK(CanActivate(model, "frin", "male"));
+    NIMVLETS_CHECK(CanActivate(model, "frin", "female"));
+    const auto* frin = model.Find("frin");
+    NIMVLETS_CHECK(frin->AllVariantsOwned());
     return true;
 }
 
@@ -201,14 +274,21 @@ bool TestActivePetIsNeverLockedAfterSeed() {
 void RegisterCollectionModelTests(testing::TestRunner& runner) {
     runner.Add("CollectionModel/ThreeOwnershipStatesDeriveCorrectly", TestThreeOwnershipStatesDeriveCorrectly);
     runner.Add("CollectionModel/FrinCollapsesToOneItemWithTwoVariants", TestFrinCollapsesToOneItemWithTwoVariants);
+    runner.Add("CollectionModel/FrinOneVariantOwned", TestFrinOneVariantOwned);
+    runner.Add("CollectionModel/FrinNoVariantsOwned", TestFrinNoVariantsOwned);
+    runner.Add("CollectionModel/FrinBothVariantsOwnedViaWholePet", TestFrinBothVariantsOwnedViaWholePet);
     runner.Add("CollectionModel/SelectedVariantFollowsActiveIdentity", TestSelectedVariantFollowsActiveIdentity);
     runner.Add("CollectionModel/UnknownActiveVariantFallsBackToFirst", TestUnknownActiveVariantFallsBackToFirst);
-    runner.Add("CollectionModel/LockedPetCannotActivate", TestLockedPetCannotActivate);
-    runner.Add("CollectionModel/OwnedInactiveCanActivate", TestOwnedInactiveCanActivate);
-    runner.Add("CollectionModel/EnsureActivePetOwnedAddsMissing", TestEnsureActivePetOwnedAddsMissing);
-    runner.Add("CollectionModel/EnsureActivePetOwnedNormalizes", TestEnsureActivePetOwnedNormalizes);
-    runner.Add("CollectionModel/SeedOwnershipFromCatalog", TestSeedOwnershipFromCatalog);
-    runner.Add("CollectionModel/ActivePetIsNeverLockedAfterSeed", TestActivePetIsNeverLockedAfterSeed);
+    runner.Add("CollectionModel/CanActivateGatesLockedAndUnownedVariant", TestCanActivateGatesLockedAndUnownedVariant);
+    runner.Add("CollectionModel/CanActivateDefaultVariantResolves", TestCanActivateDefaultVariantResolves);
+    runner.Add("CollectionModel/EnsureActiveEntitlementOwnedAddsExact", TestEnsureActiveEntitlementOwnedAddsExact);
+    runner.Add("CollectionModel/EnsureActiveEntitlementOwnedNoOpWhenWholePetCovers",
+               TestEnsureActiveEntitlementOwnedNoOpWhenWholePetCovers);
+    runner.Add("CollectionModel/EnsureActiveEntitlementOwnedCanonicalizes",
+               TestEnsureActiveEntitlementOwnedCanonicalizes);
+    runner.Add("CollectionModel/SeedEntitlementsFromCatalog", TestSeedEntitlementsFromCatalog);
+    runner.Add("CollectionModel/ActiveVariantValidAfterSeedAndInvariant", TestActiveVariantValidAfterSeedAndInvariant);
+    runner.Add("CollectionModel/MigratedFrinOwnerHasBothVariants", TestMigratedFrinOwnerHasBothVariants);
 }
 
 }  // namespace nimvlets::tests

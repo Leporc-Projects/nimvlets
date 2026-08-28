@@ -19,7 +19,10 @@ namespace nimvlets::catalog {
 // v1 (Block 04): petId, variantId, displayName, packPath, isDefault.
 // v2 (Block 06): agrega `initiallyOwned` (u8) por entrada — la semilla
 //   de propiedad de desarrollo. Ver docs/CATALOG.md §3.
-constexpr std::uint32_t kCurrentCatalogSchemaVersion = 2;
+// v3 (Block 07): agrega `priceClicks` (u64) y `publiclyPurchasable` (u8)
+//   por entrada — el precio y la elegibilidad para el Shop público, como
+//   dato. Ver docs/CATALOG.md §12.
+constexpr std::uint32_t kCurrentCatalogSchemaVersion = 3;
 
 // Parsea un catálogo compilado (ver tools/compile_pet_catalog.py para
 // el productor) desde un buffer de bytes en memoria. Parseo puro — sin

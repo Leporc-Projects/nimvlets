@@ -20,6 +20,26 @@ struct WindowPosition {
     }
 };
 
+// Una AUTORIZACIÓN de propiedad persistida (Block 07, schema v4).
+// Reemplaza al `ownedPetIds` (un simple conjunto de petId) de Block 06.
+//
+//   petId no vacío + variantId vacío   -> el Nimvlet entero.
+//   petId no vacío + variantId no vacío -> solo esa variante.
+//
+// src/persistence la almacena como DATO plano; la semántica (¿cubre
+// esta identidad?, canonicalización con subsunción) vive en
+// src/catalog (catalog::PetEntitlement), que src/app puentea — la misma
+// división que activePetId (string acá) vs. catalog::PetIdentity, para
+// que src/persistence siga sin depender de src/catalog ni de SDL.
+struct OwnedEntitlement {
+    std::string petId;
+    std::string variantId;  // "" = el pet entero (cualquier variante)
+
+    friend bool operator==(const OwnedEntitlement& a, const OwnedEntitlement& b) {
+        return a.petId == b.petId && a.variantId == b.variantId;
+    }
+};
+
 // El conjunto completo de estado de aplicación local, en disco, que
 // persiste Block 03. Datos puros — sin SDL, sin I/O de archivos, sin
 // código de plataforma (ver AppStateSerializer.h para la
@@ -42,21 +62,29 @@ struct AppState {
     //   ownershipSeeded) y las preferencias del menú rápido
     //   (lockPosition, sizeChoice, opacityPercent).
     // v3 (Block 06.1): agrega `language` ("en"/"es").
+    // v4 (Block 07): la propiedad pasa de `ownedPetIds` (petIds sueltos)
+    //   a `ownedEntitlements` (autorizaciones {petId, variantId}) —
+    //   capaz de expresar "posee solo Frin macho". La migración desde
+    //   v1/v2/v3 mapea cada petId viejo a una autorización de PET ENTERO
+    //   ({petId, ""}), así un Frin poseído sigue dando macho + hembra
+    //   (brief §5). Ver docs/PERSISTENCE.md §3 y DEC-124.
     //
     // Cada subida trae una migración hacia adelante mínima: un archivo
     // más viejo se lee con su layout, los campos nuevos quedan en su
-    // default, y `schemaVersion` se marca como el actual para que el
-    // próximo Save() lo reescriba — así el click balance, la posición,
-    // la propiedad y las preferencias del owner sobreviven cada
-    // actualización. Ver docs/PERSISTENCE.md §3 y DEC-109/DEC-116.
-    static constexpr std::uint32_t kCurrentSchemaVersion = 3;
+    // default (o se derivan del viejo, como la propiedad en v4), y
+    // `schemaVersion` se marca como el actual para que el próximo Save()
+    // lo reescriba — así el click balance, la posición, la propiedad y
+    // las preferencias del owner sobreviven cada actualización. Ver
+    // docs/PERSISTENCE.md §3 y DEC-109/DEC-116/DEC-124.
+    static constexpr std::uint32_t kCurrentSchemaVersion = 4;
 
     std::uint32_t schemaVersion = kCurrentSchemaVersion;
 
-    // La única moneda — ver AGENTS.md §2. Empieza en 0; solo se
-    // incrementa por un click real. Block 06 la MUESTRA dentro del
-    // Product UI pero sigue sin poder gastarla (no hay Shop todavía).
-    // uint64 para que nunca desborde de forma realista.
+    // La única moneda — ver AGENTS.md §2. Empieza en 0; se incrementa
+    // por un click real y, desde Block 07, se DECREMENTA por una compra
+    // en el Shop (nunca por debajo de 0 — la política de compra verifica
+    // balance >= precio antes de restar). uint64 para que nunca desborde
+    // de forma realista.
     std::uint64_t clickBalance = 0;
 
     // Qué pet está activo actualmente. String vacío = sin save aún /
@@ -79,29 +107,32 @@ struct AppState {
     // centrado al iniciar).
     std::optional<WindowPosition> lastWindowPosition;
 
-    // --- Estado de propiedad (Block 06) ------------------------------
+    // --- Estado de propiedad (Block 06 -> Block 07 schema v4) --------
     //
-    // Qué Nimvlets posee el owner, por `petId` (nunca por variante —
-    // Frin es UN Nimvlet lógico: poseer "frin" da acceso a macho y
-    // hembra). Orden canónico: ordenado ascendente y sin duplicados,
-    // impuesto por el serializer y por src/app al mutar — así el
-    // archivo es determinista y dos AppState con el mismo conjunto
-    // siempre comparan igual.
+    // Qué tiene derecho a usar el owner, como AUTORIZACIONES
+    // {petId, variantId} (ver OwnedEntitlement arriba). Reemplaza al
+    // `ownedPetIds` de Block 06: ahora se puede expresar "posee solo
+    // Frin macho". Orden canónico: ordenado, sin duplicados, sin petId
+    // vacío, y con subsunción ((p,"") descarta (p,<var>)) — lo impone
+    // catalog::CanonicalizePetEntitlements en src/app al mutar, y el
+    // serializer (orden + dedup) sobre una copia, así el archivo es
+    // determinista y dos AppState equivalentes comparan igual.
     //
     // Autoridad una vez escrito; NO se deriva del catálogo en cada
     // arranque. El catálogo solo aporta la SEMILLA de desarrollo (ver
     // catalog::CatalogEntry::initiallyOwned) y solo cuando
     // `ownershipSeeded` todavía es false — ver más abajo.
-    std::vector<std::string> ownedPetIds;
+    std::vector<OwnedEntitlement> ownedEntitlements;
 
     // false = este estado nunca pasó por la inicialización de
-    // propiedad. En ese caso src/app siembra `ownedPetIds` desde las
-    // entradas `initiallyOwned` del catálogo y pone esto en true. Un
-    // bloque futuro de onboarding (Block 09) reemplaza esa siembra por
-    // la elección real de starter del jugador SIN un cambio de schema:
-    // solo escribe `ownedPetIds` + `ownershipSeeded = true` con su
-    // propia lógica. "Poseer cero Nimvlets" (todo bloqueado) y "nunca
-    // se inicializó" son estados distintos precisamente por este flag.
+    // propiedad. En ese caso src/app siembra `ownedEntitlements` desde
+    // las entradas `initiallyOwned` del catálogo y pone esto en true.
+    // Un bloque futuro de onboarding (Block 09) reemplaza esa siembra
+    // por la elección real de starter del jugador SIN un cambio de
+    // schema: solo escribe `ownedEntitlements` + `ownershipSeeded =
+    // true` con su propia lógica. "Poseer cero Nimvlets" (todo
+    // bloqueado) y "nunca se inicializó" son estados distintos
+    // precisamente por este flag.
     bool ownershipSeeded = false;
 
     // --- Preferencias del menú rápido (Block 06) -------------------
@@ -143,7 +174,7 @@ struct AppState {
                a.activePetId == b.activePetId &&
                a.activeVariantId == b.activeVariantId &&
                a.lastWindowPosition == b.lastWindowPosition &&
-               a.ownedPetIds == b.ownedPetIds &&
+               a.ownedEntitlements == b.ownedEntitlements &&
                a.ownershipSeeded == b.ownershipSeeded &&
                a.lockPosition == b.lockPosition &&
                a.sizeChoice == b.sizeChoice &&

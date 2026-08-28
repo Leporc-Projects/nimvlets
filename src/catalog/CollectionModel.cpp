@@ -1,24 +1,22 @@
 #include "catalog/CollectionModel.h"
 
 #include <algorithm>
-#include <unordered_set>
 
 namespace nimvlets::catalog {
 
-namespace {
-
-// sort + unique + descartar el string vacío, en el lugar. Mismo
-// resultado canónico que persistence::NormalizeOwnedPetIds, pero
-// src/catalog no puede ver src/persistence (y no debe: la conexión
-// catálogo<->persistencia la hace src/app) — así que este idiom de 3
-// líneas se repite acá a propósito.
-void CanonicalizeIds(std::vector<std::string>& ids) {
-    std::sort(ids.begin(), ids.end());
-    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-    ids.erase(std::remove(ids.begin(), ids.end(), std::string()), ids.end());
+bool CollectionItem::AllVariantsOwned() const {
+    return std::all_of(variants.begin(), variants.end(),
+                       [](const CollectionVariant& v) { return v.owned; });
 }
 
-}  // namespace
+bool CollectionItem::VariantOwned(const std::string& variantId) const {
+    for (const CollectionVariant& v : variants) {
+        if (v.variantId == variantId) {
+            return v.owned;
+        }
+    }
+    return false;
+}
 
 const CollectionItem* CollectionModel::Find(const std::string& petId) const {
     for (const CollectionItem& item : items) {
@@ -40,10 +38,8 @@ const CollectionItem* CollectionModel::Active() const {
 
 CollectionModel BuildCollectionModel(
     const PetCatalog& catalog,
-    const std::vector<std::string>& ownedPetIds,
+    const std::vector<PetEntitlement>& owned,
     const PetIdentity& activeId) {
-    const std::unordered_set<std::string> owned(ownedPetIds.begin(), ownedPetIds.end());
-
     CollectionModel model;
     model.activePetId = activeId.petId;
     model.activeVariantId = activeId.variantId;
@@ -65,14 +61,22 @@ CollectionModel BuildCollectionModel(
             item->petId = entry.identity.petId;
             item->displayName = entry.displayName;
         }
-        item->variants.push_back(CollectionVariant{entry.identity.variantId, entry.displayName});
+        CollectionVariant variant;
+        variant.variantId = entry.identity.variantId;
+        variant.displayName = entry.displayName;
+        variant.owned = OwnsIdentity(owned, PetIdentity{entry.identity.petId, entry.identity.variantId});
+        item->variants.push_back(variant);
     }
 
     for (CollectionItem& item : model.items) {
-        // Estado de propiedad — por petId, nunca por variante.
+        const bool anyOwned =
+            std::any_of(item.variants.begin(), item.variants.end(),
+                        [](const CollectionVariant& v) { return v.owned; });
+        // Estado a nivel de pet lógico. "Activo" gana sobre todo: el
+        // invariante garantiza que la variante activa es propia.
         if (item.petId == activeId.petId) {
             item.status = OwnershipStatus::kActive;
-        } else if (owned.count(item.petId) != 0) {
+        } else if (anyOwned) {
             item.status = OwnershipStatus::kOwnedInactive;
         } else {
             item.status = OwnershipStatus::kLocked;
@@ -97,42 +101,60 @@ CollectionModel BuildCollectionModel(
     return model;
 }
 
-bool CanActivate(const CollectionModel& model, const std::string& petId) {
+bool CanActivate(const CollectionModel& model, const std::string& petId, const std::string& variantId) {
     const CollectionItem* item = model.Find(petId);
     if (item == nullptr) {
         return false;
     }
-    return item->status == OwnershipStatus::kActive || item->status == OwnershipStatus::kOwnedInactive;
+    if (item->status != OwnershipStatus::kActive && item->status != OwnershipStatus::kOwnedInactive) {
+        return false;  // locked -> nunca (sin compra desde acá; el Shop es aparte)
+    }
+    // Gate a nivel de variante: la variante exacta a poner en el
+    // escritorio tiene que estar poseída (brief §6). Un variantId vacío
+    // en un pet CON variantes se resuelve contra la variante por
+    // defecto del ítem.
+    std::string wanted = variantId;
+    if (wanted.empty() && item->HasVariants()) {
+        wanted = item->selectedVariantId;
+    }
+    if (item->HasVariants()) {
+        return item->VariantOwned(wanted);
+    }
+    // Pet sin variantes: su única "variante" (id vacío) lleva el flag.
+    return item->variants.front().owned || item->status == OwnershipStatus::kActive;
 }
 
-bool EnsureActivePetOwned(std::vector<std::string>& ownedPetIds, const std::string& activePetId) {
-    if (activePetId.empty()) {
+bool EnsureActiveEntitlementOwned(std::vector<PetEntitlement>& ents, const PetIdentity& active) {
+    if (active.petId.empty()) {
         return false;
     }
-    // Se compara contra el valor CRUDO de entrada, no contra su forma
-    // canónica: si lo guardado venía sin ordenar / con duplicados / con
-    // un string vacío, reescribirlo canónico también es un cambio que
-    // src/app debe persistir.
-    const std::vector<std::string> before = ownedPetIds;
-
-    std::vector<std::string> after = ownedPetIds;
-    if (std::find(after.begin(), after.end(), activePetId) == after.end()) {
-        after.push_back(activePetId);
+    if (OwnsIdentity(ents, active)) {
+        // Ya cubierto — pero puede que `ents` venga sin canonicalizar
+        // (archivo hecho a mano, orden raro, duplicados). Reescribir a
+        // forma canónica también es un cambio que src/app debe persistir.
+        std::vector<PetEntitlement> canon = ents;
+        CanonicalizePetEntitlements(canon);
+        if (canon != ents) {
+            ents = std::move(canon);
+            return true;
+        }
+        return false;
     }
-    CanonicalizeIds(after);
-
-    ownedPetIds = after;
-    return after != before;
+    ents.push_back(PetEntitlement{active.petId, active.variantId});
+    CanonicalizePetEntitlements(ents);
+    return true;
 }
 
-std::vector<std::string> SeedOwnershipFromCatalog(const PetCatalog& catalog) {
-    std::vector<std::string> seed;
+std::vector<PetEntitlement> SeedEntitlementsFromCatalog(const PetCatalog& catalog) {
+    std::vector<PetEntitlement> seed;
     for (const CatalogEntry& entry : catalog.Entries()) {
         if (entry.initiallyOwned) {
-            seed.push_back(entry.identity.petId);
+            // PET ENTERO, no la variante: un Frin sembrado da macho y
+            // hembra, igual que el `ownedPetIds` de Block 06.
+            seed.push_back(PetEntitlement{entry.identity.petId, std::string()});
         }
     }
-    CanonicalizeIds(seed);
+    CanonicalizePetEntitlements(seed);
     return seed;
 }
 

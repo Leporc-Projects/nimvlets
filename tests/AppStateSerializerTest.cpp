@@ -10,8 +10,11 @@
 
 using nimvlets::persistence::AppState;
 using nimvlets::persistence::DeserializeAppState;
+using nimvlets::persistence::OwnedEntitlement;
 using nimvlets::persistence::SerializeAppState;
 using nimvlets::persistence::WindowPosition;
+
+using Ents = std::vector<OwnedEntitlement>;
 
 namespace nimvlets::tests {
 
@@ -82,14 +85,14 @@ std::vector<std::uint8_t> BuildValidBuffer(
     return buf;
 }
 
-// Un archivo v2 completo y válido (magic + version 2 + cuerpo Block 03
-// + bloque v2), SIN el bloque v3 (`language`). Para el test de
-// migración v2 -> v3.
-std::vector<std::uint8_t> BuildValidV2Buffer(
-    std::uint64_t clickBalance, const std::string& petId, bool ownershipSeeded,
-    const std::vector<std::string>& ownedPetIds, bool lockPosition, const std::string& sizeChoice,
-    std::uint32_t opacityPercent) {
-    std::vector<std::uint8_t> buf = BuildValidBuffer(2, clickBalance, petId, "", false, 0, 0);
+// Un archivo v2 o v3 con propiedad en el formato VIEJO (`ownedPetIds`,
+// petIds sueltos). `schemaVersion` == 2 -> sin `language`; == 3 -> con
+// `language`. Para los tests de migración hacia v4.
+std::vector<std::uint8_t> BuildLegacyOwnershipBuffer(
+    std::uint32_t schemaVersion, std::uint64_t clickBalance, const std::string& petId,
+    bool ownershipSeeded, const std::vector<std::string>& ownedPetIds, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language = "") {
+    std::vector<std::uint8_t> buf = BuildValidBuffer(schemaVersion, clickBalance, petId, "", false, 0, 0);
     AppendUint8(buf, ownershipSeeded ? 1 : 0);
     AppendUint32(buf, static_cast<std::uint32_t>(ownedPetIds.size()));
     for (const std::string& id : ownedPetIds) {
@@ -98,6 +101,28 @@ std::vector<std::uint8_t> BuildValidV2Buffer(
     AppendUint8(buf, lockPosition ? 1 : 0);
     AppendString(buf, sizeChoice);
     AppendUint32(buf, opacityPercent);
+    if (schemaVersion >= 3) {
+        AppendString(buf, language);
+    }
+    return buf;
+}
+
+// Un archivo v4 completo con propiedad como pares (petId, variantId).
+std::vector<std::uint8_t> BuildValidV4Buffer(
+    std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
+    bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language) {
+    std::vector<std::uint8_t> buf = BuildValidBuffer(4, clickBalance, petId, variantId, false, 0, 0);
+    AppendUint8(buf, ownershipSeeded ? 1 : 0);
+    AppendUint32(buf, static_cast<std::uint32_t>(ownedEntitlements.size()));
+    for (const OwnedEntitlement& e : ownedEntitlements) {
+        AppendString(buf, e.petId);
+        AppendString(buf, e.variantId);
+    }
+    AppendUint8(buf, lockPosition ? 1 : 0);
+    AppendString(buf, sizeChoice);
+    AppendUint32(buf, opacityPercent);
+    AppendString(buf, language);
     return buf;
 }
 
@@ -224,12 +249,13 @@ bool TestUnsupportedSchemaVersionIsRejected() {
     return true;
 }
 
-// --- Block 06: schema v2 + migración hacia adelante desde v1 -------
+// --- Migración hacia adelante desde v1/v2/v3 (Block 07: propiedad
+//     pasa de `ownedPetIds` a `ownedEntitlements`) -------------------
 
 // Un archivo v1 real (Block 03/04/05) se sigue leyendo: el balance y
-// el pet activo sobreviven, los campos v2 quedan en su default, y el
-// schema queda marcado como el actual para que el próximo Save() lo
-// reescriba como v2.
+// el pet activo sobreviven, los campos posteriores quedan en su
+// default, y el schema queda marcado como el actual para que el
+// próximo Save() lo reescriba.
 bool TestV1BufferMigratesForward() {
     std::vector<std::uint8_t> buf =
         BuildValidBuffer(/*schemaVersion=*/1, /*clickBalance=*/999, "frin", "male", /*hasPosition=*/true, 7, 9);
@@ -243,29 +269,24 @@ bool TestV1BufferMigratesForward() {
     NIMVLETS_CHECK(decoded.activeVariantId == "male");
     NIMVLETS_CHECK(decoded.lastWindowPosition.has_value());
     NIMVLETS_CHECK(decoded.lastWindowPosition->x == 7 && decoded.lastWindowPosition->y == 9);
-    // Campos v2 en su default.
     NIMVLETS_CHECK(!decoded.ownershipSeeded);
-    NIMVLETS_CHECK(decoded.ownedPetIds.empty());
+    NIMVLETS_CHECK(decoded.ownedEntitlements.empty());
     NIMVLETS_CHECK(!decoded.lockPosition);
     NIMVLETS_CHECK(decoded.sizeChoice.empty());
     NIMVLETS_CHECK(decoded.opacityPercent == 0);
-    // Campo v3 en su default.
     NIMVLETS_CHECK(decoded.language.empty());
-    // Marcado como schema actual -> el próximo Save() escribe el formato actual.
     NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
     return true;
 }
 
-// --- Block 06.1: schema v3 (language) + migración desde v2 ---------
-
-// Un archivo v2 (Block 06) se sigue leyendo: propiedad, tamaño,
-// opacidad y todo lo anterior sobreviven; `language` queda "" (src/app
-// lo resolverá desde el locale del OS), y el schema queda marcado como
-// el actual para que el próximo Save() lo reescriba como v3.
+// Un archivo v2 (Block 06): la propiedad (`ownedPetIds`) se MIGRA a
+// autorizaciones de PET ENTERO — un Frin de Block 06 (que exponía las
+// dos variantes) sigue dando macho + hembra (brief §5). `language`
+// queda "".
 bool TestV2BufferMigratesForward() {
-    const std::vector<std::uint8_t> buf =
-        BuildValidV2Buffer(/*clickBalance=*/500, "nidir", /*ownershipSeeded=*/true,
-                           {"bunny", "frin"}, /*lockPosition=*/true, "large", 70);
+    const std::vector<std::uint8_t> buf = BuildLegacyOwnershipBuffer(
+        /*schemaVersion=*/2, /*clickBalance=*/500, "nidir", /*ownershipSeeded=*/true,
+        {"bunny", "frin"}, /*lockPosition=*/true, "large", 70);
 
     AppState decoded;
     std::string error;
@@ -274,25 +295,108 @@ bool TestV2BufferMigratesForward() {
     NIMVLETS_CHECK(decoded.clickBalance == 500);
     NIMVLETS_CHECK(decoded.activePetId == "nidir");
     NIMVLETS_CHECK(decoded.ownershipSeeded);
-    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin"}));
+    NIMVLETS_CHECK((decoded.ownedEntitlements ==
+                    Ents{OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", ""}}));
     NIMVLETS_CHECK(decoded.lockPosition);
     NIMVLETS_CHECK(decoded.sizeChoice == "large");
     NIMVLETS_CHECK(decoded.opacityPercent == 70);
-    // Campo v3 en su default -> "sin preferencia explícita".
     NIMVLETS_CHECK(decoded.language.empty());
     NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
     return true;
 }
 
-bool TestV3LanguageRoundTrips() {
+// Un archivo v3 (Block 06.1): idem propiedad -> pet entero; `language`
+// SÍ se conserva.
+bool TestV3BufferMigratesForward() {
+    const std::vector<std::uint8_t> buf = BuildLegacyOwnershipBuffer(
+        /*schemaVersion=*/3, /*clickBalance=*/12, "bunny", /*ownershipSeeded=*/true, {"frin", "bunny"},
+        /*lockPosition=*/false, "medium", 85, /*language=*/"es");
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(error.empty());
+    NIMVLETS_CHECK((decoded.ownedEntitlements ==
+                    Ents{OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", ""}}));
+    NIMVLETS_CHECK(decoded.language == "es");
+    NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    return true;
+}
+
+// Round-trip v4 completo, incluida una autorización de VARIANTE concreta
+// ({"frin","male"}) junto a una de pet entero ({"bunny",""}).
+bool TestV4RoundTrips() {
     AppState original;
     original.clickBalance = 77;
     original.activePetId = "frin";
-    original.activeVariantId = "female";
+    original.activeVariantId = "male";
     original.ownershipSeeded = true;
-    original.ownedPetIds = {"bunny", "frin"};
+    original.ownedEntitlements = {OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"}};
     original.sizeChoice = "medium";
     original.opacityPercent = 100;
+    original.language = "en";
+
+    const std::vector<std::uint8_t> bytes = SerializeAppState(original);
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK(decoded == original);
+
+    // Y un buffer v4 hecho a mano parsea igual.
+    const std::vector<std::uint8_t> handmade = BuildValidV4Buffer(
+        77, "frin", "male", true, {OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"}},
+        false, "medium", 100, "en");
+    AppState fromHandmade;
+    NIMVLETS_CHECK(DeserializeAppState(handmade.data(), handmade.size(), fromHandmade, error));
+    NIMVLETS_CHECK(fromHandmade == original);
+    return true;
+}
+
+// `ownedEntitlements` sale siempre en orden canónico (por (petId,
+// variantId)) y sin petId vacío, venga como venga en memoria -> el
+// formato sigue siendo determinista byte a byte, y los duplicados se
+// normalizan.
+bool TestOwnedEntitlementsNormalizedOnSerialize() {
+    AppState a;
+    a.ownedEntitlements = {OwnedEntitlement{"nidir", ""}, OwnedEntitlement{"bunny", ""},
+                           OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"", "x"},
+                           OwnedEntitlement{"frin", "male"}};
+    AppState b;
+    b.ownedEntitlements = {OwnedEntitlement{"frin", "male"}, OwnedEntitlement{"nidir", ""},
+                           OwnedEntitlement{"bunny", ""}};
+
+    NIMVLETS_CHECK(SerializeAppState(a) == SerializeAppState(b));
+
+    AppState decoded;
+    std::string error;
+    const std::vector<std::uint8_t> bytes = SerializeAppState(a);
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK((decoded.ownedEntitlements ==
+                    Ents{OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"},
+                         OwnedEntitlement{"nidir", ""}}));
+    return true;
+}
+
+// Un v4 cortado a mitad de un par (petId, variantId) se rechaza en vez
+// de inventar una autorización.
+bool TestV4TruncatedOwnershipIsRejected() {
+    std::vector<std::uint8_t> buf = BuildValidV4Buffer(
+        1, "bunny", "", true, {OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"}}, false,
+        "", 0, "");
+    buf.resize(buf.size() - 20);  // recorta dentro del bloque de autorizaciones
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(!DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
+// `language` sigue haciendo round-trip en v4.
+bool TestV4LanguageRoundTrips() {
+    AppState original;
+    original.ownershipSeeded = true;
+    original.ownedEntitlements = {OwnedEntitlement{"bunny", ""}};
     original.language = "es";
 
     const std::vector<std::uint8_t> bytes = SerializeAppState(original);
@@ -302,59 +406,12 @@ bool TestV3LanguageRoundTrips() {
     NIMVLETS_CHECK(decoded.language == "es");
     NIMVLETS_CHECK(decoded == original);
 
-    // "" (sin preferencia) también hace round-trip.
     original.language.clear();
     const std::vector<std::uint8_t> bytes2 = SerializeAppState(original);
     AppState decoded2;
     NIMVLETS_CHECK(DeserializeAppState(bytes2.data(), bytes2.size(), decoded2, error));
     NIMVLETS_CHECK(decoded2.language.empty());
     NIMVLETS_CHECK(decoded2 == original);
-    return true;
-}
-
-bool TestV2FieldsRoundTrip() {
-    AppState original;
-    original.clickBalance = 4242;
-    original.activePetId = "bunny";
-    original.ownershipSeeded = true;
-    original.ownedPetIds = {"frin", "bunny"};  // desordenado a propósito
-    original.lockPosition = true;
-    original.sizeChoice = "large";
-    original.opacityPercent = 70;
-
-    const std::vector<std::uint8_t> bytes = SerializeAppState(original);
-    AppState decoded;
-    std::string error;
-    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
-    NIMVLETS_CHECK(decoded.ownershipSeeded);
-    // Normalizado: ordenado ascendente, sin duplicados.
-    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin"}));
-    NIMVLETS_CHECK(decoded.lockPosition);
-    NIMVLETS_CHECK(decoded.sizeChoice == "large");
-    NIMVLETS_CHECK(decoded.opacityPercent == 70);
-    // operator== compara ownedPetIds -- original está desordenado, así
-    // que hay que normalizarlo antes de comparar el struct entero.
-    original.ownedPetIds = {"bunny", "frin"};
-    NIMVLETS_CHECK(decoded == original);
-    return true;
-}
-
-// ownedPetIds sale siempre en orden canónico y sin string vacío,
-// venga como venga en el AppState en memoria -> el formato sigue
-// siendo determinista byte a byte.
-bool TestOwnedPetIdsNormalizedOnSerialize() {
-    AppState a;
-    a.ownedPetIds = {"nidir", "bunny", "bunny", "", "frin"};
-    AppState b;
-    b.ownedPetIds = {"frin", "nidir", "bunny"};
-
-    NIMVLETS_CHECK(SerializeAppState(a) == SerializeAppState(b));
-
-    AppState decoded;
-    std::string error;
-    const std::vector<std::uint8_t> bytes = SerializeAppState(a);
-    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
-    NIMVLETS_CHECK((decoded.ownedPetIds == std::vector<std::string>{"bunny", "frin", "nidir"}));
     return true;
 }
 
@@ -372,10 +429,12 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/TruncatedMidStringIsRejected", TestTruncatedMidStringIsRejected);
     runner.Add("AppStateSerializer/UnsupportedSchemaVersionIsRejected", TestUnsupportedSchemaVersionIsRejected);
     runner.Add("AppStateSerializer/V1BufferMigratesForward", TestV1BufferMigratesForward);
-    runner.Add("AppStateSerializer/V2FieldsRoundTrip", TestV2FieldsRoundTrip);
-    runner.Add("AppStateSerializer/OwnedPetIdsNormalizedOnSerialize", TestOwnedPetIdsNormalizedOnSerialize);
     runner.Add("AppStateSerializer/V2BufferMigratesForward", TestV2BufferMigratesForward);
-    runner.Add("AppStateSerializer/V3LanguageRoundTrips", TestV3LanguageRoundTrips);
+    runner.Add("AppStateSerializer/V3BufferMigratesForward", TestV3BufferMigratesForward);
+    runner.Add("AppStateSerializer/V4RoundTrips", TestV4RoundTrips);
+    runner.Add("AppStateSerializer/OwnedEntitlementsNormalizedOnSerialize", TestOwnedEntitlementsNormalizedOnSerialize);
+    runner.Add("AppStateSerializer/V4TruncatedOwnershipIsRejected", TestV4TruncatedOwnershipIsRejected);
+    runner.Add("AppStateSerializer/V4LanguageRoundTrips", TestV4LanguageRoundTrips);
 }
 
 }  // namespace nimvlets::tests

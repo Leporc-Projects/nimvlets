@@ -39,6 +39,7 @@ class ByteReader {
 
     bool ReadUint8(std::uint8_t& out) { return ReadBytes(&out, sizeof(out)); }
     bool ReadUint32(std::uint32_t& out) { return ReadBytes(&out, sizeof(out)); }
+    bool ReadUint64(std::uint64_t& out) { return ReadBytes(&out, sizeof(out)); }
 
     bool ReadString(std::string& out) {
         std::uint32_t len = 0;
@@ -113,14 +114,17 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
         CatalogEntry entry;
         std::uint8_t isDefaultByte = 0;
         std::uint8_t initiallyOwnedByte = 0;
+        std::uint8_t publiclyPurchasableByte = 0;
         if (!reader.ReadString(entry.identity.petId) || !reader.ReadString(entry.identity.variantId) ||
             !reader.ReadString(entry.displayName) || !reader.ReadString(entry.packPath) ||
-            !reader.ReadUint8(isDefaultByte) || !reader.ReadUint8(initiallyOwnedByte)) {
+            !reader.ReadUint8(isDefaultByte) || !reader.ReadUint8(initiallyOwnedByte) ||
+            !reader.ReadUint64(entry.priceClicks) || !reader.ReadUint8(publiclyPurchasableByte)) {
             outError = reader.Error();
             return false;
         }
         entry.isDefault = isDefaultByte != 0;
         entry.initiallyOwned = initiallyOwnedByte != 0;
+        entry.publiclyPurchasable = publiclyPurchasableByte != 0;
 
         if (entry.identity.petId.empty()) {
             outError = "catalog entry " + std::to_string(i) + ": pet id must not be empty";
@@ -129,6 +133,14 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
         if (entry.packPath.empty()) {
             outError = "catalog entry " + std::to_string(i) + " ('" + entry.identity.petId +
                        "'): pack path must not be empty";
+            return false;
+        }
+        // Una entrada pública sin precio nunca es válida: la política de
+        // compra rechaza precio cero (brief §26), así que llegar acá con
+        // ese estado solo produciría un ítem de Shop inoperable.
+        if (entry.publiclyPurchasable && entry.priceClicks == 0) {
+            outError = "catalog entry " + std::to_string(i) + " ('" + entry.identity.petId +
+                       "'): publicly purchasable but price is 0";
             return false;
         }
 

@@ -49,10 +49,18 @@ add_executable(nimvlets_tests
   RendererPolicyTest.cpp
   ClickThroughPolicyTest.h
   ClickThroughPolicyTest.cpp
+  PetEntitlementTest.h
+  PetEntitlementTest.cpp
   CollectionModelTest.h
   CollectionModelTest.cpp
   CollectionLayoutTest.h
   CollectionLayoutTest.cpp
+  ShopModelTest.h
+  ShopModelTest.cpp
+  PurchasePolicyTest.h
+  PurchasePolicyTest.cpp
+  ShopLayoutTest.h
+  ShopLayoutTest.cpp
   FocusListTest.h
   FocusListTest.cpp
   TextLayoutTest.h

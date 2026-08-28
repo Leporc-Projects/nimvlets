@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "entries": [
     {
       "pet_id": "bunny",
@@ -7,7 +7,9 @@
       "display_name": "Bunny",
       "pack_path": "assets/dev/bunny_pack.nvpack",
       "is_default": true,
-      "initially_owned": true
+      "initially_owned": true,
+      "price_clicks": 120,
+      "publicly_purchasable": true
     },
     {
       "pet_id": "nidir",
@@ -15,7 +17,9 @@
       "display_name": "Nidir",
       "pack_path": "assets/dev/nidir_pack.nvpack",
       "is_default": false,
-      "initially_owned": false
+      "initially_owned": false,
+      "price_clicks": 300,
+      "publicly_purchasable": true
     },
     {
       "pet_id": "frin",
@@ -23,7 +27,9 @@
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_male_pack.nvpack",
       "is_default": false,
-      "initially_owned": true
+      "initially_owned": true,
+      "price_clicks": 0,
+      "publicly_purchasable": false
     },
     {
       "pet_id": "frin",
@@ -31,7 +37,9 @@
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_female_pack.nvpack",
       "is_default": false,
-      "initially_owned": true
+      "initially_owned": true,
+      "price_clicks": 0,
+      "publicly_purchasable": false
     }
   ]
 }
