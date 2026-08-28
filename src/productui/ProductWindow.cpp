@@ -223,6 +223,40 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
     return out;
 }
 
+void ProductWindow::DrawFrame() {
+    int logicalW = kDefaultW;
+    int logicalH = kDefaultH;
+    SDL_GetWindowSize(window_, &logicalW, &logicalH);
+
+    UiPainter painter(renderer_, scale_);
+    view_.Render(painter, *text_, *previews_, static_cast<float>(logicalW), static_cast<float>(logicalH));
+    view_.ClearDirty();
+}
+
+bool ProductWindow::CaptureToBmpForQA(const std::string& path) {
+    if (window_ == nullptr || renderer_ == nullptr) {
+        return false;
+    }
+    pendingExpose_ = false;
+    DrawFrame();
+    // Leer ANTES de presentar: tras SDL_RenderPresent el contenido del
+    // backbuffer de un renderer acelerado (Metal) queda indefinido.
+    SDL_Surface* shot = SDL_RenderReadPixels(renderer_, nullptr);
+    SDL_RenderPresent(renderer_);
+    if (shot == nullptr) {
+        SDL_Log("nimvlets: ProductWindow: SDL_RenderReadPixels failed: %s", SDL_GetError());
+        return false;
+    }
+    const bool ok = SDL_SaveBMP(shot, path.c_str());
+    if (!ok) {
+        SDL_Log("nimvlets: ProductWindow: SDL_SaveBMP('%s') failed: %s", path.c_str(), SDL_GetError());
+    } else {
+        SDL_Log("nimvlets: ProductWindow: [dev-shot] wrote %s (%dx%d)", path.c_str(), shot->w, shot->h);
+    }
+    SDL_DestroySurface(shot);
+    return ok;
+}
+
 void ProductWindow::RenderIfNeeded() {
     if (window_ == nullptr || renderer_ == nullptr) {
         return;
@@ -231,14 +265,7 @@ void ProductWindow::RenderIfNeeded() {
         return;
     }
     pendingExpose_ = false;
-
-    int logicalW = kDefaultW;
-    int logicalH = kDefaultH;
-    SDL_GetWindowSize(window_, &logicalW, &logicalH);
-
-    UiPainter painter(renderer_, scale_);
-    view_.Render(painter, *text_, *previews_, static_cast<float>(logicalW), static_cast<float>(logicalH));
-    view_.ClearDirty();
+    DrawFrame();
     SDL_RenderPresent(renderer_);
 }
 

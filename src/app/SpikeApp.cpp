@@ -1519,6 +1519,20 @@ int SpikeApp::Run() {
         if (const char* hov = std::getenv("NIMVLETS_DEV_HERO_HOVER"); hov != nullptr && hov[0] != '\0') {
             productWindow_.SetGalleryHoverForQA(hov);
         }
+        // Solo-DEV: pone el foco de TECLADO sobre un chip de variante del
+        // hero (captura de "keyboard-focused Frin variant", brief §29).
+        if (const char* vf = std::getenv("NIMVLETS_DEV_VARIANT_FOCUS"); vf != nullptr && vf[0] != '\0') {
+            productWindow_.SetVariantKeyboardFocusForQA(vf);
+        }
+        // Solo-DEV: vuelca el framebuffer de la Collection a un BMP y
+        // sale (captura de QA a densidad nativa, sin captura de pantalla
+        // del SO — brief §29). Ausente: no-op.
+        if (const char* shot = std::getenv("NIMVLETS_DEV_PRODUCT_SHOT"); shot != nullptr && shot[0] != '\0') {
+            productWindow_.CaptureToBmpForQA(shot);
+            productWindow_.Close();
+            Shutdown();
+            return 0;
+        }
     }
 
     // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para

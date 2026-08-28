@@ -79,14 +79,27 @@ class ProductWindow {
     // y no-op si no hay nada que hacer.
     void RenderIfNeeded();
 
-    // Solo-DEV (QA / capturas): elige el hero / su variante / el hover.
+    // Solo-DEV (QA / capturas): fuerza un redibujo y vuelca el
+    // framebuffer del renderer de la Collection a un BMP en
+    // `path` (SDL_RenderReadPixels + SDL_SaveBMP — cómputo local, sin
+    // ninguna captura de pantalla del SO, ver AGENTS.md §5). A densidad
+    // de píxeles nativa. Devuelve false si la ventana está cerrada o la
+    // escritura falla. No forma parte del producto.
+    bool CaptureToBmpForQA(const std::string& path);
+
+    // Solo-DEV (QA / capturas): elige el hero / su variante / el hover /
+    // el foco de teclado sobre un chip de variante.
     void SelectHeroForQA(const std::string& petId) { view_.SelectHeroForQA(petId); }
     void SetHeroVariantForQA(const std::string& variantId) { view_.SetHeroVariantForQA(variantId); }
     void SetGalleryHoverForQA(const std::string& petId) { view_.SetGalleryHoverForQA(petId); }
+    void SetVariantKeyboardFocusForQA(const std::string& variantId) {
+        view_.SetVariantKeyboardFocusForQA(variantId);
+    }
 
  private:
     void RecomputeScale();
     void DestroyResources();
+    void DrawFrame();  // dibuja la vista al backbuffer, SIN presentar
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
