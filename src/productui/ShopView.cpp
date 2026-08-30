@@ -147,11 +147,14 @@ ShopViewResult ShopView::ActivateWidget(const std::string& focusId) {
         return r;
     }
     if (focusId == "purchase:confirm") {
-        // Segundo paso deliberado: compra de verdad.
+        // Segundo paso deliberado: compra de verdad. El objetivo es la
+        // identidad de catálogo del ítem (entitlementTarget), NO una
+        // suposición sobre petId.
         const ShopLayout layout = BuildLayout(viewportW_, viewportH_);
         if (layout.hero.confirm.visible && !layout.hero.petId.empty()) {
             r.hasPurchase = true;
-            r.purchase.petId = layout.hero.petId;
+            r.purchase.petId = layout.hero.entitlementTarget.petId;
+            r.purchase.variantId = layout.hero.entitlementTarget.variantId;
         }
         confirming_ = false;  // src/app re-empuja el modelo con el estado final
         r.dirty = true;

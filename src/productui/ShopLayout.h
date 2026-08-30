@@ -68,6 +68,10 @@ struct ShopHero {
     std::string speciesText;      // etiqueta de especie, "" si no hay
     std::string descriptionText;  // línea(s) de personalidad, "" si no hay
     catalog::ShopItemStatus status = catalog::ShopItemStatus::kAffordable;
+    // Qué identidad de catálogo se compra (de ShopItem::entitlementTarget).
+    // Para los pets sin variantes de Block 07 es {petId, ""}. La vista la
+    // emite como PurchaseRequest; src/app se la pasa a EvaluatePurchase.
+    catalog::PetEntitlement entitlementTarget;
     PetAccent accent;
 
     std::uint64_t priceClicks = 0;

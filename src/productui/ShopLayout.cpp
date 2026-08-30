@@ -140,6 +140,7 @@ ShopLayout BuildShopLayout(const ShopModel& model, const ShopLayoutInput& in) {
     h.speciesText = Species(heroItem.petId, lang);
     h.descriptionText = ShortDescription(heroItem.petId, lang);
     h.status = heroItem.status;
+    h.entitlementTarget = heroItem.entitlementTarget;
     h.accent = PetAccentFor(heroItem.petId);
     h.priceClicks = heroItem.priceClicks;
     h.priceText = FormatClickCount(heroItem.priceClicks, lang);

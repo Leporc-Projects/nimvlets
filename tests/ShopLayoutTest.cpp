@@ -53,7 +53,7 @@ PetCatalog MakeShopCatalog() {
     return PetCatalog(std::move(e));
 }
 
-PetEntitlement Whole(const std::string& p) { return PetEntitlement{p, ""}; }
+PetEntitlement NoVar(const std::string& p) { return PetEntitlement{p, ""}; }  // Nimvlet sin variantes
 
 bool Has(const std::vector<std::string>& v, const std::string& s) {
     for (const auto& x : v) {
@@ -97,16 +97,20 @@ bool TestHeroDefaultsToFirstShopPet() {
 // Estado ASEQUIBLE: botón "Get <pet>" (localizado, nombre propio sin
 // traducir), precio visible, "get" en el focus order.
 bool TestAffordableShowsGetButton() {
-    const ShopLayout en = Layout(500, {Whole("bunny")}, "nidir");
+    const ShopLayout en = Layout(500, {NoVar("bunny")}, "nidir");
     NIMVLETS_CHECK(en.hero.petId == "nidir");
     NIMVLETS_CHECK(en.hero.actionEnabled);
     NIMVLETS_CHECK(en.hero.actionLabel == "Get Nidir");
     NIMVLETS_CHECK(en.hero.priceText == "300 clicks");
+    // El hero lleva la IDENTIDAD de compra (de ShopItem::entitlementTarget),
+    // que la vista emite como PurchaseRequest — no una suposición sobre
+    // petId. Para Nidir es {nidir, ""}.
+    NIMVLETS_CHECK((en.hero.entitlementTarget == NoVar("nidir")));
     NIMVLETS_CHECK(!en.hero.confirm.visible);
     NIMVLETS_CHECK(Has(en.focusOrder, "get"));
     NIMVLETS_CHECK(!Has(en.focusOrder, "purchase:confirm"));
 
-    const ShopLayout es = Layout(500, {Whole("bunny")}, "nidir", false, Language::kEs);
+    const ShopLayout es = Layout(500, {NoVar("bunny")}, "nidir", false, Language::kEs);
     NIMVLETS_CHECK(es.hero.actionLabel == "Obtener Nidir");
     NIMVLETS_CHECK(es.hero.priceText == "300 clics");
     return true;
@@ -115,28 +119,28 @@ bool TestAffordableShowsGetButton() {
 // Estado SALDO INSUFICIENTE: sin botón, línea "Need N more clicks", "get"
 // fuera del focus order.
 bool TestInsufficientShowsNeedMore() {
-    const ShopLayout en = Layout(258, {Whole("bunny")}, "nidir");
+    const ShopLayout en = Layout(258, {NoVar("bunny")}, "nidir");
     NIMVLETS_CHECK(!en.hero.actionEnabled);
     NIMVLETS_CHECK(en.hero.showStatusLine);
     NIMVLETS_CHECK(en.hero.statusText == "Need 42 more clicks");
     NIMVLETS_CHECK(en.hero.priceText == "300 clicks");
     NIMVLETS_CHECK(!Has(en.focusOrder, "get"));
 
-    const ShopLayout es = Layout(299, {Whole("bunny")}, "nidir", false, Language::kEs);
+    const ShopLayout es = Layout(299, {NoVar("bunny")}, "nidir", false, Language::kEs);
     NIMVLETS_CHECK(es.hero.statusText == "Te falta 1 clic");  // singular
     return true;
 }
 
 // Estado POSEÍDO: "In your collection", sin precio accionable, sin botón.
 bool TestOwnedShowsInYourCollection() {
-    const ShopLayout en = Layout(1000, {Whole("bunny")}, "bunny");
+    const ShopLayout en = Layout(1000, {NoVar("bunny")}, "bunny");
     NIMVLETS_CHECK(en.hero.petId == "bunny");
     NIMVLETS_CHECK(!en.hero.actionEnabled);
     NIMVLETS_CHECK(!en.hero.confirm.visible);
     NIMVLETS_CHECK(en.hero.showStatusLine);
     NIMVLETS_CHECK(en.hero.statusText == "In your collection");
 
-    const ShopLayout es = Layout(1000, {Whole("bunny")}, "bunny", false, Language::kEs);
+    const ShopLayout es = Layout(1000, {NoVar("bunny")}, "bunny", false, Language::kEs);
     NIMVLETS_CHECK(es.hero.statusText == "En tu colección");
     return true;
 }
@@ -144,7 +148,7 @@ bool TestOwnedShowsInYourCollection() {
 // Confirmación inline: la pregunta localizada + Cancelar/Confirmar, con
 // sus focusId en el orden de tabulación, y "get" fuera.
 bool TestConfirmationLayout() {
-    const ShopLayout en = Layout(500, {Whole("bunny")}, "nidir", /*confirming=*/true);
+    const ShopLayout en = Layout(500, {NoVar("bunny")}, "nidir", /*confirming=*/true);
     NIMVLETS_CHECK(en.hero.confirm.visible);
     NIMVLETS_CHECK(en.hero.confirm.prompt == "Spend 300 clicks to add Nidir to your collection?");
     NIMVLETS_CHECK(en.hero.confirm.cancelLabel == "Cancel");
@@ -156,7 +160,7 @@ bool TestConfirmationLayout() {
     NIMVLETS_CHECK(Has(en.focusOrder, "purchase:confirm"));
     NIMVLETS_CHECK(!Has(en.focusOrder, "get"));
 
-    const ShopLayout es = Layout(500, {Whole("bunny")}, "nidir", true, Language::kEs);
+    const ShopLayout es = Layout(500, {NoVar("bunny")}, "nidir", true, Language::kEs);
     NIMVLETS_CHECK(es.hero.confirm.prompt == "¿Gastar 300 clics para añadir Nidir a tu colección?");
     NIMVLETS_CHECK(es.hero.confirm.cancelLabel == "Cancelar");
     NIMVLETS_CHECK(es.hero.confirm.confirmLabel == "Confirmar");
@@ -166,16 +170,16 @@ bool TestConfirmationLayout() {
 // La confirmación solo tiene efecto si el pet es asequible: un pet
 // poseído nunca muestra la confirmación aunque `confirming` sea true.
 bool TestConfirmingIgnoredWhenNotAffordable() {
-    const ShopLayout owned = Layout(1000, {Whole("bunny")}, "bunny", /*confirming=*/true);
+    const ShopLayout owned = Layout(1000, {NoVar("bunny")}, "bunny", /*confirming=*/true);
     NIMVLETS_CHECK(!owned.hero.confirm.visible);
-    const ShopLayout poor = Layout(10, {Whole("bunny")}, "nidir", /*confirming=*/true);
+    const ShopLayout poor = Layout(10, {NoVar("bunny")}, "nidir", /*confirming=*/true);
     NIMVLETS_CHECK(!poor.hero.confirm.visible);
     return true;
 }
 
 // Hit-test: pestañas de nav, botón "Get", y botones de confirmación.
 bool TestHitTest() {
-    const ShopLayout l = Layout(500, {Whole("bunny")}, "nidir");
+    const ShopLayout l = Layout(500, {NoVar("bunny")}, "nidir");
     NIMVLETS_CHECK(l.HitTest(l.hero.actionButton.CenterX(), l.hero.actionButton.CenterY()) == "get");
     NIMVLETS_CHECK(l.HitTest(l.header.tabs[0].hitRect.CenterX(),
                              l.header.tabs[0].hitRect.CenterY()) == "nav:collection");
@@ -183,7 +187,7 @@ bool TestHitTest() {
     NIMVLETS_CHECK(nidirGal != nullptr);
     NIMVLETS_CHECK(l.HitTest(nidirGal->art.CenterX(), nidirGal->art.CenterY()) == "shopitem:bunny");
 
-    const ShopLayout c = Layout(500, {Whole("bunny")}, "nidir", /*confirming=*/true);
+    const ShopLayout c = Layout(500, {NoVar("bunny")}, "nidir", /*confirming=*/true);
     NIMVLETS_CHECK(c.HitTest(c.hero.confirm.cancelButton.CenterX(),
                              c.hero.confirm.cancelButton.CenterY()) == "purchase:cancel");
     NIMVLETS_CHECK(c.HitTest(c.hero.confirm.confirmButton.CenterX(),

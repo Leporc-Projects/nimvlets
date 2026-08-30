@@ -14,10 +14,15 @@
 
 namespace nimvlets::productui {
 
-// Lo que la vista del Shop le pide a src/app: comprar el pet lógico
-// `petId` (tras la confirmación inline). Simétrico a ActivateRequest.
+// Lo que la vista del Shop le pide a src/app: comprar la IDENTIDAD de
+// catálogo `{petId, variantId}` (tras la confirmación inline). Simétrico
+// a ActivateRequest. En Block 07 `variantId` siempre viene "" (el Shop
+// solo ofrece pets sin variantes), pero el campo existe para que la
+// compra por variante (shop oculto, futuro) no necesite un rediseño —
+// sale de ShopItem::entitlementTarget, no de una suposición sobre petId.
 struct PurchaseRequest {
     std::string petId;
+    std::string variantId;
 };
 
 struct ShopViewResult {
