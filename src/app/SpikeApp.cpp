@@ -349,19 +349,81 @@ bool SpikeApp::Init() {
         }
     }
 
-    const catalog::ResolvedSelection resolved = catalog::ResolveActiveSelection(catalog_, requestedIdentity);
+    // --- Estado de propiedad (Block 06 -> Block 07 autorizaciones) ---
+    //
+    // (1) Reconcilia autorizaciones "históricas de pet entero" contra el
+    //     catálogo. Un `ownedPetIds` "frin" de un save v1/v2/v3 se
+    //     parseó PROVISIONALMENTE a `{frin, ""}` (el serializer no tiene
+    //     catálogo — ver docs/PERSISTENCE.md §3); acá se expande a
+    //     `{frin, "male"} + {frin, "female"}` — las variantes que Block
+    //     06 realmente exponía, NO "toda variante futura de Frin" (brief
+    //     §5, DEC-128). Idempotente: para un save v4 limpio no cambia
+    //     nada.
+    {
+        std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
+        if (catalog::ExpandHistoricalWholePetEntitlements(ents, catalog_)) {
+            appState_.ownedEntitlements = ToPersistedEntitlements(ents);
+            persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+            SDL_Log("nimvlets: legacy whole-pet ownership expanded to explicit variants (%zu entitlement(s))",
+                    appState_.ownedEntitlements.size());
+        }
+    }
 
+    // (2) Siembra de desarrollo/default SOLO en el primer arranque (o si
+    //     el conjunto quedó vacío por corrupción — un estado post-siembra
+    //     nunca puede tener cero autorizaciones, no hay forma de "vender"
+    //     un Nimvlet). Un bloque futuro de onboarding reemplaza esto sin
+    //     tocar el catálogo. La semilla otorga la autorización EXPLÍCITA
+    //     de cada entrada `initiallyOwned` — Frin siembra sus dos
+    //     variantes, no un `{frin, ""}`.
+    if (!appState_.ownershipSeeded || appState_.ownedEntitlements.empty()) {
+        appState_.ownedEntitlements =
+            ToPersistedEntitlements(catalog::SeedEntitlementsFromCatalog(catalog_));
+        appState_.ownershipSeeded = true;
+        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+        SDL_Log("nimvlets: ownership seeded from catalog (%zu entitlement(s))",
+                appState_.ownedEntitlements.size());
+    }
+
+    // (3) Resolver el pet activo: primero contra el CATÁLOGO (identidad
+    //     desconocida -> default), luego contra la PROPIEDAD (identidad
+    //     no autorizada -> una que sí lo esté). ResolveOwnedActiveIdentity
+    //     NUNCA otorga nada: un save corrupto con `active = nidir, owned
+    //     = {bunny}` cae de vuelta a bunny, no se "compra" nidir gratis
+    //     (brief §4, DEC-128). Se salta en una selección solo-DEV
+    //     (NIMVLETS_DEV_SELECT_PET carga lo que se le pide sin tocar el
+    //     estado real).
+    const catalog::ResolvedSelection resolved = catalog::ResolveActiveSelection(catalog_, requestedIdentity);
+    catalog::PetIdentity target = resolved.entry->identity;
+    bool selectionRepaired = resolved.usedFallback;
+    if (!haveDevSelection) {
+        bool ownershipFellBack = false;
+        target = catalog::ResolveOwnedActiveIdentity(CurrentEntitlements(), catalog_, target, ownershipFellBack);
+        if (ownershipFellBack) {
+            selectionRepaired = true;
+            SDL_Log(
+                "nimvlets: persisted active pet '%s'%s%s is not owned -- falling back to owned '%s'%s%s "
+                "(no entitlement granted)",
+                resolved.entry->identity.petId.c_str(),
+                resolved.entry->identity.variantId.empty() ? "" : "/",
+                resolved.entry->identity.variantId.c_str(), target.petId.c_str(),
+                target.variantId.empty() ? "" : "/", target.variantId.c_str());
+        }
+    }
+
+    // (4) Cargar el pack de `target` (con el fallback histórico al
+    //     default si el pack no carga — nunca crashea solo porque un pet
+    //     guardado dejó de estar disponible).
     content::PetDefinition loadedPet;
     std::string packError;
-    const catalog::CatalogEntry* loadedEntry = resolved.entry;
-    bool usedFallback = resolved.usedFallback;
-    if (!catalog::LoadPetForIdentity(catalog_, loadedEntry->identity, loadedPet, packError)) {
-        SDL_Log("nimvlets: pack for '%s' failed to load (%s)", loadedEntry->identity.petId.c_str(), packError.c_str());
-        if (loadedEntry != &catalog_.Default()) {
+    catalog::PetIdentity loadedIdentity = target;
+    if (!catalog::LoadPetForIdentity(catalog_, target, loadedPet, packError)) {
+        SDL_Log("nimvlets: pack for '%s' failed to load (%s)", target.petId.c_str(), packError.c_str());
+        if (target != catalog_.Default().identity) {
             SDL_Log("nimvlets: falling back to catalog default");
-            loadedEntry = &catalog_.Default();
-            usedFallback = true;
-            if (!catalog::LoadPetForIdentity(catalog_, loadedEntry->identity, loadedPet, packError)) {
+            loadedIdentity = catalog_.Default().identity;
+            selectionRepaired = true;
+            if (!catalog::LoadPetForIdentity(catalog_, loadedIdentity, loadedPet, packError)) {
                 SDL_Log("nimvlets: FATAL: catalog default pack also failed to load: %s", packError.c_str());
                 return false;
             }
@@ -372,48 +434,22 @@ bool SpikeApp::Init() {
     }
     pet_ = std::move(loadedPet);
 
-    // Repara la selección persistida en memoria si terminamos usando
-    // algo distinto de lo guardado -- pero NUNCA si la razón fue la
-    // selección solo-DEV de arriba (esa es deliberadamente transitoria
-    // para esta sesión, no debe sobrescribir el estado real del owner).
-    if (usedFallback && !haveDevSelection) {
-        appState_.activePetId = loadedEntry->identity.petId;
-        appState_.activeVariantId = loadedEntry->identity.variantId;
+    // (5) Repara la selección persistida en memoria si terminamos usando
+    //     algo distinto de lo guardado -- NUNCA en una selección solo-DEV
+    //     transitoria.
+    if (selectionRepaired && !haveDevSelection) {
+        appState_.activePetId = loadedIdentity.petId;
+        appState_.activeVariantId = loadedIdentity.variantId;
         persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
         SDL_Log(
-            "nimvlets: persisted pet selection repaired to '%s'%s%s",
-            loadedEntry->identity.petId.c_str(),
-            loadedEntry->identity.variantId.empty() ? "" : "/",
-            loadedEntry->identity.variantId.c_str());
+            "nimvlets: persisted pet selection repaired to '%s'%s%s", loadedIdentity.petId.c_str(),
+            loadedIdentity.variantId.empty() ? "" : "/", loadedIdentity.variantId.c_str());
     }
 
     // Identidad de catálogo del pet realmente activo esta sesión (cubre
     // NIMVLETS_DEV_SELECT_PET, que no escribe appState_). Fuente de
     // verdad para la Collection, el invariante de propiedad, y el menú.
-    activeCatalogIdentity_ = loadedEntry->identity;
-
-    // --- Estado de propiedad (Block 06 -> Block 07 autorizaciones) ---
-    // Siembra de desarrollo SOLO en el primer arranque tras la
-    // migración a schema v2+ (o una instalación nueva). Un bloque futuro
-    // de onboarding reemplaza esto sin tocar el catálogo.
-    if (!appState_.ownershipSeeded) {
-        appState_.ownedEntitlements =
-            ToPersistedEntitlements(catalog::SeedEntitlementsFromCatalog(catalog_));
-        appState_.ownershipSeeded = true;
-        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
-        SDL_Log("nimvlets: ownership seeded from catalog (%zu entitlement(s) by default)",
-                appState_.ownedEntitlements.size());
-    }
-    // Invariante duro: el pet/variante que está en el escritorio siempre
-    // es propio (brief §5). Se persiste salvo que la sesión sea una
-    // selección DEV transitoria, igual que la reparación de arriba.
-    {
-        std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
-        if (catalog::EnsureActiveEntitlementOwned(ents, activeCatalogIdentity_) && !haveDevSelection) {
-            appState_.ownedEntitlements = ToPersistedEntitlements(ents);
-            persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
-        }
-    }
+    activeCatalogIdentity_ = loadedIdentity;
 
     const SDL_WindowFlags flags =
         SDL_WINDOW_TRANSPARENT |
@@ -610,6 +646,20 @@ void SpikeApp::FlushPersistedState() {
 }
 
 bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
+    // Gate de propiedad (defensa en profundidad): NUNCA se pone en el
+    // escritorio una identidad que el owner no tiene autorizada, y este
+    // switch JAMÁS otorga propiedad — establecer propiedad es cosa de la
+    // siembra / migración / compra, no del switch de runtime (brief §4,
+    // DEC-128). HandleActivateRequest ya gatea con CanActivate; esto
+    // cubre además el smoke test solo-DEV (que itera todas las entradas
+    // del catálogo, incluidas las no poseídas).
+    if (!catalog::OwnsIdentity(CurrentEntitlements(), target)) {
+        SDL_Log(
+            "nimvlets: switch to '%s'%s%s refused: not owned (current pet unchanged)",
+            target.petId.c_str(), target.variantId.empty() ? "" : "/", target.variantId.c_str());
+        return false;
+    }
+
     content::PetDefinition newPet;
     std::string error;
     if (!catalog::LoadPetForIdentity(catalog_, target, newPet, error)) {
@@ -636,14 +686,8 @@ bool SpikeApp::TrySwitchActivePet(const catalog::PetIdentity& target) {
     appState_.activePetId = target.petId;
     appState_.activeVariantId = target.variantId;
     activeCatalogIdentity_ = target;
-    // El pet/variante recién puesto en el escritorio es, por definición,
-    // propio (brief §5) — CanActivate ya lo garantiza, pero se reafirma.
-    {
-        std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
-        if (catalog::EnsureActiveEntitlementOwned(ents, target)) {
-            appState_.ownedEntitlements = ToPersistedEntitlements(ents);
-        }
-    }
+    // La propiedad NO se toca acá: el gate de arriba ya garantizó que
+    // `target` está autorizado, y el switch nunca otorga nada.
     persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
     RearmAmbientDeadline(static_cast<double>(SDL_GetTicks()));
     MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
@@ -744,11 +788,16 @@ void SpikeApp::HandleActivateRequest(const productui::ActivateRequest& request) 
 
 void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) {
     const double nowMs = static_cast<double>(SDL_GetTicks());
+    // El objetivo es la IDENTIDAD de catálogo del ítem del Shop, no un
+    // petId suelto (DEC-128). En Block 07 `variantId` siempre viene "".
+    const catalog::PetIdentity target{request.petId, request.variantId};
+    const std::string targetLabel =
+        request.petId + (request.variantId.empty() ? "" : ("/" + request.variantId));
     const catalog::PurchaseOutcome outcome = catalog::EvaluatePurchase(
-        catalog_, request.petId, appState_.clickBalance, CurrentEntitlements());
+        catalog_, target, appState_.clickBalance, CurrentEntitlements());
 
     if (outcome.result != catalog::PurchaseResult::kSuccess) {
-        SDL_Log("nimvlets: Shop: purchase of '%s' not completed (%s)", request.petId.c_str(),
+        SDL_Log("nimvlets: Shop: purchase of '%s' not completed (%s)", targetLabel.c_str(),
                 catalog::ToString(outcome.result));
         // Igual se re-empujan los modelos: una confirmación que llegó
         // tarde (p. ej. el balance bajó) debe reflejar el estado real.
@@ -772,7 +821,7 @@ void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) 
 
     SDL_Log(
         "nimvlets: Shop: purchased '%s' for %llu click(s) -- balance %llu -> %llu, ownership persisted",
-        request.petId.c_str(), static_cast<unsigned long long>(outcome.price),
+        targetLabel.c_str(), static_cast<unsigned long long>(outcome.price),
         static_cast<unsigned long long>(outcome.price + outcome.newBalance),
         static_cast<unsigned long long>(outcome.newBalance));
 

@@ -279,11 +279,14 @@ bool TestV1BufferMigratesForward() {
     return true;
 }
 
-// Un archivo v2 (Block 06): la propiedad (`ownedPetIds`) se MIGRA a
-// autorizaciones de PET ENTERO — un Frin de Block 06 (que exponía las
-// dos variantes) sigue dando macho + hembra (brief §5). `language`
-// queda "".
-bool TestV2BufferMigratesForward() {
+// Un archivo v2 (Block 06): la lista de propiedad (`ownedPetIds`) se
+// parsea PROVISIONALMENTE a `{petId, ""}` por cada petId. El serializer
+// NO tiene catálogo, así que no puede saber que "frin" tiene variantes
+// — `src/app` reconcilia ese `{frin, ""}` contra el catálogo
+// (ExpandHistoricalWholePetEntitlements -> `{frin, "male"} + {frin,
+// "female"}`; ver EntitlementMigrationTest y DEC-128). Acá solo se
+// verifica el parseo del serializer. `language` queda "".
+bool TestV2BufferParsesLegacyOwnershipProvisionally() {
     const std::vector<std::uint8_t> buf = BuildLegacyOwnershipBuffer(
         /*schemaVersion=*/2, /*clickBalance=*/500, "nidir", /*ownershipSeeded=*/true,
         {"bunny", "frin"}, /*lockPosition=*/true, "large", 70);
@@ -305,9 +308,9 @@ bool TestV2BufferMigratesForward() {
     return true;
 }
 
-// Un archivo v3 (Block 06.1): idem propiedad -> pet entero; `language`
-// SÍ se conserva.
-bool TestV3BufferMigratesForward() {
+// Un archivo v3 (Block 06.1): idem parseo provisional; `language` SÍ se
+// conserva.
+bool TestV3BufferParsesLegacyOwnershipProvisionally() {
     const std::vector<std::uint8_t> buf = BuildLegacyOwnershipBuffer(
         /*schemaVersion=*/3, /*clickBalance=*/12, "bunny", /*ownershipSeeded=*/true, {"frin", "bunny"},
         /*lockPosition=*/false, "medium", 85, /*language=*/"es");
@@ -429,8 +432,10 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/TruncatedMidStringIsRejected", TestTruncatedMidStringIsRejected);
     runner.Add("AppStateSerializer/UnsupportedSchemaVersionIsRejected", TestUnsupportedSchemaVersionIsRejected);
     runner.Add("AppStateSerializer/V1BufferMigratesForward", TestV1BufferMigratesForward);
-    runner.Add("AppStateSerializer/V2BufferMigratesForward", TestV2BufferMigratesForward);
-    runner.Add("AppStateSerializer/V3BufferMigratesForward", TestV3BufferMigratesForward);
+    runner.Add("AppStateSerializer/V2BufferParsesLegacyOwnershipProvisionally",
+               TestV2BufferParsesLegacyOwnershipProvisionally);
+    runner.Add("AppStateSerializer/V3BufferParsesLegacyOwnershipProvisionally",
+               TestV3BufferParsesLegacyOwnershipProvisionally);
     runner.Add("AppStateSerializer/V4RoundTrips", TestV4RoundTrips);
     runner.Add("AppStateSerializer/OwnedEntitlementsNormalizedOnSerialize", TestOwnedEntitlementsNormalizedOnSerialize);
     runner.Add("AppStateSerializer/V4TruncatedOwnershipIsRejected", TestV4TruncatedOwnershipIsRejected);

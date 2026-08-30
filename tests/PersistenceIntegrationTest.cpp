@@ -211,8 +211,8 @@ bool TestPurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload() {
     state.clickBalance = 512;
     state.ownedEntitlements = {nimvlets::persistence::OwnedEntitlement{"bunny", ""}};
 
-    // --- "confirmar compra" ---
-    const auto outcome = EvaluatePurchase(catalog, "nidir", state.clickBalance,
+    // --- "confirmar compra" --- (el objetivo es la identidad de catálogo)
+    const auto outcome = EvaluatePurchase(catalog, PetIdentity{"nidir", ""}, state.clickBalance,
                                           {PetEntitlement{"bunny", ""}});
     NIMVLETS_CHECK(outcome.result == PurchaseResult::kSuccess);
     state.clickBalance = outcome.newBalance;  // 512 - 300 = 212
