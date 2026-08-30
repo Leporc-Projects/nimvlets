@@ -157,25 +157,34 @@ versiones posteriores quedan en su default; `outState.schemaVersion` se
 fija a la versión actual, así que el próximo `Save()` lo reescribe al
 formato actual.
 
-**Migración de propiedad v2/v3 -> v4, en dos etapas** (DEC-128):
+**Migración de propiedad v2/v3 -> v4, en dos etapas** (DEC-128,
+afinada por DEC-129):
 
 1. **Parseo provisional (serializer).** `DeserializeAppState` lee la
    lista `ownedPetIds` (petIds sueltos) y produce un `{petId, ""}` por
    cada uno. El serializer NO tiene catálogo, así que no puede saber
    qué petIds tienen variantes — `{frin, ""}` acá es PROVISIONAL, no
-   "todo Frin".
-2. **Reconciliación contra el catálogo (`src/app`).**
-   `SpikeApp::Init()`, tras cargar el catálogo, corre
-   `catalog::ExpandHistoricalWholePetEntitlements`: para un petId que
-   el catálogo describe con variantes (Frin), cada `{p, ""}` se
-   reemplaza por las autorizaciones EXPLÍCITAS de esas variantes
-   (`{frin, "male"} + {frin, "female"}` — lo que Block 06 realmente
-   exponía). Un Nimvlet sin variantes (Bunny, Nidir) deja su `{p, ""}`
-   igual. Idempotente: un save v4 limpio no cambia. **El AppState
-   persistido nunca queda con `{frin, ""}`.** Una tercera variante de
-   Frin agregada DESPUÉS de esta migración NO queda cubierta por el
-   conjunto migrado (Block 06 no estableció propiedad de variantes
-   futuras).
+   "todo Frin". El mismo parseo reporta por un out-param
+   (`outOnDiskSchemaVersion`) la versión que traía el archivo EN DISCO,
+   antes de normalizar `schemaVersion` a la actual; `AppStateStore::Load`
+   lo propaga (queda en `kCurrentSchemaVersion` si no hay save o está
+   corrupto).
+2. **Reconciliación por tabla histórica CONGELADA (`src/app`).**
+   `SpikeApp::Init()` corre `catalog::ExpandHistoricalWholePetEntitlements(ents)`
+   **solo si la versión en disco es < la actual** (un estado
+   genuinamente v1/v2/v3; nunca sobre un v4). La función **ya no recibe
+   catálogo**: una tabla fija (`HistoricalLegacyVariants`) mapea
+   `"frin" -> {frin, "male"} {frin, "female"}` — las variantes que Block
+   06 realmente exponía — y deja cualquier otro `{p, ""}` igual (era un
+   pet sin variantes). Idempotente. **El AppState persistido nunca queda
+   con `{frin, ""}`.** Una variante de Frin agregada al catálogo DESPUÉS
+   del schema v3 (p. ej. un hipotético `frin/spirit`) **no** queda
+   cubierta por el conjunto migrado — aunque ya exista en el catálogo
+   cuando ocurre la migración (DEC-129): la propiedad legacy significa
+   exactamente el contenido del modelo viejo, no "toda variante futura".
+   Un v4 editado a mano con un `{frin, ""}` suelto tampoco se expande
+   (no pasa el gate de versión), y con `Covers` exacto ese par no cubre
+   ninguna identidad real.
 
 El resto es "los campos nuevos arrancan en su default". El click
 balance, la posición de ventana, el idioma, la propiedad, el
@@ -296,7 +305,7 @@ también despierta cuando hay un flush pendiente por vencer.
 
 | Evento | Efecto |
 |---|---|
-| Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; **reconcilia la propiedad legacy** contra el catálogo (`ExpandHistoricalWholePetEntitlements`) y siembra si hace falta; resuelve el pet activo contra el catálogo Y contra la PROPIEDAD (`catalog::ResolveOwnedActiveIdentity` — un activo no autorizado cae a uno que sí lo está, **sin otorgar nada**, DEC-128); sincroniza `activePetId`/`activeVariantId` con lo que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
+| Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; **si el save venía de un schema en disco < el actual, reconcilia la propiedad legacy** con una tabla histórica CONGELADA (`ExpandHistoricalWholePetEntitlements`, sin catálogo — DEC-129) y siembra si hace falta; resuelve el pet activo contra el catálogo Y contra la PROPIEDAD (`catalog::ResolveOwnedActiveIdentity` — un activo no autorizado cae a uno que sí lo está, **sin otorgar nada**, DEC-128); sincroniza `activePetId`/`activeVariantId` con lo que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
 | Click | `clickCount_` (diagnóstico solo de sesión) y `appState_.clickBalance` (persistido) se incrementan ambos; se marca el scheduler como dirty. Deliberadamente dos contadores separados — ver `docs/DECISION_LOG.md` DEC-026. |
 | **Compra del Shop (Block 07)** | `EvaluatePurchase` (puro); si es `kSuccess`, `appState_.clickBalance` -= precio y `appState_.ownedEntitlements` += la autorización, en el mismo struct; se marca dirty y se **flushea de inmediato** (un solo write atómico — DEC-126). Sin `kSuccess` no se toca nada. |
 | Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |

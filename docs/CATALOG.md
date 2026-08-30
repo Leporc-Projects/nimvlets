@@ -375,12 +375,16 @@ Los símbolos de arriba se generalizaron:
 `CanActivate(model, petId, variantId)` (gate de variante exacta),
 `SeedEntitlementsFromCatalog()` (siembra la autorización EXPLÍCITA de
 cada entrada `initiallyOwned` — Frin siembra sus dos variantes),
-`ExpandHistoricalWholePetEntitlements()` (reconcilia un `{frin, ""}`
-legacy contra el catálogo -> `{frin, "male"} + {frin, "female"}`), y
-`ResolveOwnedActiveIdentity()` (resuelve el pet activo a uno REALMENTE
-autorizado, **sin otorgar nada** — reemplaza al viejo
-`EnsureActiveEntitlementOwned`). El enum de estados de `CollectionModel`
-**NO** cambió; cada `CollectionVariant` gana un flag `owned`.
+`ExpandHistoricalWholePetEntitlements(ents)` (reconcilia un `{frin, ""}`
+legacy con una **tabla histórica CONGELADA** -> `{frin, "male"} +
+{frin, "female"}`; **ya no recibe catálogo** y NO lo enumera, así una
+variante de Frin agregada después del schema v3 nunca se otorga al
+migrar — DEC-129; `src/app` solo la corre si el save venía de un schema
+en disco < el actual), y `ResolveOwnedActiveIdentity()` (resuelve el
+pet activo a uno REALMENTE autorizado, **sin otorgar nada** — reemplaza
+al viejo `EnsureActiveEntitlementOwned`). El enum de estados de
+`CollectionModel` **NO** cambió; cada `CollectionVariant` gana un flag
+`owned`.
 
 - **Frontera para Block 09 (onboarding / shop oculto)**: escribe
   `AppState::ownedEntitlements` con su propia lógica (una sola variante

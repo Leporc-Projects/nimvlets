@@ -4629,3 +4629,71 @@ arquitectónicos:
 autorizaciones y `frin/female` activo se conserva; un save v4 corrupto
 con `active=nidir, owned={bunny}` reabre en bunny con `owned` intacto
 (`{bunny,""}` solo — nidir NO se otorgó).
+
+---
+
+### DEC-129 — La expansión de propiedad legacy de Frin es una tabla histórica CONGELADA, no una enumeración del catálogo actual
+**Status:** DECIDIDO · Block 07 (corrección final). **Ajusta** DEC-128
+(`ExpandHistoricalWholePetEntitlements`). NO reabre la semántica de
+`PetEntitlement`, `EvaluatePurchase`, el Shop, el switch de runtime ni
+la activación de la Collection.
+
+**Contexto.** DEC-128 dejó `ExpandHistoricalWholePetEntitlements(ents,
+catalog)` **derivando** el conjunto de variantes de "poseer frin" al
+**enumerar el catálogo ACTUAL** en el momento de migrar. Eso filtra
+propiedad futura: si un bloque posterior agrega `frin/spirit` al
+catálogo y el usuario recién entonces actualiza desde un save v2/v3, la
+migración le otorgaría Spirit — que **nunca** formó parte de lo que
+"poseer frin" significaba bajo el modelo de propiedad "por pet lógico"
+de los schemas v1..v3. La propiedad legacy significa exactamente el
+contenido disponible bajo el modelo viejo en aquel momento histórico:
+para el Frin de Block 06, `frin/male` + `frin/female`, nada más.
+
+**Decisión.**
+
+- **Mapeo histórico CONGELADO.** `ExpandHistoricalWholePetEntitlements(std::vector<PetEntitlement>&)`
+  ya **no recibe catálogo**. Una tabla en `src/catalog/CollectionModel.cpp`
+  (anon namespace, `HistoricalLegacyVariants(petId)`) fija:
+
+  ```
+  "frin"                 ->  {frin, "male"}  {frin, "female"}
+  (cualquier otro petId) ->  se deja como {p, ""}  (era sin variantes)
+  ```
+
+  Independiente de cuántas variantes de Frin tenga el catálogo ACTUAL.
+  Si un bloque futuro incorpora otro Nimvlet capaz de variantes que
+  alguna vez estuvo bajo el modelo por-pet-lógico, se agrega una fila
+  con la lista EXACTA de aquel momento — nunca se deriva del catálogo.
+  El catálogo actual PUEDE usarse para validar/diagnosticar ids
+  históricos, nunca para descubrir el conjunto que la propiedad legacy
+  otorga.
+
+- **La expansión solo corre sobre un estado GENUINAMENTE legacy.**
+  `DeserializeAppState` gana un out-param `outOnDiskSchemaVersion` que
+  reporta la versión que traía el archivo EN DISCO, ANTES de normalizar
+  `AppState::schemaVersion` a la actual. `AppStateStore::Load` lo
+  propaga (inicializado a `kCurrentSchemaVersion`; solo un parseo
+  exitoso de un save viejo lo baja — sin save / ilegible / corrupto
+  queda en la actual). `SpikeApp::Init()` corre la reconciliación
+  **solo si `loadedOnDiskSchema < kCurrentSchemaVersion`**. Un v4
+  editado a mano con un `{frin, ""}` suelto NO se expande: con
+  `Covers` de coincidencia exacta ese par no cubre ninguna identidad
+  real, así que tampoco fabrica propiedad ni activación.
+
+- **Sin ramas de Frin nuevas.** El mapeo congelado es dato de
+  compatibilidad histórica, no lógica de producto: la política de
+  compra, el `ShopModel`, `TrySwitchActivePet`, `BuildCollectionModel`
+  y el matching de autorizaciones no ganan ningún caso especial de
+  Frin ni de migración.
+
+**Verificado (tests).** `EntitlementMigration/FutureVariantAlreadyInCatalogBeforeMigrationStaysUnowned`:
+catálogo SINTÉTICO con `frin/male, frin/female, frin/spirit` **ya
+presente**, se migra un save v2 y un v3 reales con `ownedPetIds=["frin"]`
+por el mismo camino que la app (`DeserializeAppState` + gate por versión
+en disco) -> `owns frin/male == true`, `owns frin/female == true`,
+`owns frin/spirit == false`, `owns frin/"" == false`, y `frin/spirit`
+no es activable. `EntitlementMigration/CurrentV4BareWholeFrinIsNotExpanded`:
+un v4 con `{frin, ""}` no se expande ni manufactura activación.
+También: seed v1, Frin legacy v2/v3, propiedad legacy sin variantes,
+idempotencia, y un v4 limpio que pasa por el camino de carga sin
+ensancharse.

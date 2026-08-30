@@ -801,13 +801,16 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
   ruta de compra visible** (el shop oculto de starters es futuro — brief
   §6). Tras la migración el owner tiene las dos variantes de Frin, así
   que ese estado no le aparece.
-- **Migración** (AppState `v2/v3 → v4`, DEC-124/DEC-128): el serializer
-  parsea `ownedPetIds` a `{petId, ""}` PROVISIONAL (sin catálogo);
-  `src/app` corre `catalog::ExpandHistoricalWholePetEntitlements` contra
-  el catálogo — un `{frin, ""}` legacy se **expande** a `{frin, "male"}
-  + {frin, "female"}` (lo que Block 06 exponía), NO a "todo Frin". El
-  AppState persistido nunca contiene `{frin, ""}`. Ver
-  `docs/PERSISTENCE.md` §3.
+- **Migración** (AppState `v2/v3 → v4`, DEC-124/DEC-128, afinada por
+  DEC-129): el serializer parsea `ownedPetIds` a `{petId, ""}`
+  PROVISIONAL (sin catálogo) y reporta la versión en disco por un
+  out-param; `src/app` corre `catalog::ExpandHistoricalWholePetEntitlements(ents)`
+  **solo si esa versión < la actual**, usando una **tabla histórica
+  CONGELADA** (no recibe catálogo ni lo enumera) — un `{frin, ""}`
+  legacy se **expande** a `{frin, "male"} + {frin, "female"}` (lo que
+  Block 06 exponía), NO a "todo Frin" ni a variantes agregadas después
+  del schema v3 aunque ya estén en el catálogo. El AppState persistido
+  nunca contiene `{frin, ""}`. Ver `docs/PERSISTENCE.md` §3.
 - **Resolución del pet activo, sin bypass de economía** (DEC-128):
   `catalog::ResolveOwnedActiveIdentity` reemplaza al viejo
   `EnsureActiveEntitlementOwned`. Si el pet/variante activo persistido
