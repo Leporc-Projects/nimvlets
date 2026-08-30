@@ -24,7 +24,14 @@ std::string AppStateStore::TempPath() const {
     return (std::filesystem::path(directoryPath_) / kTempFileName).string();
 }
 
-AppState AppStateStore::Load(std::string* outWarning) const {
+AppState AppStateStore::Load(std::string* outWarning, std::uint32_t* outOnDiskSchemaVersion) const {
+    // Por defecto "el estado ES del schema actual" — solo un parseo
+    // exitoso de un save viejo lo baja. Sin save / ilegible / corrupto
+    // -> queda acá: no hay migración legacy que correr.
+    if (outOnDiskSchemaVersion != nullptr) {
+        *outOnDiskSchemaVersion = AppState::kCurrentSchemaVersion;
+    }
+
     std::ifstream file(StatePath(), std::ios::binary);
     if (!file) {
         if (outWarning != nullptr) {
@@ -60,9 +67,12 @@ AppState AppStateStore::Load(std::string* outWarning) const {
 
     AppState state;
     std::string error;
-    if (!DeserializeAppState(buffer.data(), buffer.size(), state, error)) {
+    if (!DeserializeAppState(buffer.data(), buffer.size(), state, error, outOnDiskSchemaVersion)) {
         if (outWarning != nullptr) {
             *outWarning = "existing app-state save could not be used (" + error + "); using defaults";
+        }
+        if (outOnDiskSchemaVersion != nullptr) {
+            *outOnDiskSchemaVersion = AppState::kCurrentSchemaVersion;  // corrupto -> nada que migrar
         }
         return AppState{};
     }

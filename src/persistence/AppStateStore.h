@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "persistence/AppState.h"
@@ -34,7 +35,14 @@ class AppStateStore {
     // corta, específica y legible cada vez que el resultado no es "se
     // encontró un save válido con el schema actual" (y se limpia en
     // caso contrario) — el llamador decide si/cómo loguearlo.
-    AppState Load(std::string* outWarning = nullptr) const;
+    //
+    // Si `outOnDiskSchemaVersion` no es nulo, se inicializa a
+    // AppState::kCurrentSchemaVersion y, SOLO cuando se parsea un save
+    // válido, se sobre-escribe con la versión que traía el archivo en
+    // disco. En cualquier otro caso (sin save, ilegible, corrupto)
+    // queda en el valor actual — así "no hay estado legacy que migrar".
+    // Ver DEC-129.
+    AppState Load(std::string* outWarning = nullptr, std::uint32_t* outOnDiskSchemaVersion = nullptr) const;
 
     // Serializa `state` y lo escribe atómicamente: el contenido
     // completo se escribe primero a un archivo temporal en el mismo

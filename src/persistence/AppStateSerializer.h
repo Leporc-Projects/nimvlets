@@ -45,6 +45,16 @@ void NormalizeOwnedEntitlements(std::vector<OwnedEntitlement>& ents);
 // tratándose como "no se puede usar este dato". `outState` queda en un
 // estado no especificado si falla; siempre verificar el valor de
 // retorno.
-bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError);
+//
+// `outOnDiskSchemaVersion` (opcional): la versión que traía el archivo
+// EN DISCO, ANTES de que `outState.schemaVersion` se normalice a la
+// actual. Solo se escribe cuando el parseo tiene éxito. src/app la usa
+// para decidir si hay que correr la reconciliación de propiedad legacy
+// (`catalog::ExpandHistoricalWholePetEntitlements`) — que solo aplica a
+// un estado que GENUINAMENTE venía del modelo "por pet lógico" de los
+// schemas v1..v3, nunca a un v4 (DEC-129).
+bool DeserializeAppState(
+    const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError,
+    std::uint32_t* outOnDiskSchemaVersion = nullptr);
 
 }  // namespace nimvlets::persistence

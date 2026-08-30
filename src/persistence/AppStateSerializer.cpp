@@ -185,7 +185,9 @@ std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
     return out;
 }
 
-bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError) {
+bool DeserializeAppState(
+    const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError,
+    std::uint32_t* outOnDiskSchemaVersion) {
     ByteReader reader(data, size);
 
     char magic[8];
@@ -280,11 +282,17 @@ bool DeserializeAppState(const std::uint8_t* data, std::size_t size, AppState& o
     // schemaVersion == 1: los campos v2/v3/v4 quedan en su default.
     // schemaVersion == 2: `language` queda "" (src/app lo resuelve
     // desde el locale del OS en el próximo arranque); la propiedad se
-    // migra a autorizaciones de pet entero.
+    // parsea provisionalmente a `{petId, ""}` y src/app la reconcilia.
     // schemaVersion == 3: idem propiedad; `language` se conserva.
 
     outState = std::move(state);
     outError.clear();
+    // La versión EN DISCO, antes de normalizar `outState.schemaVersion`
+    // a la actual — src/app decide con esto si corre la reconciliación
+    // de propiedad legacy (DEC-129).
+    if (outOnDiskSchemaVersion != nullptr) {
+        *outOnDiskSchemaVersion = schemaVersion;
+    }
     return true;
 }
 

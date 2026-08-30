@@ -282,10 +282,11 @@ bool TestV1BufferMigratesForward() {
 // Un archivo v2 (Block 06): la lista de propiedad (`ownedPetIds`) se
 // parsea PROVISIONALMENTE a `{petId, ""}` por cada petId. El serializer
 // NO tiene catálogo, así que no puede saber que "frin" tiene variantes
-// — `src/app` reconcilia ese `{frin, ""}` contra el catálogo
-// (ExpandHistoricalWholePetEntitlements -> `{frin, "male"} + {frin,
-// "female"}`; ver EntitlementMigrationTest y DEC-128). Acá solo se
-// verifica el parseo del serializer. `language` queda "".
+// — `src/app` reconcilia ese `{frin, ""}` con una tabla histórica
+// CONGELADA (ExpandHistoricalWholePetEntitlements -> `{frin, "male"} +
+// {frin, "female"}`, sin mirar el catálogo actual; ver
+// EntitlementMigrationTest y DEC-128 / DEC-129). Acá solo se verifica el
+// parseo del serializer. `language` queda "".
 bool TestV2BufferParsesLegacyOwnershipProvisionally() {
     const std::vector<std::uint8_t> buf = BuildLegacyOwnershipBuffer(
         /*schemaVersion=*/2, /*clickBalance=*/500, "nidir", /*ownershipSeeded=*/true,
@@ -395,6 +396,46 @@ bool TestV4TruncatedOwnershipIsRejected() {
     return true;
 }
 
+// El out-param `outOnDiskSchemaVersion` reporta la versión que traía el
+// archivo EN DISCO — ANTES de que `schemaVersion` se normalice a la
+// actual. src/app decide con eso si corre la reconciliación de propiedad
+// legacy (solo cuando la versión en disco < la actual — DEC-129). En un
+// parseo fallido NO se escribe: queda el valor que el caller haya puesto.
+bool TestOnDiskSchemaVersionOutParam() {
+    AppState decoded;
+    std::string error;
+
+    for (std::uint32_t v : {1u, 2u, 3u}) {
+        const std::vector<std::uint8_t> buf =
+            (v == 1) ? BuildValidBuffer(1, 10, "bunny", "", false, 0, 0)
+                     : BuildLegacyOwnershipBuffer(v, 10, "bunny", true, {"bunny"}, false, "medium", 100, "es");
+        std::uint32_t onDisk = 999;
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
+        NIMVLETS_CHECK(onDisk == v);
+        // El estado en memoria SÍ queda normalizado a la versión actual.
+        NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    }
+
+    // v4: el out-param reporta la versión actual (no hay nada legacy que migrar).
+    {
+        const std::vector<std::uint8_t> buf = BuildValidV4Buffer(
+            10, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en");
+        std::uint32_t onDisk = 0;
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
+        NIMVLETS_CHECK(onDisk == AppState::kCurrentSchemaVersion);
+    }
+
+    // Parseo fallido (magic malo): el out-param queda intacto.
+    {
+        std::vector<std::uint8_t> buf = BuildValidBuffer(1, 10, "bunny", "", false, 0, 0);
+        buf[0] = 'X';
+        std::uint32_t onDisk = 42;
+        NIMVLETS_CHECK(!DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
+        NIMVLETS_CHECK(onDisk == 42);
+    }
+    return true;
+}
+
 // `language` sigue haciendo round-trip en v4.
 bool TestV4LanguageRoundTrips() {
     AppState original;
@@ -439,6 +480,7 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/V4RoundTrips", TestV4RoundTrips);
     runner.Add("AppStateSerializer/OwnedEntitlementsNormalizedOnSerialize", TestOwnedEntitlementsNormalizedOnSerialize);
     runner.Add("AppStateSerializer/V4TruncatedOwnershipIsRejected", TestV4TruncatedOwnershipIsRejected);
+    runner.Add("AppStateSerializer/OnDiskSchemaVersionOutParam", TestOnDiskSchemaVersionOutParam);
     runner.Add("AppStateSerializer/V4LanguageRoundTrips", TestV4LanguageRoundTrips);
 }
 
