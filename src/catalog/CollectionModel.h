@@ -128,24 +128,33 @@ PetIdentity ResolveOwnedActiveIdentity(
     const PetIdentity& wanted,
     bool& outFellBack);
 
-// Reconcilia autorizaciones "históricas de pet entero" ({p, ""}) contra
-// el catálogo: si `p` es un Nimvlet CAPAZ DE VARIANTES (el catálogo
-// tiene >= 1 entrada para `p` con variantId no vacío), reemplaza cada
-// `{p, ""}` por las autorizaciones EXPLÍCITAS de cada variante que el
-// catálogo define para `p`. Un Nimvlet sin variantes ({p} tiene una
-// sola entrada de catálogo con variantId "") deja su `{p, ""}` igual.
-// Canonicaliza el resultado. Idempotente, determinista, sin ramas por
-// pet.
+// Reconcilia autorizaciones "históricas de pet entero" ({p, ""}) que
+// vienen del modelo de propiedad "por pet lógico" de los schemas
+// v1..v3 (el `ownedPetIds` "frin" de Block 06 se parsea PROVISIONALMENTE
+// a `{frin, ""}` — el serializer no tiene catálogo, ver
+// docs/PERSISTENCE.md §3). Reemplaza cada `{p, ""}` por las
+// autorizaciones EXPLÍCITAS que poseer `p` significaba HISTÓRICAMENTE:
 //
-// Es el paso que src/app corre tras cargar el catálogo: un `ownedPetIds`
-// "frin" de un save v1/v2/v3 se parsea PROVISIONALMENTE a `{frin, ""}`
-// (el serializer no tiene catálogo — ver docs/PERSISTENCE.md §3) y acá
-// se expande a `{frin, "male"} + {frin, "female"}` — las variantes que
-// Block 06 realmente exponía, NO "toda variante futura de Frin"
-// (brief §5, DEC-128). Devuelve true si cambió algo (src/app marca
-// dirty para reescribir el save como v4 limpio).
-bool ExpandHistoricalWholePetEntitlements(
-    std::vector<PetEntitlement>& ents, const PetCatalog& catalog);
+//   "frin"  ->  {frin, "male"}  {frin, "female"}
+//   (cualquier otro petId)  ->  se deja como {p, ""} (era sin variantes)
+//
+// **El mapeo está CONGELADO y NO consulta el catálogo actual.** Una
+// variante agregada al catálogo DESPUÉS del schema v3 (p. ej. un
+// hipotético `frin/spirit`) nunca formó parte de lo que "poseer frin"
+// significaba bajo el modelo viejo, así que migrar un estado legacy
+// NUNCA la otorga — aunque ya exista en el catálogo cuando ocurre la
+// migración (DEC-129).
+//
+// Es dato de compatibilidad histórica, NO lógica de producto de
+// runtime: no hay una rama de Frin en la política de compra, el
+// ShopModel, el switch de runtime, ni el matching de autorizaciones.
+//
+// src/app SOLO la corre cuando el estado vino GENUINAMENTE de un schema
+// v1/v2/v3 en disco (ver DeserializeAppState / AppStateStore::Load y su
+// out-param de versión); NUNCA sobre un v4. Canonicaliza el resultado.
+// Idempotente, determinista. Devuelve true si cambió algo (src/app
+// marca dirty para reescribir el save como v4 limpio).
+bool ExpandHistoricalWholePetEntitlements(std::vector<PetEntitlement>& ents);
 
 // La semilla de propiedad de desarrollo/default: por cada entrada
 // `initiallyOwned` del catálogo, la autorización EXPLÍCITA de esa

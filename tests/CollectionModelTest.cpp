@@ -62,6 +62,54 @@ PetCatalog MakeDevCatalog() {
     return PetCatalog(std::move(entries));
 }
 
+// Igual que MakeDevCatalog() pero con una TERCERA entrada de Frin
+// (`spirit`) que NO existía bajo el modelo de propiedad por-pet-lógico.
+// Es el caso del brief §4 / DEC-129: la variante "futura" YA está en el
+// catálogo ACTUAL ANTES de migrar un estado legacy. Migrar "poseer
+// frin" NO debe otorgarla — la expansión histórica está congelada y no
+// enumera el catálogo.
+PetCatalog MakeDevCatalogWithSpiritVariant() {
+    std::vector<CatalogEntry> entries;
+
+    CatalogEntry bunny;
+    bunny.identity = PetIdentity{"bunny", ""};
+    bunny.displayName = "Bunny";
+    bunny.packPath = "bunny.nvpack";
+    bunny.isDefault = true;
+    bunny.initiallyOwned = true;
+    entries.push_back(bunny);
+
+    CatalogEntry nidir;
+    nidir.identity = PetIdentity{"nidir", ""};
+    nidir.displayName = "Nidir";
+    nidir.packPath = "nidir.nvpack";
+    nidir.initiallyOwned = false;
+    entries.push_back(nidir);
+
+    CatalogEntry frinMale;
+    frinMale.identity = PetIdentity{"frin", "male"};
+    frinMale.displayName = "Frin";
+    frinMale.packPath = "frin_male.nvpack";
+    frinMale.initiallyOwned = true;
+    entries.push_back(frinMale);
+
+    CatalogEntry frinFemale;
+    frinFemale.identity = PetIdentity{"frin", "female"};
+    frinFemale.displayName = "Frin";
+    frinFemale.packPath = "frin_female.nvpack";
+    frinFemale.initiallyOwned = true;
+    entries.push_back(frinFemale);
+
+    CatalogEntry frinSpirit;
+    frinSpirit.identity = PetIdentity{"frin", "spirit"};
+    frinSpirit.displayName = "Frin";
+    frinSpirit.packPath = "frin_spirit.nvpack";
+    frinSpirit.initiallyOwned = false;  // agregada en un bloque futuro, no parte del modelo viejo
+    entries.push_back(frinSpirit);
+
+    return PetCatalog(std::move(entries));
+}
+
 PetEntitlement NoVar(const std::string& p) { return PetEntitlement{p, ""}; }
 PetEntitlement Var(const std::string& p, const std::string& v) { return PetEntitlement{p, v}; }
 // Frin como lo tiene el owner tras la migración/siembra: las DOS
@@ -213,12 +261,12 @@ bool TestSeedGrantsExplicitVariants() {
 
 // --- ExpandHistoricalWholePetEntitlements ---------------------------
 
-// Un {frin, ""} legacy se expande a las variantes del catálogo; un
-// {bunny, ""} (pet sin variantes) se deja igual.
+// Un {frin, ""} legacy se expande al conjunto histórico CONGELADO (macho
+// + hembra); un {bunny, ""} (pet sin variantes) se deja igual. La
+// función ya no recibe catálogo — el mapeo no lo consulta (DEC-129).
 bool TestExpandFrinWholePetToBothVariants() {
-    const PetCatalog catalog = MakeDevCatalog();
     Ents ents = {NoVar("bunny"), NoVar("frin")};
-    const bool changed = ExpandHistoricalWholePetEntitlements(ents, catalog);
+    const bool changed = ExpandHistoricalWholePetEntitlements(ents);
     NIMVLETS_CHECK(changed);
     NIMVLETS_CHECK((ents == Ents{NoVar("bunny"), Var("frin", "female"), Var("frin", "male")}));
     // Y no quedó ningún {frin, ""}.
@@ -229,26 +277,41 @@ bool TestExpandFrinWholePetToBothVariants() {
 }
 
 bool TestExpandIsIdempotentAndLeavesExplicitAlone() {
-    const PetCatalog catalog = MakeDevCatalog();
     Ents ents = MigratedOwner();  // ya explícito
-    NIMVLETS_CHECK(!ExpandHistoricalWholePetEntitlements(ents, catalog));
+    NIMVLETS_CHECK(!ExpandHistoricalWholePetEntitlements(ents));
     NIMVLETS_CHECK((ents == MigratedOwner()));
 
     // Un {bunny, ""} solo (pet sin variantes) tampoco cambia.
     Ents onlyBunny = {NoVar("bunny")};
-    NIMVLETS_CHECK(!ExpandHistoricalWholePetEntitlements(onlyBunny, catalog));
+    NIMVLETS_CHECK(!ExpandHistoricalWholePetEntitlements(onlyBunny));
     NIMVLETS_CHECK((onlyBunny == Ents{NoVar("bunny")}));
     return true;
 }
 
-// Migrar el Frin legacy NO autoriza una tercera variante hipotética.
-bool TestMigratedFrinDoesNotCoverHypotheticalThirdVariant() {
-    const PetCatalog catalog = MakeDevCatalog();  // solo male/female
+// Brief §4 / DEC-129: migrar el Frin legacy NO autoriza una variante que
+// se agregó al catálogo DESPUÉS del schema v3 — AUNQUE esa variante YA
+// exista en el catálogo ACTUAL en el momento de migrar. La expansión usa
+// una tabla histórica congelada, nunca enumera el catálogo.
+bool TestMigratedFrinDoesNotCoverFutureCatalogVariant() {
     Ents ents = {NoVar("frin")};
-    ExpandHistoricalWholePetEntitlements(ents, catalog);
-    NIMVLETS_CHECK((ents == FrinBoth()));
+    ExpandHistoricalWholePetEntitlements(ents);
+    NIMVLETS_CHECK((ents == FrinBoth()));  // exactamente male + female
     NIMVLETS_CHECK(!nimvlets::catalog::OwnsIdentity(ents, PetIdentity{"frin", "spirit"}));
     NIMVLETS_CHECK(!nimvlets::catalog::OwnsIdentity(ents, PetIdentity{"frin", ""}));
+
+    // Y a través de un CollectionModel construido con un catálogo que YA
+    // contiene `frin/spirit`: Macho y Hembra activables, Spirit NO.
+    const PetCatalog withSpirit = MakeDevCatalogWithSpiritVariant();
+    const CollectionModel model =
+        BuildCollectionModel(withSpirit, ents, PetIdentity{"frin", "male"});
+    NIMVLETS_CHECK(CanActivate(model, "frin", "male"));
+    NIMVLETS_CHECK(CanActivate(model, "frin", "female"));
+    NIMVLETS_CHECK(!CanActivate(model, "frin", "spirit"));
+    const auto* frin = model.Find("frin");
+    NIMVLETS_CHECK(frin->VariantOwned("male"));
+    NIMVLETS_CHECK(frin->VariantOwned("female"));
+    NIMVLETS_CHECK(!frin->VariantOwned("spirit"));
+    NIMVLETS_CHECK(!frin->AllVariantsOwned());  // spirit falta -> no "todas"
     return true;
 }
 
@@ -257,7 +320,7 @@ bool TestMigratedFrinDoesNotCoverHypotheticalThirdVariant() {
 bool TestMigratedFrinOwnerActivatesBothVariants() {
     const PetCatalog catalog = MakeDevCatalog();
     Ents owned = {NoVar("bunny"), NoVar("frin")};
-    ExpandHistoricalWholePetEntitlements(owned, catalog);
+    ExpandHistoricalWholePetEntitlements(owned);
     const CollectionModel model = BuildCollectionModel(catalog, owned, PetIdentity{"frin", "male"});
     NIMVLETS_CHECK(CanActivate(model, "frin", "male"));
     NIMVLETS_CHECK(CanActivate(model, "frin", "female"));
@@ -333,8 +396,8 @@ void RegisterCollectionModelTests(testing::TestRunner& runner) {
     runner.Add("CollectionModel/SeedGrantsExplicitVariants", TestSeedGrantsExplicitVariants);
     runner.Add("CollectionModel/ExpandFrinWholePetToBothVariants", TestExpandFrinWholePetToBothVariants);
     runner.Add("CollectionModel/ExpandIsIdempotentAndLeavesExplicitAlone", TestExpandIsIdempotentAndLeavesExplicitAlone);
-    runner.Add("CollectionModel/MigratedFrinDoesNotCoverHypotheticalThirdVariant",
-               TestMigratedFrinDoesNotCoverHypotheticalThirdVariant);
+    runner.Add("CollectionModel/MigratedFrinDoesNotCoverFutureCatalogVariant",
+               TestMigratedFrinDoesNotCoverFutureCatalogVariant);
     runner.Add("CollectionModel/MigratedFrinOwnerActivatesBothVariants", TestMigratedFrinOwnerActivatesBothVariants);
     runner.Add("CollectionModel/ResolveOwnedActiveKeepsOwnedWanted", TestResolveOwnedActiveKeepsOwnedWanted);
     runner.Add("CollectionModel/ResolveOwnedActiveFallsBackWithoutGranting", TestResolveOwnedActiveFallsBackWithoutGranting);

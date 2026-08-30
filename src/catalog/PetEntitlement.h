@@ -22,12 +22,16 @@ namespace nimvlets::catalog {
 // NO existe una autorización de "todas las variantes de un Nimvlet
 // capaz de variantes". La propiedad de Frin es SIEMPRE por variante,
 // explícita — poseer Frin Macho no implica poseer Frin Hembra ni una
-// tercera variante futura. Un `{frin, ""}` que llegue por un archivo
-// hecho a mano o por una migración legacy se EXPANDE a las variantes
-// que el catálogo define (ver ExpandHistoricalWholePetEntitlements en
-// CollectionModel.h), nunca se interpreta como "todo Frin". Block 06
+// tercera variante futura. Un `{frin, ""}` que llegue por una MIGRACIÓN
+// LEGACY (save v1/v2/v3) se EXPANDE a las variantes HISTÓRICAS que
+// "poseer frin" significaba bajo el modelo viejo — Macho + Hembra —
+// mediante una tabla CONGELADA, sin mirar el catálogo actual (ver
+// ExpandHistoricalWholePetEntitlements en CollectionModel.h; DEC-129).
+// Nunca se interpreta como "todo Frin", y una variante agregada al
+// catálogo después del schema v3 no se otorga al migrar. Block 06
 // exponía Macho + Hembra; no estableció propiedad de variantes futuras
-// (DEC-128).
+// (DEC-128). Un `{frin, ""}` en un save v4 (editado a mano) NO se
+// expande: `Covers` exacto hace que no cubra ninguna identidad real.
 //
 // El onboarding futuro (Block 09) otorga UNA variante de Frin, y la
 // otra se obtiene por separado. Block 07 NO implementa ese flujo — solo

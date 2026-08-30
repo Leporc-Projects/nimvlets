@@ -126,15 +126,26 @@ bool CanActivate(const CollectionModel& model, const std::string& petId, const s
 
 namespace {
 
-// ¿El catálogo tiene alguna entrada para `petId` con variantId no
-// vacío? (i.e. `petId` es un Nimvlet capaz de variantes.)
-bool PetIsVariantCapable(const PetCatalog& catalog, const std::string& petId) {
-    for (const CatalogEntry& entry : catalog.Entries()) {
-        if (entry.identity.petId == petId && !entry.identity.variantId.empty()) {
-            return true;
-        }
+// Mapeo HISTÓRICO CONGELADO (DEC-129): qué autorizaciones EXPLÍCITAS
+// otorgaba, bajo el modelo de propiedad "por pet lógico" de los schemas
+// v1..v3, poseer un petId capaz de variantes. Deliberadamente
+// independiente del catálogo ACTUAL — una variante agregada al catálogo
+// DESPUÉS del schema v3 nunca formó parte de lo que "poseer <pet>"
+// significaba, así que migrar un estado viejo NO debe otorgarla.
+//
+// Solo Frin califica: es el único Nimvlet capaz de variantes que
+// existió bajo el modelo por-pet-lógico (Block 05/06), y sus dos
+// variantes históricas son macho y hembra. Cualquier otro petId legacy
+// era sin variantes y mapea natural a `{petId, ""}` -> devuelve
+// nullptr. Si un bloque futuro AGREGA un Nimvlet capaz de variantes que
+// alguna vez estuvo bajo el modelo viejo, se agrega una fila acá con la
+// lista EXACTA de ese momento histórico — nunca se deriva del catálogo.
+const std::vector<std::string>* HistoricalLegacyVariants(const std::string& petId) {
+    static const std::vector<std::string> kFrinHistoricalVariants = {"female", "male"};  // orden canónico
+    if (petId == "frin") {
+        return &kFrinHistoricalVariants;
     }
-    return false;
+    return nullptr;
 }
 
 }  // namespace
@@ -166,23 +177,23 @@ PetIdentity ResolveOwnedActiveIdentity(
     return wanted;
 }
 
-bool ExpandHistoricalWholePetEntitlements(
-    std::vector<PetEntitlement>& ents, const PetCatalog& catalog) {
+bool ExpandHistoricalWholePetEntitlements(std::vector<PetEntitlement>& ents) {
     const std::vector<PetEntitlement> before = ents;
 
     std::vector<PetEntitlement> out;
     out.reserve(ents.size());
     for (const PetEntitlement& e : ents) {
-        if (!e.variantId.empty() || !PetIsVariantCapable(catalog, e.petId)) {
-            out.push_back(e);  // ya es explícita, o el pet no tiene variantes
+        const std::vector<std::string>* historical =
+            e.variantId.empty() ? HistoricalLegacyVariants(e.petId) : nullptr;
+        if (historical == nullptr) {
+            out.push_back(e);  // ya es explícita, o era un pet legacy sin variantes
             continue;
         }
-        // `{p, ""}` para un pet capaz de variantes -> expandir a cada
-        // variante del catálogo. NO se re-agrega el `{p, ""}`.
-        for (const CatalogEntry& entry : catalog.Entries()) {
-            if (entry.identity.petId == e.petId && !entry.identity.variantId.empty()) {
-                out.push_back(PetEntitlement{entry.identity.petId, entry.identity.variantId});
-            }
+        // `{p, ""}` de un pet que HISTÓRICAMENTE tenía variantes ->
+        // expandir al conjunto CONGELADO de ese momento. NO se re-agrega
+        // el `{p, ""}`, y el catálogo actual no interviene.
+        for (const std::string& variantId : *historical) {
+            out.push_back(PetEntitlement{e.petId, variantId});
         }
     }
     CanonicalizePetEntitlements(out);

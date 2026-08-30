@@ -295,11 +295,16 @@ bool SpikeApp::Init() {
         }
     }
 
+    // La versión de schema que traía el save EN DISCO (antes de
+    // normalizarse a la actual). Gobierna si hay que correr la
+    // reconciliación de propiedad legacy más abajo. Sin save / corrupto
+    // -> queda en la actual: nada legacy que migrar (DEC-129).
+    std::uint32_t loadedOnDiskSchema = persistence::AppState::kCurrentSchemaVersion;
     if (!appDataDir.empty()) {
         appStateStore_.emplace(appDataDir);
 
         std::string loadWarning;
-        appState_ = appStateStore_->Load(&loadWarning);
+        appState_ = appStateStore_->Load(&loadWarning, &loadedOnDiskSchema);
         if (!loadWarning.empty()) {
             SDL_Log("nimvlets: %s", loadWarning.c_str());
         }
@@ -351,21 +356,26 @@ bool SpikeApp::Init() {
 
     // --- Estado de propiedad (Block 06 -> Block 07 autorizaciones) ---
     //
-    // (1) Reconcilia autorizaciones "históricas de pet entero" contra el
-    //     catálogo. Un `ownedPetIds` "frin" de un save v1/v2/v3 se
-    //     parseó PROVISIONALMENTE a `{frin, ""}` (el serializer no tiene
-    //     catálogo — ver docs/PERSISTENCE.md §3); acá se expande a
-    //     `{frin, "male"} + {frin, "female"}` — las variantes que Block
-    //     06 realmente exponía, NO "toda variante futura de Frin" (brief
-    //     §5, DEC-128). Idempotente: para un save v4 limpio no cambia
-    //     nada.
-    {
+    // (1) Reconcilia la propiedad "por pet lógico" de un save v1/v2/v3.
+    //     Un `ownedPetIds` "frin" se parseó PROVISIONALMENTE a
+    //     `{frin, ""}` (el serializer no tiene catálogo — ver
+    //     docs/PERSISTENCE.md §3); acá se expande al conjunto HISTÓRICO
+    //     CONGELADO — `{frin, "male"} + {frin, "female"}`, las variantes
+    //     que Block 06 exponía — mediante una tabla en src/catalog que
+    //     NO consulta el catálogo actual (así una variante futura como
+    //     `frin/spirit`, aunque ya exista en el catálogo, NO se otorga —
+    //     DEC-129). Solo se corre si el save vino GENUINAMENTE de un
+    //     schema legacy en disco; sobre un v4 nunca (no se puede
+    //     fabricar propiedad reinterpretando un `{frin, ""}` de un save
+    //     actual editado a mano).
+    if (loadedOnDiskSchema < persistence::AppState::kCurrentSchemaVersion) {
         std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
-        if (catalog::ExpandHistoricalWholePetEntitlements(ents, catalog_)) {
+        if (catalog::ExpandHistoricalWholePetEntitlements(ents)) {
             appState_.ownedEntitlements = ToPersistedEntitlements(ents);
             persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
-            SDL_Log("nimvlets: legacy whole-pet ownership expanded to explicit variants (%zu entitlement(s))",
-                    appState_.ownedEntitlements.size());
+            SDL_Log(
+                "nimvlets: migrated schema v%u ownership to explicit entitlements (%zu; frozen historical map)",
+                loadedOnDiskSchema, appState_.ownedEntitlements.size());
         }
     }
 
