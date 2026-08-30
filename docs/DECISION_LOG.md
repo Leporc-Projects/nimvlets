@@ -4549,3 +4549,83 @@ filtros, categorías, banners ni countdowns.
   presentación por pet; agregar un backdrop estático opcional más
   adelante no se vuelve más difícil. Sin red en runtime; los backdrops
   futuros serían assets locales optimizados.
+
+---
+
+### DEC-128 — Corrección Block 07: migración legacy de Frin, objetivo de compra data-driven, y resolución de activo sin otorgar
+**Status:** DECIDIDO · Block 07 (pasada de corrección). **Ajusta**
+DEC-123 (semántica de `PetEntitlement`), DEC-124 (migración de
+propiedad) y DEC-126 (política de compra). NO rediseña el Shop ni la
+Collection.
+
+**Contexto.** La primera versión de Block 07 tomó tres atajos
+arquitectónicos:
+1. La migración de un `ownedPetIds` "frin" de Block 06 producía
+   `{frin, ""}`, con la semántica "todo Frin, toda variante presente y
+   futura". El contrato pedía expandirlo a las DOS variantes
+   HISTÓRICAS (`{frin, "male"} + {frin, "female"}`) — Block 06 exponía
+   Macho + Hembra, no estableció propiedad de variantes futuras.
+2. `{frin, ""}` como "pet entero" podía colapsar propiedad
+   variant-específica en una autorización abierta.
+3. `EvaluatePurchase` operaba sobre un `petId` suelto, asumiendo que
+   alcanza siempre.
+4. `EnsureActiveEntitlementOwned` OTORGABA propiedad si el pet activo
+   no estaba autorizado — un bypass de economía (`active = nidir,
+   owned = {bunny}` se volvía `owned = bunny + nidir` al cargar).
+
+**Decisión.**
+
+- **`PetEntitlement::Covers` es coincidencia EXACTA** en `{petId,
+  variantId}`. `{frin, ""}` NO cubre `{frin, "male"}`. NO existe una
+  autorización de "todas las variantes de un Nimvlet capaz de
+  variantes"; la propiedad de Frin es siempre por variante, explícita.
+  `CanonicalizePetEntitlements` pierde el paso de subsunción (ya no hay
+  nada que subsumir).
+
+- **`catalog::ExpandHistoricalWholePetEntitlements(ents, catalog)`** —
+  el serializer parsea un `ownedPetIds` legacy a `{petId, ""}`
+  PROVISIONAL (no tiene catálogo — ver docs/PERSISTENCE.md §3);
+  `SpikeApp::Init()` corre esta función tras cargar el catálogo. Para
+  un petId con entradas de variante en el catálogo, `{p, ""}` se
+  reemplaza por las autorizaciones EXPLÍCITAS de cada variante; un pet
+  sin variantes deja su `{p, ""}` igual. Idempotente: un save v4 limpio
+  no cambia. **El AppState actual nunca contiene `{frin, ""}`.** Una
+  tercera variante de Frin agregada DESPUÉS de la migración NO queda
+  cubierta por el conjunto migrado.
+
+- **`SeedEntitlementsFromCatalog`** otorga la autorización EXPLÍCITA de
+  cada entrada `initiallyOwned` (`{frin, "male"}` y `{frin, "female"}`,
+  no `{frin, ""}`).
+
+- **`EvaluatePurchase(catalog, PetIdentity target, ...)`** — el
+  objetivo es una IDENTIDAD de catálogo completa, resuelta contra una
+  entrada EXACTA (`PetCatalog::Find`). Lo que se otorga es la identidad
+  de esa entrada. `{frin, ""}` (comprar "todo Frin") -> `kInvalidTarget`
+  (no hay tal entrada). Un catálogo SINTÉTICO donde `frin/male` es
+  público hace que la MISMA política lo compre y otorgue `{frin,
+  "male"}`, sin ninguna rama `if (pet == "frin")` — el seam para el
+  shop oculto de starters (Block 09) existe sin código futuro. El Shop
+  real de Block 07 sigue sin listar Frin; `ShopItem::entitlementTarget`
+  (que la vista emite como `PurchaseRequest`) es esa identidad, no una
+  suposición sobre petId.
+
+- **`catalog::ResolveOwnedActiveIdentity(owned, catalog, wanted,
+  &fellBack)`** reemplaza a `EnsureActiveEntitlementOwned`. NUNCA
+  otorga: si `wanted` está autorizado se devuelve; si no, cae al
+  default del catálogo si está autorizado, o a la primera entrada
+  autorizada, o (nada autorizado — solo antes de la siembra) a `wanted`
+  sin marcar fallback. `SpikeApp::Init()` la usa tras la
+  expansión/siembra; repara `activePetId/Variant` y marca dirty en el
+  fallback (salvo en una selección solo-DEV). `TrySwitchActivePet` gana
+  un gate de propiedad (`OwnsIdentity`) y ya NO toca la propiedad — un
+  switch de runtime jamás otorga; establecer propiedad es cosa de
+  siembra / migración / compra. La siembra se re-ejecuta si el conjunto
+  de autorizaciones quedó vacío por corrupción (un estado post-siembra
+  no puede tener cero — no hay forma de "vender").
+
+**Verificado contra el binario real:** una instalación nueva siembra
+`{bunny,""} {frin,female} {frin,male}` (sin `{frin,""}`); un save v3 con
+`ownedPetIds=[bunny,frin]` se reescribe a v4 con esas tres
+autorizaciones y `frin/female` activo se conserva; un save v4 corrupto
+con `active=nidir, owned={bunny}` reabre en bunny con `owned` intacto
+(`{bunny,""}` solo — nidir NO se otorgó).

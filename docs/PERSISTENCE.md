@@ -38,11 +38,14 @@ Persistido, con significado real en el runtime hoy:
   `AppState::ownedEntitlements`**: pares `{petId, variantId}` capaces de
   expresar "posee solo Frin macho" (`persistence::OwnedEntitlement` —
   datos planos, sin dependencia de `src/catalog`; `src/app` puentea a
-  `catalog::PetEntitlement`). `ownershipSeeded` (sin cambios) distingue
-  "nunca se inicializó" de "posee cero". Semilla desde
-  `catalog::CatalogEntry::initiallyOwned` (como **pet entero**) solo en
-  el primer arranque. Ver `docs/CATALOG.md` §11–§12 y
-  `docs/PRODUCT_UI.md` §19.
+  `catalog::PetEntitlement`, cuya coincidencia es EXACTA — no hay
+  autorización de "todas las variantes de un Nimvlet", DEC-128).
+  `ownershipSeeded` (sin cambios) distingue "nunca se inicializó" de
+  "posee cero"; `src/app` re-siembra si el conjunto quedó vacío por
+  corrupción. La semilla otorga la autorización EXPLÍCITA de cada
+  entrada `initiallyOwned` (Frin siembra sus dos variantes, no un
+  `{frin, ""}`) solo en el primer arranque. Ver `docs/CATALOG.md`
+  §11–§12 y `docs/PRODUCT_UI.md` §19.
 - **Preferencias del menú rápido** (`AppState::lockPosition`,
   `sizeChoice`, `opacityPercent`) — controles de usuario expuestos por
   el menú de la barra (`docs/PRODUCT_UI.md` §8). `core::DisplayControls`
@@ -133,7 +136,7 @@ lastWindowY       : int32
 ownershipSeeded   : uint8   (0/1)
 -- propiedad: el layout de la lista cambia en v4
 [schemaVersion <= 3]  ownedPetIdCount : uint32 ; ownedPetIds : string[]   (ordenados, sin duplicados)
-[schemaVersion >= 4]  ownedEntitlementCount : uint32 ; (petId:string, variantId:string)[]   (canónico: ordenado por (petId,variantId), sin duplicados, sin petId vacío; "" en variantId = pet entero)
+[schemaVersion >= 4]  ownedEntitlementCount : uint32 ; (petId:string, variantId:string)[]   (canónico: ordenado por (petId,variantId), sin duplicados, sin petId vacío; "" en variantId = Nimvlet SIN variantes)
 lockPosition      : uint8   (0/1)
 sizeChoice        : string  ("small"/"medium"/"large"; "" => "medium")
 opacityPercent    : uint32  (0 => sin preferencia => 100)
@@ -147,25 +150,42 @@ iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
 **Versionado + migración hacia adelante (Block 06 DEC-109, Block 06.1
-DEC-116, Block 07 DEC-124):** `DeserializeAppState` lee cualquier
-versión en `[1, kCurrentSchemaVersion]` — hoy **1, 2, 3 y 4**. Un
-archivo más viejo se lee con su layout y los campos de versiones
-posteriores quedan en su default; `outState.schemaVersion` se fija a la
-versión actual, así que el próximo `Save()` lo reescribe al formato
-actual.
+DEC-116, Block 07 DEC-124/DEC-128):** `DeserializeAppState` lee
+cualquier versión en `[1, kCurrentSchemaVersion]` — hoy **1, 2, 3 y
+4**. Un archivo más viejo se lee con su layout y los campos de
+versiones posteriores quedan en su default; `outState.schemaVersion` se
+fija a la versión actual, así que el próximo `Save()` lo reescribe al
+formato actual.
 
-La única conversión con lógica real es la de **propiedad en v4**: un
-archivo v2/v3 trae `ownedPetIds` (petIds sueltos) y cada uno se migra a
-una autorización de **PET ENTERO** `(petId, "")` — así un Frin de Block
-06 (que exponía macho y hembra) sigue dando las dos variantes. El resto
-es "los campos nuevos arrancan en su default". El click balance, la
-posición de ventana, el idioma, la propiedad, el pet/variante activo y
-las preferencias de tamaño/opacidad/lock **sobreviven** cada
-actualización. Una versión más nueva desconocida (v5+) o basura sigue
-tratándose como datos corruptos (ver §5), nunca se adivina.
-`NormalizeOwnedEntitlements` (orden + dedup, sobre una copia) mantiene
-la salida determinista byte a byte; `src/app` aplica además la
-canonicalización semántica completa (subsunción de variantes) antes de
+**Migración de propiedad v2/v3 -> v4, en dos etapas** (DEC-128):
+
+1. **Parseo provisional (serializer).** `DeserializeAppState` lee la
+   lista `ownedPetIds` (petIds sueltos) y produce un `{petId, ""}` por
+   cada uno. El serializer NO tiene catálogo, así que no puede saber
+   qué petIds tienen variantes — `{frin, ""}` acá es PROVISIONAL, no
+   "todo Frin".
+2. **Reconciliación contra el catálogo (`src/app`).**
+   `SpikeApp::Init()`, tras cargar el catálogo, corre
+   `catalog::ExpandHistoricalWholePetEntitlements`: para un petId que
+   el catálogo describe con variantes (Frin), cada `{p, ""}` se
+   reemplaza por las autorizaciones EXPLÍCITAS de esas variantes
+   (`{frin, "male"} + {frin, "female"}` — lo que Block 06 realmente
+   exponía). Un Nimvlet sin variantes (Bunny, Nidir) deja su `{p, ""}`
+   igual. Idempotente: un save v4 limpio no cambia. **El AppState
+   persistido nunca queda con `{frin, ""}`.** Una tercera variante de
+   Frin agregada DESPUÉS de esta migración NO queda cubierta por el
+   conjunto migrado (Block 06 no estableció propiedad de variantes
+   futuras).
+
+El resto es "los campos nuevos arrancan en su default". El click
+balance, la posición de ventana, el idioma, la propiedad, el
+pet/variante activo y las preferencias de tamaño/opacidad/lock
+**sobreviven** cada actualización. Una versión más nueva desconocida
+(v5+) o basura sigue tratándose como datos corruptos (ver §5), nunca se
+adivina. `NormalizeOwnedEntitlements` (orden + dedup, sobre una copia)
+mantiene la salida determinista byte a byte;
+`catalog::CanonicalizePetEntitlements` (orden + dedup, sin subsunción —
+DEC-128) es la forma canónica semántica que `src/app` aplica antes de
 cada `Save()`.
 
 ## 4. Comportamiento de escritura atómica
@@ -276,7 +296,7 @@ también despierta cuando hay un flush pendiente por vencer.
 
 | Evento | Efecto |
 |---|---|
-| Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; sincroniza `activePetId` con el pack que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
+| Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; **reconcilia la propiedad legacy** contra el catálogo (`ExpandHistoricalWholePetEntitlements`) y siembra si hace falta; resuelve el pet activo contra el catálogo Y contra la PROPIEDAD (`catalog::ResolveOwnedActiveIdentity` — un activo no autorizado cae a uno que sí lo está, **sin otorgar nada**, DEC-128); sincroniza `activePetId`/`activeVariantId` con lo que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
 | Click | `clickCount_` (diagnóstico solo de sesión) y `appState_.clickBalance` (persistido) se incrementan ambos; se marca el scheduler como dirty. Deliberadamente dos contadores separados — ver `docs/DECISION_LOG.md` DEC-026. |
 | **Compra del Shop (Block 07)** | `EvaluatePurchase` (puro); si es `kSuccess`, `appState_.clickBalance` -= precio y `appState_.ownedEntitlements` += la autorización, en el mismo struct; se marca dirty y se **flushea de inmediato** (un solo write atómico — DEC-126). Sin `kSuccess` no se toca nada. |
 | Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |

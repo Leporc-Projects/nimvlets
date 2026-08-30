@@ -741,12 +741,22 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
   El foco arranca en **Cancelar**; `Esc` o "Cancelar" la cierran sin
   tocar nada; solo "Confirmar" emite la compra. Un click perdido nunca
   gasta.
-- **Política pura** `catalog::EvaluatePurchase` (testeable sin GUI —
-  brief §14): `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` /
-  `kNotPurchasable` (no público o precio 0) / `kInvalidTarget`. En
-  cualquier fallo el estado resultante == el de entrada; **nunca una
-  mutación parcial**. La resta solo corre tras `balance >= precio` →
-  **sin underflow posible**.
+- **Política pura** `catalog::EvaluatePurchase(catalog, PetIdentity
+  target, ...)` (testeable sin GUI — brief §14): el objetivo es una
+  **identidad de catálogo completa** (`{petId, variantId}`), NO un petId
+  suelto — se resuelve contra una entrada EXACTA del catálogo y lo que
+  se otorga es la identidad de esa entrada (DEC-128). `ShopItem::
+  entitlementTarget` la lleva; la vista la emite como `PurchaseRequest`.
+  Para los pets de Block 07 (Bunny, Nidir) el objetivo es `{petId, ""}`;
+  la misma política ya procesa `{frin, "male"}` en un catálogo sintético
+  (`PurchasePolicyTest`) sin ninguna rama por pet — el seam para el shop
+  oculto de starters (Block 09) existe sin código futuro. Resultados:
+  `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` / `kNotPurchasable`
+  (la entrada existe pero no es pública, o precio 0) / `kInvalidTarget`
+  (ninguna entrada con esa identidad exacta — incluido comprar `{frin,
+  ""}`). En cualquier fallo el estado resultante == el de entrada;
+  **nunca una mutación parcial**. La resta solo corre tras `balance >=
+  precio` → **sin underflow posible**.
 - **Transacción atómica** `SpikeApp::HandlePurchaseRequest`: si es
   `kSuccess`, muta `clickBalance` **y** `ownedEntitlements` en el MISMO
   `AppState`, sin escrituras intermedias, y **flushea de inmediato**
@@ -759,8 +769,8 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
   Shop pasa a `In your collection` y la Collection marca el pet como
   poseído, sin reiniciar el Product UI ni la app. Activar el pet recién
   comprado usa el switch transaccional de runtime que ya existía
-  (`TrySwitchActivePet`); cambiar entre contenido ya poseído sigue
-  siendo gratis.
+  (`TrySwitchActivePet`, que gatea propiedad y NUNCA otorga — DEC-128);
+  cambiar entre contenido ya poseído sigue siendo gratis.
 - **Balance visible**: discreto, arriba a la derecha, en la cabecera
   compartida. `312 clicks` / `1 click` (singular) — `312 clics` / `1
   clic`. Se actualiza en vivo con cada click del pet y tras una compra.
@@ -771,12 +781,15 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
 `AppState::ownedPetIds` (conjunto de `petId`) queda **superseded** por
 `AppState::ownedEntitlements`:
 
-- **`catalog::PetEntitlement { petId, variantId }`** — `variantId == ""`
-  = el **pet entero** (cualquier variante); no vacío = **solo esa
-  variante**. `Covers(PetIdentity)` es el gate de activación;
-  `CanonicalizePetEntitlements` (orden + dedup + subsunción: `(p,"")`
-  descarta `(p,<var>)`) mantiene la lista determinista, sin conocer el
-  catálogo.
+- **`catalog::PetEntitlement { petId, variantId }`** — misma forma y
+  semántica de `variantId` que `PetIdentity`: `""` = el Nimvlet NO
+  tiene variantes (Bunny, Nidir); no vacío = **solo esa variante**.
+  **NO existe una autorización de "todas las variantes de un Nimvlet"**
+  — la propiedad de Frin es siempre por variante, explícita (DEC-128).
+  `Covers(PetIdentity)` es **coincidencia exacta** en los dos campos
+  (`{frin, ""}` NO cubre `{frin, "male"}`); es el gate de activación.
+  `CanonicalizePetEntitlements` = orden + dedup (sin subsunción — ya no
+  hay "pet entero" que subsuma), sin conocer el catálogo.
 - **`persistence::OwnedEntitlement`** — el mismo par, como dato plano en
   `src/persistence` (sin dependencia de `src/catalog`); `src/app`
   puentea, la misma división que `activePetId` (string) vs.
@@ -788,9 +801,21 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
   ruta de compra visible** (el shop oculto de starters es futuro — brief
   §6). Tras la migración el owner tiene las dos variantes de Frin, así
   que ese estado no le aparece.
-- **Migración** (AppState `v3 → v4`, DEC-124): cada `petId` poseído se
-  vuelve una autorización de **pet entero** `(petId, "")` — un Frin de
-  Block 06 sigue dando macho y hembra. Ver `docs/PERSISTENCE.md` §3.
+- **Migración** (AppState `v2/v3 → v4`, DEC-124/DEC-128): el serializer
+  parsea `ownedPetIds` a `{petId, ""}` PROVISIONAL (sin catálogo);
+  `src/app` corre `catalog::ExpandHistoricalWholePetEntitlements` contra
+  el catálogo — un `{frin, ""}` legacy se **expande** a `{frin, "male"}
+  + {frin, "female"}` (lo que Block 06 exponía), NO a "todo Frin". El
+  AppState persistido nunca contiene `{frin, ""}`. Ver
+  `docs/PERSISTENCE.md` §3.
+- **Resolución del pet activo, sin bypass de economía** (DEC-128):
+  `catalog::ResolveOwnedActiveIdentity` reemplaza al viejo
+  `EnsureActiveEntitlementOwned`. Si el pet/variante activo persistido
+  NO está autorizado (save corrupto / editado a mano), cae a uno que sí
+  lo esté (default del catálogo, o la primera entrada autorizada) — y
+  **nunca otorga la autorización que falta**. `TrySwitchActivePet`
+  gatea propiedad y tampoco otorga; establecer propiedad es solo cosa
+  de la siembra / migración / compra.
 - **Frontera para Block 09**: onboarding y shop oculto escriben
   `ownedEntitlements` con su propia lógica (una sola variante de Frin,
   la otra por separado) sin tocar el catálogo ni el modelo. **Nada en

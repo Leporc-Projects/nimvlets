@@ -368,14 +368,19 @@ switching de §6.
 
 **Actualización Block 07 — `ownedPetIds` superseded.** La propiedad
 deja de ser "un conjunto de `petId`" y pasa a ser **autorizaciones
-capaces de variantes** (`catalog::PetEntitlement`) — ver §12 abajo,
-`docs/PERSISTENCE.md` §3 y DEC-123/DEC-124. Los símbolos de arriba se
-generalizaron: `BuildCollectionModel(catalog, entitlements, activeId)`,
+capaces de variantes** (`catalog::PetEntitlement`, coincidencia EXACTA
+— ver §12 abajo, `docs/PERSISTENCE.md` §3 y DEC-123/DEC-124/DEC-128).
+Los símbolos de arriba se generalizaron:
+`BuildCollectionModel(catalog, entitlements, activeId)`,
 `CanActivate(model, petId, variantId)` (gate de variante exacta),
-`SeedEntitlementsFromCatalog()` (siembra como **pet entero**),
-`EnsureActiveEntitlementOwned()`. El enum de estados de
-`CollectionModel` **NO** cambió; cada `CollectionVariant` gana un flag
-`owned`.
+`SeedEntitlementsFromCatalog()` (siembra la autorización EXPLÍCITA de
+cada entrada `initiallyOwned` — Frin siembra sus dos variantes),
+`ExpandHistoricalWholePetEntitlements()` (reconcilia un `{frin, ""}`
+legacy contra el catálogo -> `{frin, "male"} + {frin, "female"}`), y
+`ResolveOwnedActiveIdentity()` (resuelve el pet activo a uno REALMENTE
+autorizado, **sin otorgar nada** — reemplaza al viejo
+`EnsureActiveEntitlementOwned`). El enum de estados de `CollectionModel`
+**NO** cambió; cada `CollectionVariant` gana un flag `owned`.
 
 - **Frontera para Block 09 (onboarding / shop oculto)**: escribe
   `AppState::ownedEntitlements` con su propia lógica (una sola variante
@@ -405,10 +410,12 @@ en el runtime/UI (brief §10). Sin ruta de migración (es un artefacto de
 build); v2 ya no se acepta.
 
 - **`catalog::PetEntitlement { petId, variantId }`** — la autorización
-  genérica. `variantId == ""` = el **pet entero**; no vacío = **solo
-  esa variante**. `Covers()`, `CanonicalizePetEntitlements()` (orden +
-  dedup + subsunción, sin conocer el catálogo), `OwnsIdentity()`. Ver
-  `docs/PRODUCT_UI.md` §19.
+  genérica, MISMA forma y semántica de `variantId` que `PetIdentity`:
+  `""` = Nimvlet SIN variantes; no vacío = **solo esa variante**. NO
+  hay una autorización de "todas las variantes de un Nimvlet".
+  `Covers()` es **coincidencia exacta**; `CanonicalizePetEntitlements()`
+  = orden + dedup (sin subsunción — DEC-128), sin conocer el catálogo;
+  `OwnsIdentity()`. Ver `docs/PRODUCT_UI.md` §19.
 
 - **`catalog::ShopModel`** (puro) — `BuildShopModel(catalog, balance,
   entitlements)` produce una fila por pet lógico con al menos una
@@ -416,16 +423,25 @@ build); v2 ya no se acepta.
   entradas están `publiclyPurchasable: false` — brief §11). Cada
   `ShopItem` lleva `priceClicks`, `status`
   (`kAffordable`/`kInsufficientBalance`/`kOwned`), `clicksShort` y
-  `entitlementTarget` (`{petId, variantId}` de la entrada pública —
-  para Bunny/Nidir es `{petId, ""}`).
+  `entitlementTarget` (la IDENTIDAD `{petId, variantId}` de la entrada
+  pública — para Bunny/Nidir es `{petId, ""}`; la vista la emite como
+  `PurchaseRequest`).
 
-- **`catalog::EvaluatePurchase`** (puro, sin GUI) — la política de
-  compra: `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` /
-  `kNotPurchasable` (no público o precio 0) / `kInvalidTarget`. En
-  cualquier fallo el estado resultante == el de entrada (nunca parcial);
-  la resta solo corre tras `balance >= precio` → sin underflow. `src/app`
-  aplica el resultado de forma atómica (balance + propiedad en el mismo
-  `AppState`, un solo write — `docs/PERSISTENCE.md` §6, DEC-126).
+- **`catalog::EvaluatePurchase(catalog, PetIdentity target, ...)`**
+  (puro, sin GUI) — el objetivo es una IDENTIDAD de catálogo completa,
+  no un petId suelto (DEC-128): se resuelve contra una entrada EXACTA
+  (`PetCatalog::Find`) y se otorga la identidad de esa entrada. `{frin,
+  ""}` (comprar "todo Frin") -> `kInvalidTarget` (no hay tal entrada).
+  Un catálogo SINTÉTICO donde `frin/male` es público hace que la MISMA
+  política lo compre y otorgue `{frin, "male"}` — el seam para el shop
+  oculto de starters sin código futuro ni ramas por pet. Resultados:
+  `kSuccess` / `kAlreadyOwned` / `kInsufficientBalance` /
+  `kNotPurchasable` (la entrada existe pero no es pública, o precio 0) /
+  `kInvalidTarget`. En cualquier fallo el estado resultante == el de
+  entrada (nunca parcial); la resta solo corre tras `balance >= precio`
+  → sin underflow. `src/app` aplica el resultado de forma atómica
+  (balance + propiedad en el mismo `AppState`, un solo write —
+  `docs/PERSISTENCE.md` §6, DEC-126).
 
 - **Precios PROVISIONALES de QA/economía** (no balanceo final): Bunny
   120, Nidir 300. Frin `price_clicks: 0`, `publicly_purchasable:

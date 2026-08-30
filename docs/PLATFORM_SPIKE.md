@@ -722,3 +722,17 @@ generaron con `NIMVLETS_DEV_PRODUCT_SHOT` + los hooks
 `NIMVLETS_DEV_SECTION` / `NIMVLETS_DEV_SHOP_PET` / `NIMVLETS_DEV_SHOP_CONFIRM`
 / `NIMVLETS_DEV_BUY` contra un directorio de app-data aislado — mismo
 mecanismo de cómputo local que 06.2, sin captura de pantalla del SO.
+
+**Pasada de corrección de Block 07 (DEC-128).** Migración legacy de
+Frin a variantes explícitas, objetivo de compra data-driven
+(`EvaluatePurchase` toma una `PetIdentity`), y resolución del pet
+activo sin bypass de economía. Es enteramente lógica: **ningún dibujo
+del Product UI cambió** — las 8 capturas de Block 07 siguen siendo
+válidas — y `src/platform/*` no se tocó. Los dos checks nativos de
+macOS se re-corrieron: `nimvlets_macos_text_check` PASS,
+`nimvlets_macos_clickthrough_check` `ALL CHECKS PASSED (0 failures)`.
+Verificado además contra el binario real: instalación nueva siembra
+`{bunny,""} {frin,female} {frin,male}` (sin `{frin,""}`); un save v3
+con `ownedPetIds=[bunny,frin]` se reescribe a v4 con esas tres
+autorizaciones; un save v4 corrupto con `active=nidir, owned={bunny}`
+reabre en bunny con `owned` intacto (nidir NO se otorgó).
