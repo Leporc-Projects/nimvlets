@@ -7,6 +7,7 @@
 #include "ClickThroughPolicyTest.h"
 #include "CollectionLayoutTest.h"
 #include "CollectionModelTest.h"
+#include "EntitlementMigrationTest.h"
 #include "PetEntitlementTest.h"
 #include "PurchasePolicyTest.h"
 #include "ShopLayoutTest.h"
@@ -55,6 +56,7 @@ int main() {
     nimvlets::tests::RegisterPetCatalogLoaderTests(runner);
     nimvlets::tests::RegisterActivePetResolutionTests(runner);
     nimvlets::tests::RegisterPetEntitlementTests(runner);
+    nimvlets::tests::RegisterEntitlementMigrationTests(runner);
     nimvlets::tests::RegisterCollectionModelTests(runner);
     nimvlets::tests::RegisterCollectionLayoutTests(runner);
     nimvlets::tests::RegisterShopModelTests(runner);

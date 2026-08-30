@@ -57,9 +57,10 @@ PetCatalog MakeDevCatalog() {
 }
 
 CollectionModel DevModel(const std::string& activePetId, const std::string& activeVariant = "") {
-    // El owner tras la migración: Bunny + Frin como PET ENTERO (las dos
-    // variantes de Frin poseídas).
-    const Ents owned = {PetEntitlement{"bunny", ""}, PetEntitlement{"frin", ""}};
+    // El owner tras la migración: Bunny + las DOS variantes EXPLÍCITAS
+    // de Frin (no un {frin, ""} — DEC-128).
+    const Ents owned = {PetEntitlement{"bunny", ""}, PetEntitlement{"frin", "male"},
+                        PetEntitlement{"frin", "female"}};
     return BuildCollectionModel(MakeDevCatalog(), owned, PetIdentity{activePetId, activeVariant});
 }
 

@@ -18,32 +18,9 @@ const char* ToString(PurchaseResult result) {
     return "unknown";
 }
 
-namespace {
-
-// La entrada de catálogo pública de `petId`, o nullptr si el pet no
-// existe / no tiene ninguna entrada pública. `outAnyEntryForPet` se
-// marca si el petId aparece en el catálogo aunque sea sin ser público
-// — así el caller distingue "no comprable" de "no existe".
-const CatalogEntry* PublicEntryFor(
-    const PetCatalog& catalog, const std::string& petId, bool& outAnyEntryForPet) {
-    outAnyEntryForPet = false;
-    for (const CatalogEntry& entry : catalog.Entries()) {
-        if (entry.identity.petId != petId) {
-            continue;
-        }
-        outAnyEntryForPet = true;
-        if (entry.publiclyPurchasable) {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
-}  // namespace
-
 PurchaseOutcome EvaluatePurchase(
     const PetCatalog& catalog,
-    const std::string& petId,
+    const PetIdentity& target,
     std::uint64_t currentBalance,
     const std::vector<PetEntitlement>& currentEntitlements) {
     PurchaseOutcome out;
@@ -53,23 +30,28 @@ PurchaseOutcome EvaluatePurchase(
     out.newEntitlements = currentEntitlements;
     CanonicalizePetEntitlements(out.newEntitlements);
 
-    bool anyEntry = false;
-    const CatalogEntry* entry = PublicEntryFor(catalog, petId, anyEntry);
-    if (!anyEntry) {
+    // El objetivo se resuelve contra una entrada EXACTA del catálogo
+    // ({petId, variantId}). `{frin, ""}` (comprar "todo Frin") no calza
+    // con ninguna entrada -> kInvalidTarget, no hay un pet entero que
+    // comprar.
+    const CatalogEntry* entry = catalog.Find(target);
+    if (entry == nullptr) {
         out.result = PurchaseResult::kInvalidTarget;
         return out;
     }
-    if (entry == nullptr || entry->priceClicks == 0) {
-        // Sin entrada pública, o precio cero (no soportado — brief §26).
+    if (!entry->publiclyPurchasable || entry->priceClicks == 0) {
+        // La entrada existe pero no se vende en el Shop público, o su
+        // precio es 0 (no soportado — brief §26).
         out.result = PurchaseResult::kNotPurchasable;
         return out;
     }
 
     out.price = entry->priceClicks;
+    // Lo que se otorga es la identidad de la entrada resuelta (== target
+    // para una coincidencia exacta).
     out.grantedEntitlement = PetEntitlement{entry->identity.petId, entry->identity.variantId};
 
-    if (OwnsIdentity(currentEntitlements,
-                     PetIdentity{entry->identity.petId, entry->identity.variantId})) {
+    if (OwnsIdentity(currentEntitlements, target)) {
         out.result = PurchaseResult::kAlreadyOwned;
         return out;
     }

@@ -54,7 +54,7 @@ PetCatalog MakeShopCatalog() {
     return PetCatalog(std::move(e));
 }
 
-PetEntitlement Whole(const std::string& p) { return PetEntitlement{p, ""}; }
+PetEntitlement NoVar(const std::string& p) { return PetEntitlement{p, ""}; }  // Nimvlet sin variantes
 
 // Solo los pets públicamente comprables aparecen; Frin NUNCA (brief §11).
 bool TestOnlyPublicPetsAppearFrinAbsent() {
@@ -75,7 +75,7 @@ bool TestAffordableWhenBalanceCoversPrice() {
     NIMVLETS_CHECK(nidir->status == ShopItemStatus::kAffordable);
     NIMVLETS_CHECK(nidir->priceClicks == 300);
     NIMVLETS_CHECK(nidir->clicksShort == 0);
-    NIMVLETS_CHECK((nidir->entitlementTarget == Whole("nidir")));
+    NIMVLETS_CHECK((nidir->entitlementTarget == NoVar("nidir")));
     return true;
 }
 
@@ -90,7 +90,7 @@ bool TestInsufficientReportsShortfall() {
 
 bool TestOwnedPetShowsOwnedNoAction() {
     const PetCatalog cat = MakeShopCatalog();
-    const ShopModel model = BuildShopModel(cat, 1000, {Whole("bunny")});
+    const ShopModel model = BuildShopModel(cat, 1000, {NoVar("bunny")});
     const auto* bunny = model.Find("bunny");
     NIMVLETS_CHECK(bunny->status == ShopItemStatus::kOwned);
     NIMVLETS_CHECK(bunny->clicksShort == 0);
@@ -100,8 +100,8 @@ bool TestOwnedPetShowsOwnedNoAction() {
 // Determinista: mismas entradas -> mismo modelo.
 bool TestDeterministic() {
     const PetCatalog cat = MakeShopCatalog();
-    const ShopModel a = BuildShopModel(cat, 200, {Whole("bunny")});
-    const ShopModel b = BuildShopModel(cat, 200, {Whole("bunny")});
+    const ShopModel a = BuildShopModel(cat, 200, {NoVar("bunny")});
+    const ShopModel b = BuildShopModel(cat, 200, {NoVar("bunny")});
     NIMVLETS_CHECK(a.items.size() == b.items.size());
     for (std::size_t i = 0; i < a.items.size(); ++i) {
         NIMVLETS_CHECK(a.items[i].petId == b.items[i].petId);

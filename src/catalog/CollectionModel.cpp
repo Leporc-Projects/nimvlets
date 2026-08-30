@@ -124,34 +124,80 @@ bool CanActivate(const CollectionModel& model, const std::string& petId, const s
     return item->variants.front().owned || item->status == OwnershipStatus::kActive;
 }
 
-bool EnsureActiveEntitlementOwned(std::vector<PetEntitlement>& ents, const PetIdentity& active) {
-    if (active.petId.empty()) {
-        return false;
-    }
-    if (OwnsIdentity(ents, active)) {
-        // Ya cubierto — pero puede que `ents` venga sin canonicalizar
-        // (archivo hecho a mano, orden raro, duplicados). Reescribir a
-        // forma canónica también es un cambio que src/app debe persistir.
-        std::vector<PetEntitlement> canon = ents;
-        CanonicalizePetEntitlements(canon);
-        if (canon != ents) {
-            ents = std::move(canon);
+namespace {
+
+// ¿El catálogo tiene alguna entrada para `petId` con variantId no
+// vacío? (i.e. `petId` es un Nimvlet capaz de variantes.)
+bool PetIsVariantCapable(const PetCatalog& catalog, const std::string& petId) {
+    for (const CatalogEntry& entry : catalog.Entries()) {
+        if (entry.identity.petId == petId && !entry.identity.variantId.empty()) {
             return true;
         }
-        return false;
     }
-    ents.push_back(PetEntitlement{active.petId, active.variantId});
-    CanonicalizePetEntitlements(ents);
-    return true;
+    return false;
+}
+
+}  // namespace
+
+PetIdentity ResolveOwnedActiveIdentity(
+    const std::vector<PetEntitlement>& owned,
+    const PetCatalog& catalog,
+    const PetIdentity& wanted,
+    bool& outFellBack) {
+    outFellBack = false;
+    if (OwnsIdentity(owned, wanted)) {
+        return wanted;
+    }
+    // No autorizado -> elegir una identidad que SÍ lo esté. Nunca se
+    // otorga nada.
+    const PetIdentity defaultId = catalog.Default().identity;
+    if (OwnsIdentity(owned, defaultId)) {
+        outFellBack = (defaultId != wanted);
+        return defaultId;
+    }
+    for (const CatalogEntry& entry : catalog.Entries()) {
+        if (OwnsIdentity(owned, entry.identity)) {
+            outFellBack = (entry.identity != wanted);
+            return entry.identity;
+        }
+    }
+    // Degenerado: nada autorizado (solo alcanzable antes de la siembra).
+    // src/app siembra en ese caso; devolver `wanted` sin marcar fallback.
+    return wanted;
+}
+
+bool ExpandHistoricalWholePetEntitlements(
+    std::vector<PetEntitlement>& ents, const PetCatalog& catalog) {
+    const std::vector<PetEntitlement> before = ents;
+
+    std::vector<PetEntitlement> out;
+    out.reserve(ents.size());
+    for (const PetEntitlement& e : ents) {
+        if (!e.variantId.empty() || !PetIsVariantCapable(catalog, e.petId)) {
+            out.push_back(e);  // ya es explícita, o el pet no tiene variantes
+            continue;
+        }
+        // `{p, ""}` para un pet capaz de variantes -> expandir a cada
+        // variante del catálogo. NO se re-agrega el `{p, ""}`.
+        for (const CatalogEntry& entry : catalog.Entries()) {
+            if (entry.identity.petId == e.petId && !entry.identity.variantId.empty()) {
+                out.push_back(PetEntitlement{entry.identity.petId, entry.identity.variantId});
+            }
+        }
+    }
+    CanonicalizePetEntitlements(out);
+    ents = std::move(out);
+    return ents != before;
 }
 
 std::vector<PetEntitlement> SeedEntitlementsFromCatalog(const PetCatalog& catalog) {
     std::vector<PetEntitlement> seed;
     for (const CatalogEntry& entry : catalog.Entries()) {
         if (entry.initiallyOwned) {
-            // PET ENTERO, no la variante: un Frin sembrado da macho y
-            // hembra, igual que el `ownedPetIds` de Block 06.
-            seed.push_back(PetEntitlement{entry.identity.petId, std::string()});
+            // La autorización EXPLÍCITA de la entrada. Las dos entradas
+            // de Frin marcadas initiallyOwned siembran {frin, "male"} y
+            // {frin, "female"} — nunca un {frin, ""} de "todo Frin".
+            seed.push_back(PetEntitlement{entry.identity.petId, entry.identity.variantId});
         }
     }
     CanonicalizePetEntitlements(seed);

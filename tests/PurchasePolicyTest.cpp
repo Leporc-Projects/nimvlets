@@ -58,31 +58,75 @@ PetCatalog MakeShopCatalog() {
     return PetCatalog(std::move(e));
 }
 
-PetEntitlement Whole(const std::string& p) { return PetEntitlement{p, ""}; }
+// SINTÉTICO (no producto): un catálogo donde Frin/male SÍ es
+// públicamente comprable — para probar que la política procesa un
+// objetivo de variante concreta SIN ninguna rama `if (pet == "frin")`.
+// Frin NUNCA es público en el catálogo real de Block 07.
+PetCatalog MakeVariantShopCatalog() {
+    std::vector<CatalogEntry> e;
 
-bool TestSuccessDebitsExactPriceAndGrantsOnce() {
+    CatalogEntry bunny;
+    bunny.identity = PetIdentity{"bunny", ""};
+    bunny.displayName = "Bunny";
+    bunny.packPath = "b.nvpack";
+    bunny.isDefault = true;
+    bunny.priceClicks = 120;
+    bunny.publiclyPurchasable = true;
+    e.push_back(bunny);
+
+    CatalogEntry fm;
+    fm.identity = PetIdentity{"frin", "male"};
+    fm.displayName = "Frin";
+    fm.packPath = "fm.nvpack";
+    fm.priceClicks = 200;
+    fm.publiclyPurchasable = true;  // SOLO en este catálogo sintético
+    e.push_back(fm);
+
+    CatalogEntry ff;
+    ff.identity = PetIdentity{"frin", "female"};
+    ff.displayName = "Frin";
+    ff.packPath = "ff.nvpack";
+    e.push_back(ff);  // hembra sigue NO pública
+
+    return PetCatalog(std::move(e));
+}
+
+PetEntitlement NoVar(const std::string& p) { return PetEntitlement{p, ""}; }
+PetEntitlement Var(const std::string& p, const std::string& v) { return PetEntitlement{p, v}; }
+PetIdentity Id(const std::string& p, const std::string& v = "") { return PetIdentity{p, v}; }
+
+bool TestSuccessDebitsExactPriceAndGrantsCorrectTarget() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "nidir", 500, {Whole("bunny")});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("nidir"), 500, {NoVar("bunny")});
     NIMVLETS_CHECK(o.result == PurchaseResult::kSuccess);
     NIMVLETS_CHECK(o.price == 300);
     NIMVLETS_CHECK(o.newBalance == 200);  // 500 - 300 exacto
-    NIMVLETS_CHECK((o.newEntitlements == Ents{Whole("bunny"), Whole("nidir")}));
-    NIMVLETS_CHECK((o.grantedEntitlement == Whole("nidir")));
+    NIMVLETS_CHECK((o.grantedEntitlement == NoVar("nidir")));
+    NIMVLETS_CHECK((o.newEntitlements == Ents{NoVar("bunny"), NoVar("nidir")}));
+    return true;
+}
+
+bool TestBunnyGrantTargetIsCorrect() {
+    const PetCatalog cat = MakeShopCatalog();
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("bunny"), 1000, {});
+    NIMVLETS_CHECK(o.result == PurchaseResult::kSuccess);
+    NIMVLETS_CHECK((o.grantedEntitlement == NoVar("bunny")));
+    NIMVLETS_CHECK((o.newEntitlements == Ents{NoVar("bunny")}));
     return true;
 }
 
 bool TestExactPriceBalanceSucceedsToZero() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "nidir", 300, {});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("nidir"), 300, {});
     NIMVLETS_CHECK(o.result == PurchaseResult::kSuccess);
     NIMVLETS_CHECK(o.newBalance == 0);
-    NIMVLETS_CHECK((o.newEntitlements == Ents{Whole("nidir")}));
+    NIMVLETS_CHECK((o.newEntitlements == Ents{NoVar("nidir")}));
     return true;
 }
 
 bool TestOneClickShortIsInsufficient() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "nidir", 299, {});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("nidir"), 299, {});
     NIMVLETS_CHECK(o.result == PurchaseResult::kInsufficientBalance);
     NIMVLETS_CHECK(o.price == 300);
     NIMVLETS_CHECK(o.newBalance == 299);          // sin débito
@@ -92,7 +136,7 @@ bool TestOneClickShortIsInsufficient() {
 
 bool TestZeroBalanceIsInsufficient() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "bunny", 0, {});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("bunny"), 0, {});
     NIMVLETS_CHECK(o.result == PurchaseResult::kInsufficientBalance);
     NIMVLETS_CHECK(o.newBalance == 0);
     return true;
@@ -101,7 +145,7 @@ bool TestZeroBalanceIsInsufficient() {
 bool TestVeryLargeBalanceSucceedsWithoutOverflow() {
     const PetCatalog cat = MakeShopCatalog();
     const std::uint64_t huge = std::numeric_limits<std::uint64_t>::max();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "nidir", huge, {});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("nidir"), huge, {});
     NIMVLETS_CHECK(o.result == PurchaseResult::kSuccess);
     NIMVLETS_CHECK(o.newBalance == huge - 300);
     return true;
@@ -109,10 +153,10 @@ bool TestVeryLargeBalanceSucceedsWithoutOverflow() {
 
 bool TestAlreadyOwnedDoesNotDebit() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "bunny", 1000, {Whole("bunny")});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("bunny"), 1000, {NoVar("bunny")});
     NIMVLETS_CHECK(o.result == PurchaseResult::kAlreadyOwned);
     NIMVLETS_CHECK(o.newBalance == 1000);
-    NIMVLETS_CHECK((o.newEntitlements == Ents{Whole("bunny")}));
+    NIMVLETS_CHECK((o.newEntitlements == Ents{NoVar("bunny")}));
     return true;
 }
 
@@ -120,29 +164,71 @@ bool TestAlreadyOwnedDoesNotDebit() {
 // estado, la segunda evaluación da kAlreadyOwned sin débito.
 bool TestRepeatedPurchaseIsIdempotentAfterFirst() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome first = EvaluatePurchase(cat, "nidir", 400, {});
+    const PurchaseOutcome first = EvaluatePurchase(cat, Id("nidir"), 400, {});
     NIMVLETS_CHECK(first.result == PurchaseResult::kSuccess);
 
     const PurchaseOutcome second =
-        EvaluatePurchase(cat, "nidir", first.newBalance, first.newEntitlements);
+        EvaluatePurchase(cat, Id("nidir"), first.newBalance, first.newEntitlements);
     NIMVLETS_CHECK(second.result == PurchaseResult::kAlreadyOwned);
     NIMVLETS_CHECK(second.newBalance == first.newBalance);  // sin doble débito
     return true;
 }
 
-bool TestFrinIsNotPubliclyPurchasable() {
+// Frin no es público en el catálogo real: la entrada {frin, "male"}
+// existe -> kNotPurchasable (no kInvalidTarget). Y {frin, ""} (comprar
+// "todo Frin") no calza con ninguna entrada -> kInvalidTarget.
+bool TestFrinTargetsRejected() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "frin", 100000, {});
-    NIMVLETS_CHECK(o.result == PurchaseResult::kNotPurchasable);
-    NIMVLETS_CHECK(o.newBalance == 100000);
-    NIMVLETS_CHECK(o.newEntitlements.empty());
+
+    const PurchaseOutcome maleReal = EvaluatePurchase(cat, Id("frin", "male"), 100000, {});
+    NIMVLETS_CHECK(maleReal.result == PurchaseResult::kNotPurchasable);
+    NIMVLETS_CHECK(maleReal.newBalance == 100000);
+    NIMVLETS_CHECK(maleReal.newEntitlements.empty());
+
+    const PurchaseOutcome bareWhole = EvaluatePurchase(cat, Id("frin", ""), 100000, {});
+    NIMVLETS_CHECK(bareWhole.result == PurchaseResult::kInvalidTarget);
+    NIMVLETS_CHECK(bareWhole.newBalance == 100000);
+    return true;
+}
+
+// El seam data-driven: en un catálogo SINTÉTICO donde Frin/male SÍ es
+// público, la MISMA política lo compra y otorga {frin, "male"} — sin
+// tocar {frin, "female"} ni {frin, ""}. Ninguna rama por pet.
+bool TestVariantSpecificTargetInSyntheticCatalog() {
+    const PetCatalog cat = MakeVariantShopCatalog();
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("frin", "male"), 500, {NoVar("bunny")});
+    NIMVLETS_CHECK(o.result == PurchaseResult::kSuccess);
+    NIMVLETS_CHECK(o.price == 200);
+    NIMVLETS_CHECK(o.newBalance == 300);
+    NIMVLETS_CHECK((o.grantedEntitlement == Var("frin", "male")));
+    NIMVLETS_CHECK((o.newEntitlements == Ents{NoVar("bunny"), Var("frin", "male")}));
+    // Hembra NO se otorgó, y NO hay un {frin, ""}.
+    for (const auto& en : o.newEntitlements) {
+        NIMVLETS_CHECK(!(en.petId == "frin" && en.variantId == "female"));
+        NIMVLETS_CHECK(!(en.petId == "frin" && en.variantId.empty()));
+    }
+
+    // Repetir tras aplicar -> kAlreadyOwned, sin débito.
+    const PurchaseOutcome again =
+        EvaluatePurchase(cat, Id("frin", "male"), o.newBalance, o.newEntitlements);
+    NIMVLETS_CHECK(again.result == PurchaseResult::kAlreadyOwned);
+    NIMVLETS_CHECK(again.newBalance == o.newBalance);
+
+    // La hembra sigue sin ser comprable (su entrada no es pública).
+    const PurchaseOutcome female =
+        EvaluatePurchase(cat, Id("frin", "female"), 999, o.newEntitlements);
+    NIMVLETS_CHECK(female.result == PurchaseResult::kNotPurchasable);
     return true;
 }
 
 bool TestUnknownTargetIsInvalid() {
     const PetCatalog cat = MakeShopCatalog();
-    const PurchaseOutcome o = EvaluatePurchase(cat, "ghost", 100000, {});
-    NIMVLETS_CHECK(o.result == PurchaseResult::kInvalidTarget);
+    NIMVLETS_CHECK(EvaluatePurchase(cat, Id("ghost"), 100000, {}).result == PurchaseResult::kInvalidTarget);
+    // Malformado: identidad con petId vacío.
+    NIMVLETS_CHECK(EvaluatePurchase(cat, Id("", ""), 100000, {}).result == PurchaseResult::kInvalidTarget);
+    // petId real pero variante inexistente.
+    NIMVLETS_CHECK(EvaluatePurchase(cat, Id("nidir", "ghost"), 100000, {}).result ==
+                   PurchaseResult::kInvalidTarget);
     return true;
 }
 
@@ -161,7 +247,7 @@ bool TestZeroPriceIsRejected() {
     e.push_back(p);
     const PetCatalog cat(std::move(e));
 
-    const PurchaseOutcome o = EvaluatePurchase(cat, "freebie", 10, {});
+    const PurchaseOutcome o = EvaluatePurchase(cat, Id("freebie"), 10, {});
     NIMVLETS_CHECK(o.result == PurchaseResult::kNotPurchasable);
     return true;
 }
@@ -169,13 +255,14 @@ bool TestZeroPriceIsRejected() {
 // Ningún camino de fallo muta el estado (ni parcialmente).
 bool TestNoPartialMutationOnAnyFailure() {
     const PetCatalog cat = MakeShopCatalog();
-    const Ents start = {Whole("bunny")};
-    for (const char* pet : {"nidir", "frin", "ghost", "bunny"}) {
-        // nidir: insuficiente; frin: no público; ghost: inválido; bunny: ya poseído.
-        const std::uint64_t bal = (std::string(pet) == "nidir") ? 10 : 10;
-        const PurchaseOutcome o = EvaluatePurchase(cat, pet, bal, start);
+    const Ents start = {NoVar("bunny")};
+    // nidir: insuficiente; frin/male: no público; ghost: inválido;
+    // frin/"": inválido; bunny: ya poseído.
+    for (const PetIdentity& t :
+         {Id("nidir"), Id("frin", "male"), Id("ghost"), Id("frin", ""), Id("bunny")}) {
+        const PurchaseOutcome o = EvaluatePurchase(cat, t, 10, start);
         NIMVLETS_CHECK(o.result != PurchaseResult::kSuccess);
-        NIMVLETS_CHECK(o.newBalance == bal);
+        NIMVLETS_CHECK(o.newBalance == 10);
         NIMVLETS_CHECK((o.newEntitlements == start));
     }
     return true;
@@ -184,14 +271,17 @@ bool TestNoPartialMutationOnAnyFailure() {
 }  // namespace
 
 void RegisterPurchasePolicyTests(testing::TestRunner& runner) {
-    runner.Add("PurchasePolicy/SuccessDebitsExactPriceAndGrantsOnce", TestSuccessDebitsExactPriceAndGrantsOnce);
+    runner.Add("PurchasePolicy/SuccessDebitsExactPriceAndGrantsCorrectTarget",
+               TestSuccessDebitsExactPriceAndGrantsCorrectTarget);
+    runner.Add("PurchasePolicy/BunnyGrantTargetIsCorrect", TestBunnyGrantTargetIsCorrect);
     runner.Add("PurchasePolicy/ExactPriceBalanceSucceedsToZero", TestExactPriceBalanceSucceedsToZero);
     runner.Add("PurchasePolicy/OneClickShortIsInsufficient", TestOneClickShortIsInsufficient);
     runner.Add("PurchasePolicy/ZeroBalanceIsInsufficient", TestZeroBalanceIsInsufficient);
     runner.Add("PurchasePolicy/VeryLargeBalanceSucceedsWithoutOverflow", TestVeryLargeBalanceSucceedsWithoutOverflow);
     runner.Add("PurchasePolicy/AlreadyOwnedDoesNotDebit", TestAlreadyOwnedDoesNotDebit);
     runner.Add("PurchasePolicy/RepeatedPurchaseIsIdempotentAfterFirst", TestRepeatedPurchaseIsIdempotentAfterFirst);
-    runner.Add("PurchasePolicy/FrinIsNotPubliclyPurchasable", TestFrinIsNotPubliclyPurchasable);
+    runner.Add("PurchasePolicy/FrinTargetsRejected", TestFrinTargetsRejected);
+    runner.Add("PurchasePolicy/VariantSpecificTargetInSyntheticCatalog", TestVariantSpecificTargetInSyntheticCatalog);
     runner.Add("PurchasePolicy/UnknownTargetIsInvalid", TestUnknownTargetIsInvalid);
     runner.Add("PurchasePolicy/ZeroPriceIsRejected", TestZeroPriceIsRejected);
     runner.Add("PurchasePolicy/NoPartialMutationOnAnyFailure", TestNoPartialMutationOnAnyFailure);

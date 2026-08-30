@@ -84,15 +84,15 @@ struct CollectionModel {
 
     // La fila con status kActive, o nullptr si el modelo está mal
     // formado (nunca debería pasar con un catálogo válido — el pet
-    // activo/variante siempre es propio, ver EnsureActiveEntitlementOwned).
+    // activo/variante siempre es propio, ver ResolveOwnedActiveIdentity).
     const CollectionItem* Active() const;
 };
 
 // Construye el modelo. `owned` puede venir en cualquier orden y con
 // duplicados. `activeId` es la identidad que el runtime tiene realmente
 // activa. Determinista y puro. NO impone el invariante "el activo es
-// propio" — para eso ver EnsureActiveEntitlementOwned, que src/app llama
-// antes, al resolver el arranque.
+// propio" — para eso ver ResolveOwnedActiveIdentity, que src/app usa al
+// resolver el arranque.
 CollectionModel BuildCollectionModel(
     const PetCatalog& catalog,
     const std::vector<PetEntitlement>& owned,
@@ -106,21 +106,56 @@ CollectionModel BuildCollectionModel(
 // TAMPOCO (brief §6: "it must not be activatable").
 bool CanActivate(const CollectionModel& model, const std::string& petId, const std::string& variantId = "");
 
-// Invariante "el pet/variante activo siempre es propio" (brief §5).
-// Si `active` no está cubierto por `ents`, agrega la autorización
-// EXACTA de esa identidad ({petId, variantId}); canonicaliza. Devuelve
-// true si tuvo que cambiar algo. No-op si `active.petId` está vacío.
-// src/app lo llama al resolver el pet de arranque y tras cada switch,
-// ANTES de construir el modelo.
-bool EnsureActiveEntitlementOwned(std::vector<PetEntitlement>& ents, const PetIdentity& active);
+// Devuelve una identidad que el owner REALMENTE tiene autorizada, para
+// poner en el escritorio al arrancar — SIN otorgar nada. Ya que la
+// propiedad es un entitlement pagado, cargar el estado no puede
+// fabricar propiedad solo porque una identidad no autorizada aparezca
+// como activa (p. ej. un archivo de estado corrupto/editado a mano con
+// `active = nidir, owned = {bunny}` NO debe volverse `owned = bunny +
+// nidir`). En cambio:
+//   - si `wanted` está autorizado -> `wanted` sin cambios;
+//   - si no -> el default del catálogo si está autorizado; si no, la
+//     primera entrada del catálogo (en orden) cuya identidad esté
+//     autorizada; si NADA está autorizado (estado degenerado, solo
+//     alcanzable antes de la siembra) -> `wanted` sin cambios.
+// `outFellBack` queda en true si el resultado != `wanted`. Determinista
+// y puro. src/app repara `AppState::activePetId/activeVariantId` y
+// marca dirty cuando `outFellBack` (salvo en una selección solo-DEV
+// transitoria). Ver DEC-128.
+PetIdentity ResolveOwnedActiveIdentity(
+    const std::vector<PetEntitlement>& owned,
+    const PetCatalog& catalog,
+    const PetIdentity& wanted,
+    bool& outFellBack);
+
+// Reconcilia autorizaciones "históricas de pet entero" ({p, ""}) contra
+// el catálogo: si `p` es un Nimvlet CAPAZ DE VARIANTES (el catálogo
+// tiene >= 1 entrada para `p` con variantId no vacío), reemplaza cada
+// `{p, ""}` por las autorizaciones EXPLÍCITAS de cada variante que el
+// catálogo define para `p`. Un Nimvlet sin variantes ({p} tiene una
+// sola entrada de catálogo con variantId "") deja su `{p, ""}` igual.
+// Canonicaliza el resultado. Idempotente, determinista, sin ramas por
+// pet.
+//
+// Es el paso que src/app corre tras cargar el catálogo: un `ownedPetIds`
+// "frin" de un save v1/v2/v3 se parsea PROVISIONALMENTE a `{frin, ""}`
+// (el serializer no tiene catálogo — ver docs/PERSISTENCE.md §3) y acá
+// se expande a `{frin, "male"} + {frin, "female"}` — las variantes que
+// Block 06 realmente exponía, NO "toda variante futura de Frin"
+// (brief §5, DEC-128). Devuelve true si cambió algo (src/app marca
+// dirty para reescribir el save como v4 limpio).
+bool ExpandHistoricalWholePetEntitlements(
+    std::vector<PetEntitlement>& ents, const PetCatalog& catalog);
 
 // La semilla de propiedad de desarrollo/default: por cada entrada
-// `initiallyOwned` del catálogo, una autorización de PET ENTERO
-// ({petId, ""}) — así un Frin sembrado da acceso a macho y hembra,
-// exactamente como el `ownedPetIds` de Block 06 (brief §5).
-// Canonicalizada. src/app la usa SOLO cuando
-// AppState::ownershipSeeded todavía es false. Un bloque futuro de
-// onboarding (Block 09) la reemplaza sin tocar el catálogo.
+// `initiallyOwned` del catálogo, la autorización EXPLÍCITA de esa
+// entrada ({petId, variantId}). El manifest de dev marca las DOS
+// entradas de Frin, así que la semilla otorga `{frin, "male"}` y
+// `{frin, "female"}` — NO un `{frin, ""}` de "todo Frin" (DEC-128).
+// Canonicalizada. src/app la usa SOLO cuando AppState::ownershipSeeded
+// todavía es false (o el conjunto quedó vacío por corrupción). Un
+// bloque futuro de onboarding (Block 09) la reemplaza sin tocar el
+// catálogo.
 std::vector<PetEntitlement> SeedEntitlementsFromCatalog(const PetCatalog& catalog);
 
 }  // namespace nimvlets::catalog

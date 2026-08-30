@@ -9,27 +9,13 @@ void CanonicalizePetEntitlements(std::vector<PetEntitlement>& ents) {
     ents.erase(std::remove_if(ents.begin(), ents.end(),
                               [](const PetEntitlement& e) { return e.petId.empty(); }),
                ents.end());
-    // 2. ordenar — operator< pone (p, "") antes que cualquier (p, <var>).
+    // 2. ordenar por (petId, variantId).
     std::sort(ents.begin(), ents.end());
     // 3. duplicados exactos.
     ents.erase(std::unique(ents.begin(), ents.end()), ents.end());
-    // 4. subsunción: recorrido lineal; recordar el último petId que trajo
-    //    una autorización de "pet entero" y saltar sus variantes concretas.
-    std::vector<PetEntitlement> out;
-    out.reserve(ents.size());
-    std::string wholePetId;  // petId cuyo (p, "") ya se agregó
-    bool haveWholePet = false;
-    for (const PetEntitlement& e : ents) {
-        if (haveWholePet && e.petId == wholePetId && !e.variantId.empty()) {
-            continue;  // ya cubierta por (wholePetId, "")
-        }
-        if (e.variantId.empty()) {
-            wholePetId = e.petId;
-            haveWholePet = true;
-        }
-        out.push_back(e);
-    }
-    ents = std::move(out);
+    // Sin subsunción: `{frin, ""}` y `{frin, "male"}` conviven. Un
+    // `{frin, ""}` legacy se expande contra el catálogo en src/app
+    // ANTES de que esto lo vea (DEC-128).
 }
 
 bool OwnsIdentity(const std::vector<PetEntitlement>& ents, const PetIdentity& identity) {

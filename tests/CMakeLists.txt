@@ -51,6 +51,8 @@ add_executable(nimvlets_tests
   ClickThroughPolicyTest.cpp
   PetEntitlementTest.h
   PetEntitlementTest.cpp
+  EntitlementMigrationTest.h
+  EntitlementMigrationTest.cpp
   CollectionModelTest.h
   CollectionModelTest.cpp
   CollectionLayoutTest.h

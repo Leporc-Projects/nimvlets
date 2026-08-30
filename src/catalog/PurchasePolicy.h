@@ -6,6 +6,7 @@
 
 #include "catalog/PetCatalog.h"
 #include "catalog/PetEntitlement.h"
+#include "catalog/PetIdentity.h"
 
 namespace nimvlets::catalog {
 
@@ -16,16 +17,23 @@ namespace nimvlets::catalog {
 // propiedad en el mismo AppState, un solo write) si es kSuccess — ver
 // SpikeApp::HandlePurchaseRequest y docs/PERSISTENCE.md.
 //
+// El OBJETIVO de compra es una `PetIdentity` completa ({petId,
+// variantId}), NO un petId suelto — así una compra por variante (shop
+// oculto de starters, futuro: `{frin, "male"}`) encaja en la misma
+// política sin ninguna rama `if (pet == "frin")` (brief §10, DEC-128).
+// El objetivo se resuelve contra una entrada EXACTA del catálogo; lo
+// que se otorga es la identidad de esa entrada.
+//
 // Clicks son la única moneda (AGENTS.md §2): comprar consume balance,
 // la propiedad es permanente, cambiar de contenido ya poseído es gratis
 // (eso lo maneja el switch de runtime, no esta política).
 
 enum class PurchaseResult {
     kSuccess,
-    kAlreadyOwned,          // la autorización objetivo ya está cubierta
+    kAlreadyOwned,          // la identidad objetivo ya está autorizada
     kInsufficientBalance,   // balance < precio
-    kNotPurchasable,        // el pet no es público, o su precio es 0
-    kInvalidTarget,         // `petId` no está en el catálogo en absoluto
+    kNotPurchasable,        // la entrada existe pero no es pública, o precio 0
+    kInvalidTarget,         // no hay ninguna entrada de catálogo con esa identidad exacta
 };
 
 const char* ToString(PurchaseResult result);
@@ -50,13 +58,15 @@ struct PurchaseOutcome {
     std::vector<PetEntitlement> newEntitlements;
 };
 
-// Evalúa comprar el pet lógico `petId` (el Shop compra por pet, no por
-// variante en Block 07). Determinista. Nunca puede producir un balance
-// negativo ni un underflow: la resta solo ocurre tras verificar
-// balance >= precio (brief §26).
+// Evalúa comprar la identidad `target` ({petId, variantId}). En Block 07
+// el Shop solo ofrece pets sin variantes, así que `target.variantId`
+// siempre viene "" — pero la política ya procesa `{frin, "male"}` en un
+// catálogo sintético (ver PurchasePolicyTest), sin hard-coding.
+// Determinista. Nunca produce un balance negativo ni un underflow: la
+// resta solo ocurre tras verificar balance >= precio (brief §26).
 PurchaseOutcome EvaluatePurchase(
     const PetCatalog& catalog,
-    const std::string& petId,
+    const PetIdentity& target,
     std::uint64_t currentBalance,
     const std::vector<PetEntitlement>& currentEntitlements);
 
