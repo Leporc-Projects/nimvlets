@@ -8,7 +8,13 @@ PetCatalog::PetCatalog(std::vector<CatalogEntry> entries)
     : PetCatalog(std::move(entries), /*productionOnboardingReady=*/false) {}
 
 PetCatalog::PetCatalog(std::vector<CatalogEntry> entries, bool productionOnboardingReady)
-    : entries_(std::move(entries)), productionOnboardingReady_(productionOnboardingReady) {
+    : PetCatalog(std::move(entries), productionOnboardingReady, /*devSyntheticOnboarding=*/false) {}
+
+PetCatalog::PetCatalog(
+    std::vector<CatalogEntry> entries, bool productionOnboardingReady, bool devSyntheticOnboarding)
+    : entries_(std::move(entries)),
+      productionOnboardingReady_(productionOnboardingReady),
+      devSyntheticOnboarding_(devSyntheticOnboarding) {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         if (entries_[i].isDefault) {
             defaultIndex_ = i;

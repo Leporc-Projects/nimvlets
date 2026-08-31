@@ -1,6 +1,8 @@
 #include "catalog/OnboardingPolicy.h"
 
 #include <algorithm>
+#include <set>
+#include <string>
 
 namespace nimvlets::catalog {
 
@@ -125,13 +127,17 @@ OnboardingGrant EvaluateOnboardingSelection(
 // --- Gate de contenido listo ------------------------------------
 
 std::size_t CountNormalStarters(const PetCatalog& catalog) {
-    std::size_t n = 0;
+    // Cuenta IDENTIDADES LÓGICAS distintas, no filas: filas duplicadas
+    // o variantes de un mismo Nimvlet no inflan la tríada (DEC-133). Un
+    // starter normal no lleva variante (lo garantizan el compilador y
+    // el loader), así que su identidad lógica es su petId.
+    std::set<std::string> distinct;
     for (const CatalogEntry& entry : catalog.Entries()) {
         if (entry.starterRole == StarterRole::kNormal) {
-            ++n;
+            distinct.insert(entry.identity.petId);
         }
     }
-    return n;
+    return distinct.size();
 }
 
 OnboardingReadiness EvaluateOnboardingReadiness(

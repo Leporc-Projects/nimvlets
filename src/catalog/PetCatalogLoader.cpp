@@ -114,11 +114,30 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
     }
     const bool productionOnboardingReady = productionOnboardingReadyByte != 0;
 
+    // v5 (Block 09A, pasada de endurecimiento): el marcador del catálogo
+    // sintético del harness solo-DEV, tras `productionOnboardingReady`.
+    std::uint8_t devSyntheticOnboardingByte = 0;
+    if (!reader.ReadUint8(devSyntheticOnboardingByte)) {
+        outError = reader.Error();
+        return false;
+    }
+    const bool devSyntheticOnboarding = devSyntheticOnboardingByte != 0;
+
+    // Mutuamente excluyentes: un catálogo o afirma contenido de starter
+    // de producción real, o se declara sintético-DEV (packs/previews
+    // alias), nunca ambos (DEC-133). El compilador Python ya lo rechaza;
+    // esto es defensa contra un `.nvcat` hecho a mano.
+    if (productionOnboardingReady && devSyntheticOnboarding) {
+        outError = "catalog marks both productionOnboardingReady and devSyntheticOnboarding; "
+                   "they are mutually exclusive";
+        return false;
+    }
+
     std::vector<CatalogEntry> entries;
     entries.reserve(entryCount);
     std::set<std::pair<std::string, std::string>> seenIdentities;
+    std::set<std::string> distinctNormalStarterPetIds;
     std::uint32_t defaultCount = 0;
-    std::size_t normalStarterCount = 0;
 
     for (std::uint32_t i = 0; i < entryCount; ++i) {
         CatalogEntry entry;
@@ -144,7 +163,17 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
         }
         entry.starterRole = static_cast<StarterRole>(starterRoleByte);
         if (entry.starterRole == StarterRole::kNormal) {
-            ++normalStarterCount;
+            // Un starter NORMAL es un Nimvlet lógico ENTERO: no lleva
+            // variante, así dos variantes del mismo pet nunca cuentan
+            // como dos candidatos de la tríada (DEC-133). El secreto
+            // (Frin) sí lleva variante y se cuenta aparte.
+            if (!entry.identity.variantId.empty()) {
+                outError = "catalog entry " + std::to_string(i) + " ('" + entry.identity.petId +
+                           "'): a normal starter must not carry a variant id ('" +
+                           entry.identity.variantId + "')";
+                return false;
+            }
+            distinctNormalStarterPetIds.insert(entry.identity.petId);
         }
 
         if (entry.identity.petId.empty()) {
@@ -184,20 +213,29 @@ bool LoadCatalogFromMemory(const std::uint8_t* data, std::size_t size, PetCatalo
         return false;
     }
 
-    // Defensa en profundidad (brief §8/§30): un `.nvcat` hecho a mano no
-    // puede afirmar `productionOnboardingReady` sin la tríada de starters
-    // normales. El chequeo de que el CONTENIDO de cada starter (pack +
-    // .nvprev) existe en disco lo hace tools/compile_pet_catalog.py al
-    // compilar — el runtime confía en el datum ya validado y solo
-    // re-verifica el conteo.
-    if (productionOnboardingReady && normalStarterCount < kRequiredNormalStarterCount) {
-        outError = "catalog marks production onboarding ready but has only " +
-                   std::to_string(normalStarterCount) + " normal starter(s); need " +
+    // Defensa en profundidad (brief de la pasada de endurecimiento
+    // §9 — DEC-133): un `.nvcat` hecho a mano no puede afirmar onboarding
+    // (de producción o sintético-DEV) sin >= 3 IDENTIDADES LÓGICAS
+    // distintas de starter normal. Lo que el loader NO hace acá es
+    // reabrir los `.nvpack` de decenas de MB para verificar la
+    // identidad EMBEBIDA de cada starter contra su entrada de catálogo:
+    // el `.nvcat` no lleva esa metadata, y "el runtime no debe cargar
+    // todos los packs al arranque" (§9). Esa coincidencia de identidad
+    // es una garantía de TIEMPO DE COMPILACIÓN
+    // (tools/compile_pet_catalog.py, `_validate_starter_content`); el
+    // runtime confía en el `productionOnboardingReady` ya validado y
+    // re-verifica la parte estructural barata.
+    if ((productionOnboardingReady || devSyntheticOnboarding) &&
+        distinctNormalStarterPetIds.size() < kRequiredNormalStarterCount) {
+        outError = std::string("catalog marks ") +
+                   (productionOnboardingReady ? "production" : "dev-synthetic") +
+                   " onboarding but has only " + std::to_string(distinctNormalStarterPetIds.size()) +
+                   " distinct logical normal starter(s); need " +
                    std::to_string(kRequiredNormalStarterCount);
         return false;
     }
 
-    outCatalog = PetCatalog(std::move(entries), productionOnboardingReady);
+    outCatalog = PetCatalog(std::move(entries), productionOnboardingReady, devSyntheticOnboarding);
     return true;
 }
 

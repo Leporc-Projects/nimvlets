@@ -128,7 +128,9 @@ struct OnboardingReadiness {
 // La metadata del SECRETO sola nunca arma nada (brief §30).
 OnboardingReadiness EvaluateOnboardingReadiness(bool manifestProductionReady, std::size_t normalStarterCount);
 
-// # de entradas StarterRole::kNormal de un catálogo.
+// # de IDENTIDADES LÓGICAS distintas con StarterRole::kNormal en un
+// catálogo (petId distinto; filas duplicadas o variantes de un mismo
+// Nimvlet no inflan el conteo — DEC-133).
 std::size_t CountNormalStarters(const PetCatalog& catalog);
 
 // Atajo: EvaluateOnboardingReadiness a partir de un catálogo entero.

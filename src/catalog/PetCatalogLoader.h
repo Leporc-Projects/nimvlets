@@ -26,7 +26,16 @@ namespace nimvlets::catalog {
 //   catálogo — el datum que arma el onboarding de producción — y un
 //   `starterRole` (u8) por entrada (0=none / 1=normal / 2=secret). Ver
 //   docs/ONBOARDING.md y DEC-132.
-constexpr std::uint32_t kCurrentCatalogSchemaVersion = 4;
+// v5 (Block 09A, pasada de endurecimiento): agrega un
+//   `devSyntheticOnboarding` (u8) a nivel de catálogo, tras
+//   `productionOnboardingReady` — el marcador del catálogo sintético
+//   del harness solo-DEV, mutuamente excluyente con
+//   `productionOnboardingReady`. La coincidencia de identidad
+//   pack/preview de cada starter de producción es una garantía de
+//   TIEMPO DE COMPILACIÓN (tools/compile_pet_catalog.py); el loader no
+//   reabre packs de decenas de MB — ver LoadCatalogFromMemory y
+//   DEC-133.
+constexpr std::uint32_t kCurrentCatalogSchemaVersion = 5;
 
 // Parsea un catálogo compilado (ver tools/compile_pet_catalog.py para
 // el productor) desde un buffer de bytes en memoria. Parseo puro — sin

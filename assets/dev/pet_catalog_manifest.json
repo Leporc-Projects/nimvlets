@@ -1,6 +1,7 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "production_onboarding_ready": false,
+  "dev_synthetic_onboarding": false,
   "entries": [
     {
       "pet_id": "bunny",

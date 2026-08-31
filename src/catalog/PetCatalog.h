@@ -121,6 +121,13 @@ class PetCatalog {
 
     explicit PetCatalog(std::vector<CatalogEntry> entries, bool productionOnboardingReady);
 
+    // 3-arg (Block 09A, pasada de endurecimiento — DEC-133): agrega el
+    // marcador de catálogo SINTÉTICO-DEV. Lo usa PetCatalogLoader; los
+    // tests que solo necesitan `productionOnboardingReady` siguen usando
+    // el ctor de 2 argumentos.
+    explicit PetCatalog(
+        std::vector<CatalogEntry> entries, bool productionOnboardingReady, bool devSyntheticOnboarding);
+
     // nullptr si `identity` no aparece en el catálogo.
     const CatalogEntry* Find(const PetIdentity& identity) const;
 
@@ -141,10 +148,22 @@ class PetCatalog {
     // (pack + .nvprev) en disco. Ver docs/ONBOARDING.md y DEC-132.
     bool ProductionOnboardingReady() const { return productionOnboardingReady_; }
 
+    // true SOLO en el catálogo sintético del harness solo-DEV
+    // (`assets/dev/onboarding_dev_catalog.nvcat`) — descriptores con
+    // packs/previews ALIAS de otros Nimvlets, para ejercitar la máquina
+    // de estados/UI de onboarding antes de que exista contenido de
+    // Artu/Rato/Rin Rin. MUTUAMENTE EXCLUYENTE con
+    // `productionOnboardingReady` (el compilador y el loader rechazan
+    // ambos en true). `src/app` exige este byte para forzar el gate DEV,
+    // así un alias nunca alcanza el camino de producción (DEC-133). El
+    // catálogo de producción real lo tiene en false.
+    bool DevSyntheticOnboarding() const { return devSyntheticOnboarding_; }
+
  private:
     std::vector<CatalogEntry> entries_;
     std::size_t defaultIndex_ = 0;
     bool productionOnboardingReady_ = false;
+    bool devSyntheticOnboarding_ = false;
 };
 
 }  // namespace nimvlets::catalog

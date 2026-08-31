@@ -786,12 +786,25 @@ void SpikeApp::ResolveOnboarding(bool saveFileExisted) {
         appState_.onboardingLifecycle == persistence::OnboardingLifecycle::kPending;
 
     if (devOnboarding) {
-        // El harness DEV fuerza el gate mientras el lifecycle sea
-        // kPending (un dir de app-data aislado y fresco -> kPending por
-        // default; un run previo incompleto sigue en kPending y se
-        // re-entra). Un onboarding COMPLETADO lo detiene.
-        onboardingActive_ = pending;
-        if (!onboardingActive_) {
+        // El harness DEV fuerza el gate SOLO si el catálogo cargado se
+        // declaró SINTÉTICO-DEV al compilarse (packs/previews ALIAS de
+        // otros Nimvlets — `dev_synthetic_onboarding` en el manifest) y
+        // el lifecycle sigue en kPending (un dir de app-data aislado y
+        // fresco -> kPending; un run previo incompleto se re-entra; un
+        // onboarding COMPLETADO lo detiene). Exigir el marcador
+        // sintético mantiene la separación limpia con el camino de
+        // producción: un alias nunca llega ahí, y un catálogo REAL bajo
+        // NIMVLETS_DEV_ONBOARDING no se fuerza a un onboarding cuyo
+        // contenido no coincide con la identidad de los starters
+        // (DEC-133).
+        const bool syntheticCatalog = catalog_.DevSyntheticOnboarding();
+        onboardingActive_ = syntheticCatalog && pending;
+        if (!syntheticCatalog) {
+            SDL_Log(
+                "nimvlets: %s set but the loaded catalog is not a dev-synthetic onboarding "
+                "catalog (dev_synthetic_onboarding=0); not forcing the onboarding gate",
+                kDevOnboardingEnvVar);
+        } else if (!onboardingActive_) {
             SDL_Log("nimvlets: %s set but onboarding already completed (lifecycle != pending); normal startup",
                     kDevOnboardingEnvVar);
         }

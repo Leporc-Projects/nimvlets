@@ -112,6 +112,39 @@ def _read_weighted_actions(reader: _Reader) -> list[dict]:
     return actions
 
 
+def read_pack_header(path: str) -> dict:
+    """Solo la cabecera de identidad/procedencia de un "NVPACK2", sin
+    decodificar ni un frame — id, display_name, variant_group,
+    canvas, alpha_hit_threshold, visual_scale, content_version.
+
+    Existe (Block 09A, pasada de endurecimiento del gate de contenido)
+    para que tools/compile_pet_catalog.py pueda verificar que el pack de
+    un starter de producción REALMENTE pertenece a esa identidad de
+    catálogo sin leer los ~76 MB de píxeles del pack completo. El layout
+    de la cabecera es idéntico al que parsea `read_pack()` y
+    `src/content/PetPackLoader.cpp`."""
+    with open(path, "rb") as f:
+        # La cabecera son unos pocos cientos de bytes; 4 KiB sobra y no
+        # depende de cuántos estados/frames tenga el pack.
+        head = f.read(4096)
+    reader = _Reader(head)
+
+    magic = reader.raw(len(MAGIC))
+    if magic != MAGIC:
+        raise PackReadError(f"{path}: not an NVPACK2 file (magic was {magic!r})")
+
+    return {
+        "id": reader.string(),
+        "display_name": reader.string(),
+        "variant_group": reader.string(),
+        "canvas_width": reader.u32(),
+        "canvas_height": reader.u32(),
+        "alpha_hit_threshold": reader.u8(),
+        "visual_scale": reader.f64(),
+        "content_version": reader.string(),
+    }
+
+
 def read_pack(path: str) -> dict:
     with open(path, "rb") as f:
         reader = _Reader(f.read())
