@@ -15,6 +15,7 @@
 #include "core/FrameScheduler.h"
 #include "core/HoverDwellTracker.h"
 #include "core/Localization.h"
+#include "core/Preferences.h"
 #include "graphics/ActiveFrameTexture.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
@@ -186,8 +187,37 @@ private:
     void PushModelsToProductWindow();
 
     // Empuja el estado visible del menú rápido (nombre del pet,
-    // hidden/lock/size/opacity) al System Shell.
+    // hidden/lock/size/opacity/idioma) al System Shell.
     void PushShellState();
+
+    // --- Block 08: ruta canónica de preferencias ---------------------
+    //
+    // Las CUATRO preferencias (tamaño / opacidad / lock / idioma) que
+    // Block 06/07 ya persisten se mutan SOLO por estos cuatro Apply*.
+    // Tanto el menú rápido (HandleShellAction) como la sección Settings
+    // del Product UI (ApplyPreferenceChange) los llaman — misma mutación
+    // de appState_, misma normalización, mismo efecto de runtime, misma
+    // persistencia (MarkDirty + debounce), mismo PushShellState (el menú
+    // nativo refleja el nuevo valor) y mismo PushPreferencesToProductWindow
+    // (Settings refleja el nuevo valor). Ver docs/PRODUCT_UI.md §20 y
+    // DEC-130.
+    void ApplySizeChoice(core::PetSizeChoice choice);
+    void ApplyOpacityChoice(int rawPercent);   // se normaliza al conjunto {100,85,70,55}
+    void ApplyLockPosition(bool locked);
+    void ApplyUiLanguage(core::Language language);
+
+    // Enruta un SettingsChange (venido de la sección Settings) al Apply*
+    // que corresponde a su `field`.
+    void ApplyPreferenceChange(const productui::SettingsChange& change);
+
+    // Preferencias EFECTIVAS de esta sesión como valor de core (idioma
+    // incluido — puede diferir de appState_.language si el owner nunca
+    // eligió y se derivó del locale, o por un override solo-DEV).
+    core::Preferences CurrentPreferences() const;
+
+    // Empuja CurrentPreferences() a la sección Settings si el Product UI
+    // está abierto (no-op si no).
+    void PushPreferencesToProductWindow();
 
     // Aplica ShellAction (llegado como SDL_EVENT_USER). `running` se
     // pone en false para kQuit.

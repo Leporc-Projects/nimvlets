@@ -3,6 +3,8 @@
 #include "catalog/PetCatalog.h"
 #include "catalog/PetEntitlement.h"
 #include "catalog/PurchasePolicy.h"
+#include "core/DisplayControls.h"
+#include "core/Localization.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
 
@@ -236,6 +238,66 @@ bool TestPurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload() {
     return true;
 }
 
+// Block 08: una preferencia cambiada por la ruta canónica (SpikeApp::
+// Apply*, que normaliza y escribe UN campo crudo de AppState + MarkDirty)
+// sobrevive un "reinicio", y NO toca ningún campo de economía / pet
+// activo (brief §8/§22/§28). Se reproduce a nivel de persistencia:
+// mismas normalizaciones (core::PetSizeChoiceId / NormalizeOpacityPercent
+// / LanguageId), mismo debounce.
+bool TestPreferenceChangesSurviveReloadWithoutTouchingEconomy() {
+    using nimvlets::core::Language;
+    using nimvlets::core::LanguageId;
+    using nimvlets::core::NormalizeOpacityPercent;
+    using nimvlets::core::PetSizeChoice;
+    using nimvlets::core::PetSizeChoiceId;
+    using nimvlets::persistence::OwnedEntitlement;
+
+    TempTestDirectory dir;
+    const AppStateStore store(dir.path());
+    PersistenceScheduler scheduler(2000.0);
+
+    AppState state;
+    state.schemaVersion = AppState::kCurrentSchemaVersion;  // v4, sin bump
+    state.ownershipSeeded = true;
+    state.clickBalance = 777;
+    state.activePetId = "frin";
+    state.activeVariantId = "male";
+    state.ownedEntitlements = {OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"},
+                               OwnedEntitlement{"frin", "female"}};
+    // Defaults de preferencias.
+    state.sizeChoice = "medium";
+    state.opacityPercent = 100;
+    state.lockPosition = false;
+    state.language = "en";
+
+    // --- "el owner ajusta Settings" (o el menú rápido — misma ruta) ---
+    state.sizeChoice = PetSizeChoiceId(PetSizeChoice::kSmall);          // ApplySizeChoice
+    state.opacityPercent = static_cast<std::uint32_t>(NormalizeOpacityPercent(70));  // ApplyOpacityChoice
+    state.lockPosition = true;                                          // ApplyLockPosition
+    state.language = LanguageId(Language::kEs);                         // ApplyUiLanguage
+    scheduler.MarkDirty(0.0);
+    FlushIfDirty(store, state, scheduler, 3000.0);
+    NIMVLETS_CHECK(!scheduler.IsDirty());
+
+    // --- "reiniciar Nimvlets" ---
+    const AppState reloaded = store.Load();
+    NIMVLETS_CHECK(reloaded.schemaVersion == AppState::kCurrentSchemaVersion);  // sigue v4
+    NIMVLETS_CHECK(reloaded.sizeChoice == "small");
+    NIMVLETS_CHECK(reloaded.opacityPercent == 70);
+    NIMVLETS_CHECK(reloaded.lockPosition);
+    NIMVLETS_CHECK(reloaded.language == "es");
+
+    // Economía / pet activo intactos.
+    NIMVLETS_CHECK(reloaded.clickBalance == 777);
+    NIMVLETS_CHECK(reloaded.activePetId == "frin" && reloaded.activeVariantId == "male");
+    NIMVLETS_CHECK(reloaded.ownershipSeeded);
+    NIMVLETS_CHECK((reloaded.ownedEntitlements ==
+                    std::vector<OwnedEntitlement>{OwnedEntitlement{"bunny", ""},
+                                                  OwnedEntitlement{"frin", "female"},
+                                                  OwnedEntitlement{"frin", "male"}}));
+    return true;
+}
+
 }  // namespace
 
 void RegisterPersistenceIntegrationTests(testing::TestRunner& runner) {
@@ -246,6 +308,8 @@ void RegisterPersistenceIntegrationTests(testing::TestRunner& runner) {
     runner.Add("PersistenceIntegration/FailedFlushKeepsPendingChangeForNextAttempt", TestFailedFlushKeepsPendingChangeForNextAttempt);
     runner.Add("PersistenceIntegration/PurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload",
                TestPurchaseMutatesBalanceAndOwnershipTogetherAndSurvivesReload);
+    runner.Add("PersistenceIntegration/PreferenceChangesSurviveReloadWithoutTouchingEconomy",
+               TestPreferenceChangesSurviveReloadWithoutTouchingEconomy);
 }
 
 }  // namespace nimvlets::tests

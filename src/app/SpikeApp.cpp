@@ -755,6 +755,94 @@ void SpikeApp::PushShellState() {
     systemShell_->SetState(state);
 }
 
+// --- Block 08: ruta canónica de preferencias -----------------------
+//
+// El menú rápido y la sección Settings llaman EXACTAMENTE a estos cuatro
+// Apply*. No hay una segunda ruta con reglas propias de persistencia o
+// runtime (brief §6, DEC-130).
+
+core::Preferences SpikeApp::CurrentPreferences() const {
+    core::Preferences p = core::PreferencesFromStored(
+        appState_.sizeChoice, appState_.opacityPercent, appState_.lockPosition, appState_.language);
+    // El idioma EFECTIVO de la sesión puede diferir de
+    // appState_.language: vacío -> derivado del locale del OS sin
+    // persistir; o un override solo-DEV. language_ manda para lo que se
+    // MUESTRA.
+    p.language = language_;
+    return p;
+}
+
+void SpikeApp::PushPreferencesToProductWindow() {
+    if (productWindow_.IsOpen()) {
+        productWindow_.SetPreferences(CurrentPreferences());
+    }
+}
+
+void SpikeApp::ApplySizeChoice(core::PetSizeChoice choice) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    appState_.sizeChoice = core::PetSizeChoiceId(choice);
+    persistenceScheduler_.MarkDirty(nowMs);
+    ApplyPetWindowMetrics();  // SDL_SetWindowSize + presentación lógica + hit-mask + redraw
+    SDL_Log("nimvlets: pet size -> %s (%dx%d on screen)", appState_.sizeChoice.c_str(),
+            EffectiveCanvasWidth(), EffectiveCanvasHeight());
+    PushShellState();
+    PushPreferencesToProductWindow();
+}
+
+void SpikeApp::ApplyOpacityChoice(int rawPercent) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    const int pct = core::NormalizeOpacityPercent(rawPercent);  // {100,85,70,55} — nunca un valor imposible
+    appState_.opacityPercent = static_cast<std::uint32_t>(pct);
+    persistenceScheduler_.MarkDirty(nowMs);
+    SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
+    SDL_Log("nimvlets: pet opacity -> %d%%", pct);
+    PushShellState();
+    PushPreferencesToProductWindow();
+}
+
+void SpikeApp::ApplyLockPosition(bool locked) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    appState_.lockPosition = locked;
+    persistenceScheduler_.MarkDirty(nowMs);
+    SDL_Log("nimvlets: pet position %s", appState_.lockPosition ? "LOCKED (drag disabled)" : "unlocked");
+    PushShellState();
+    PushPreferencesToProductWindow();
+}
+
+void SpikeApp::ApplyUiLanguage(core::Language language) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    if (language != language_ || appState_.language.empty()) {
+        language_ = language;
+        // Una elección EXPLÍCITA sí se persiste (a partir de acá gana
+        // siempre sobre el locale del OS — block brief 06.1 §5).
+        appState_.language = core::LanguageId(language_);
+        persistenceScheduler_.MarkDirty(nowMs);
+    }
+    SDL_Log("nimvlets: UI language -> %s", core::LanguageId(language_));
+    // Refresco inmediato, sin reiniciar: menú + las tres secciones del
+    // Product UI (block brief 08 §17).
+    PushShellState();
+    productWindow_.SetLanguage(language_);
+    PushPreferencesToProductWindow();
+}
+
+void SpikeApp::ApplyPreferenceChange(const productui::SettingsChange& change) {
+    switch (change.field) {
+        case core::PreferenceField::kSize:
+            ApplySizeChoice(change.size);
+            break;
+        case core::PreferenceField::kOpacity:
+            ApplyOpacityChoice(change.opacityPercent);
+            break;
+        case core::PreferenceField::kLockPosition:
+            ApplyLockPosition(change.lockPosition);
+            break;
+        case core::PreferenceField::kLanguage:
+            ApplyUiLanguage(change.language);
+            break;
+    }
+}
+
 void SpikeApp::ApplyPetWindowMetrics() {
     SDL_SetWindowSize(window_, EffectiveCanvasWidth(), EffectiveCanvasHeight());
     SDL_SetRenderLogicalPresentation(
@@ -769,6 +857,7 @@ void SpikeApp::OpenProductWindow() {
         return;
     }
     productWindow_.SetLanguage(language_);
+    productWindow_.SetPreferences(CurrentPreferences());  // Block 08: sección Settings
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
     productWindow_.SetModels(
@@ -862,63 +951,37 @@ void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
             break;
 
         case platform::ShellAction::kToggleLockPosition:
-            appState_.lockPosition = !appState_.lockPosition;
-            persistenceScheduler_.MarkDirty(nowMs);
-            SDL_Log("nimvlets: pet position %s", appState_.lockPosition ? "LOCKED (drag disabled)" : "unlocked");
-            PushShellState();
+            // El menú rápido es un toggle; Settings manda un bool
+            // explícito. Ambos entran por la MISMA ruta canónica.
+            ApplyLockPosition(!appState_.lockPosition);
             break;
 
         case platform::ShellAction::kSetSizeSmall:
         case platform::ShellAction::kSetSizeMedium:
-        case platform::ShellAction::kSetSizeLarge: {
-            const core::PetSizeChoice choice = action == platform::ShellAction::kSetSizeSmall
-                                                   ? core::PetSizeChoice::kSmall
-                                                   : (action == platform::ShellAction::kSetSizeLarge
-                                                          ? core::PetSizeChoice::kLarge
-                                                          : core::PetSizeChoice::kMedium);
-            appState_.sizeChoice = core::PetSizeChoiceId(choice);
-            persistenceScheduler_.MarkDirty(nowMs);
-            ApplyPetWindowMetrics();
-            SDL_Log("nimvlets: pet size -> %s (%dx%d on screen)", appState_.sizeChoice.c_str(),
-                    EffectiveCanvasWidth(), EffectiveCanvasHeight());
-            PushShellState();
+        case platform::ShellAction::kSetSizeLarge:
+            ApplySizeChoice(action == platform::ShellAction::kSetSizeSmall
+                                ? core::PetSizeChoice::kSmall
+                                : (action == platform::ShellAction::kSetSizeLarge
+                                       ? core::PetSizeChoice::kLarge
+                                       : core::PetSizeChoice::kMedium));
             break;
-        }
 
         case platform::ShellAction::kSetOpacity100:
         case platform::ShellAction::kSetOpacity85:
         case platform::ShellAction::kSetOpacity70:
-        case platform::ShellAction::kSetOpacity55: {
-            const int pct = action == platform::ShellAction::kSetOpacity100
-                                ? 100
-                                : (action == platform::ShellAction::kSetOpacity85
-                                       ? 85
-                                       : (action == platform::ShellAction::kSetOpacity70 ? 70 : 55));
-            appState_.opacityPercent = static_cast<std::uint32_t>(pct);
-            persistenceScheduler_.MarkDirty(nowMs);
-            SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
-            SDL_Log("nimvlets: pet opacity -> %d%%", pct);
-            PushShellState();
+        case platform::ShellAction::kSetOpacity55:
+            ApplyOpacityChoice(action == platform::ShellAction::kSetOpacity100
+                                   ? 100
+                                   : (action == platform::ShellAction::kSetOpacity85
+                                          ? 85
+                                          : (action == platform::ShellAction::kSetOpacity70 ? 70 : 55)));
             break;
-        }
 
         case platform::ShellAction::kSetLanguageEn:
-        case platform::ShellAction::kSetLanguageEs: {
-            const core::Language chosen =
-                action == platform::ShellAction::kSetLanguageEs ? core::Language::kEs : core::Language::kEn;
-            if (chosen != language_ || appState_.language.empty()) {
-                language_ = chosen;
-                // Una elección EXPLÍCITA sí se persiste (a partir de acá
-                // gana siempre sobre el locale del OS — block brief §5).
-                appState_.language = core::LanguageId(language_);
-                persistenceScheduler_.MarkDirty(nowMs);
-            }
-            SDL_Log("nimvlets: UI language -> %s", core::LanguageId(language_));
-            // Refresco inmediato, sin reiniciar: menú + Collection.
-            PushShellState();
-            productWindow_.SetLanguage(language_);
+        case platform::ShellAction::kSetLanguageEs:
+            ApplyUiLanguage(action == platform::ShellAction::kSetLanguageEs ? core::Language::kEs
+                                                                           : core::Language::kEn);
             break;
-        }
 
         case platform::ShellAction::kQuit:
             SDL_Log("nimvlets: quit requested from the quick menu");
@@ -1421,6 +1484,11 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             if (pe.hasPurchase) {
                 HandlePurchaseRequest(pe.purchase);
             }
+            if (pe.hasPreferenceChange) {
+                // Misma ruta canónica que la acción equivalente del menú
+                // rápido (block brief 08 §6).
+                ApplyPreferenceChange(pe.preferenceChange);
+            }
             if (pe.closeRequested) {
                 productWindow_.Close();
             }
@@ -1691,12 +1759,51 @@ int SpikeApp::Run() {
         if (const char* vf = std::getenv("NIMVLETS_DEV_VARIANT_FOCUS"); vf != nullptr && vf[0] != '\0') {
             productWindow_.SetVariantKeyboardFocusForQA(vf);
         }
-        // --- Block 07: hooks de QA del Shop -------------------------
-        // NIMVLETS_DEV_SECTION=shop|collection — sección visible.
+        // --- Block 07/08: hooks de QA del Shop y Settings -----------
+        // NIMVLETS_DEV_SECTION=shop|settings|collection — sección visible.
         if (const char* sec = std::getenv("NIMVLETS_DEV_SECTION"); sec != nullptr && sec[0] != '\0') {
-            productWindow_.ShowSectionForQA(std::string(sec) == "shop"
-                                               ? productui::ProductSection::kShop
-                                               : productui::ProductSection::kCollection);
+            const std::string s(sec);
+            productWindow_.ShowSectionForQA(s == "shop"       ? productui::ProductSection::kShop
+                                            : s == "settings" ? productui::ProductSection::kSettings
+                                                              : productui::ProductSection::kCollection);
+        }
+        // NIMVLETS_DEV_PREFS=small,70,lock,es — aplica preferencias por la
+        // MISMA ruta canónica que el menú rápido (SpikeApp::Apply*), para
+        // capturas de un estado no-default de Settings y como smoke en
+        // vivo de que esa ruta produce el AppState/runtime esperado
+        // (brief §27/§28). Tokens: small|medium|large, 100|85|70|55,
+        // lock|unlock, en|es. Ausente/vacía: no-op.
+        if (const char* prefs = std::getenv("NIMVLETS_DEV_PREFS"); prefs != nullptr && prefs[0] != '\0') {
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_PREFS='%s' (via canonical Apply* path)", prefs);
+            std::string tok;
+            std::string all(prefs);
+            all.push_back(',');
+            for (const char c : all) {
+                if (c != ',') {
+                    tok.push_back(c);
+                    continue;
+                }
+                if (tok == "small") {
+                    ApplySizeChoice(core::PetSizeChoice::kSmall);
+                } else if (tok == "medium") {
+                    ApplySizeChoice(core::PetSizeChoice::kMedium);
+                } else if (tok == "large") {
+                    ApplySizeChoice(core::PetSizeChoice::kLarge);
+                } else if (tok == "100" || tok == "85" || tok == "70" || tok == "55") {
+                    ApplyOpacityChoice(std::atoi(tok.c_str()));
+                } else if (tok == "lock") {
+                    ApplyLockPosition(true);
+                } else if (tok == "unlock") {
+                    ApplyLockPosition(false);
+                } else if (tok == "en") {
+                    ApplyUiLanguage(core::Language::kEn);
+                } else if (tok == "es") {
+                    ApplyUiLanguage(core::Language::kEs);
+                } else if (!tok.empty()) {
+                    SDL_Log("nimvlets: NIMVLETS_DEV_PREFS: ignoring unknown token '%s'", tok.c_str());
+                }
+                tok.clear();
+            }
         }
         // NIMVLETS_DEV_SHOP_PET=<petId> — hero del Shop.
         if (const char* sp = std::getenv("NIMVLETS_DEV_SHOP_PET"); sp != nullptr && sp[0] != '\0') {
@@ -1712,6 +1819,11 @@ int SpikeApp::Run() {
         if (const char* sc = std::getenv("NIMVLETS_DEV_SHOP_CONFIRM");
             sc != nullptr && sc[0] != '\0' && sc[0] != '0') {
             productWindow_.SetShopConfirmingForQA(true);
+        }
+        // NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity — foco de teclado sobre
+        // una fila de Settings (captura del anillo de foco).
+        if (const char* sf = std::getenv("NIMVLETS_DEV_SETTINGS_FOCUS"); sf != nullptr && sf[0] != '\0') {
+            productWindow_.SetSettingsKeyboardFocusForQA(sf);
         }
         // Solo-DEV: vuelca el framebuffer de la Collection a un BMP y
         // sale (captura de QA a densidad nativa, sin captura de pantalla
