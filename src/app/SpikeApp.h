@@ -2,6 +2,7 @@
 
 #include "catalog/ActivePetResolution.h"
 #include "catalog/CollectionModel.h"
+#include "catalog/OnboardingPolicy.h"
 #include "catalog/PetCatalog.h"
 #include "catalog/PetEntitlement.h"
 #include "catalog/PetIdentity.h"
@@ -237,6 +238,32 @@ private:
     // toca el runtime del pet. No-op silencioso en cualquier fallo.
     void HandlePurchaseRequest(const productui::PurchaseRequest& request);
 
+    // --- Block 09A: onboarding de primer arranque -------------------
+    //
+    // Decide en Init() si ESTA sesión entra al gate de onboarding:
+    // onboarding ARMADO (catálogo de producción listo, o el harness DEV)
+    // && lifecycle == kPending && (para producción) sin archivo de
+    // estado previo. Si entra, deja `onboardingActive_` en true, arma el
+    // deadline monotónico de los 44 s, y src/app abre el Product UI en
+    // modo onboarding con la ventana del pet oculta. Ver
+    // docs/ONBOARDING.md y DEC-131/DEC-132.
+    void ResolveOnboarding(bool saveFileExisted);
+
+    // El owner confirmó un starter en la pantalla de onboarding. Evalúa
+    // catalog::EvaluateOnboardingSelection; si es kOk aplica la
+    // TRANSACCIÓN de completitud (balance 0 + grant EXACTO + activo +
+    // lifecycle kCompleted + ownershipSeeded, en el MISMO AppState) y la
+    // persiste de inmediato (un solo write atómico), luego carga el
+    // starter, muestra la ventana del pet y saca al Product UI del modo
+    // onboarding. Idempotente (brief §15): un segundo pedido tras
+    // completar no hace nada.
+    void HandleOnboardingSelection(const catalog::PetIdentity& selection);
+
+    // Dispara el reveal secreto una sola vez cuando el deadline
+    // monotónico de dwell de sesión se alcanza (brief §10/§12). Empuja
+    // el estado a la vista y limpia el deadline.
+    void RevealOnboardingSecret(double nowMs);
+
     // Copia del frame de reposo canónico del pet activo (states[0],
     // pose base, Direction::kRight) para la preview de la Collection —
     // el pack ya está en memoria, no se recarga.
@@ -420,6 +447,25 @@ private:
     // Cerrada al arranque; se abre desde el menú. Cerrarla no afecta al
     // runtime del pet (block brief §4/§18).
     productui::ProductWindow productWindow_;
+
+    // --- Onboarding de primer arranque (Block 09A) -----------------
+    //
+    // true SOLO durante una sesión que arrancó en el gate de onboarding
+    // (ver ResolveOnboarding). Mientras dura: la ventana del pet está
+    // oculta, el Product UI está en modo onboarding, y el menú "Collection…"
+    // solo re-enfoca (no saltea la selección). Se pone en false al
+    // completar (o nunca se pone en true en un arranque normal).
+    bool onboardingActive_ = false;
+    // El offer (candidatos normales + secreto). Se necesita para evaluar
+    // la selección confirmada.
+    catalog::OnboardingOffer onboardingOffer_;
+    // Deadline MONOTÓNICO (base SDL_GetTicks(), NUNCA wall-clock) en que
+    // el candidato secreto debe revelarse — 44 s de dwell de sesión
+    // desde que la pantalla se volvió activa (brief §11). nullopt tras el
+    // reveal o si onboarding no está activo. Se integra al mismo cálculo
+    // de waitMs / next-deadline del event loop que ambientDeadlineMs_ &
+    // co. (brief §12) — sin timer thread, sin polling.
+    std::optional<double> onboardingRevealDeadlineMs_;
 
     // Presencia nativa en el System Shell (macOS: NSStatusItem).
     std::unique_ptr<platform::SystemShell> systemShell_;

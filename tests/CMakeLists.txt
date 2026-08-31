@@ -65,6 +65,10 @@ add_executable(nimvlets_tests
   ShopLayoutTest.cpp
   SettingsLayoutTest.h
   SettingsLayoutTest.cpp
+  OnboardingPolicyTest.h
+  OnboardingPolicyTest.cpp
+  OnboardingLayoutTest.h
+  OnboardingLayoutTest.cpp
   FocusListTest.h
   FocusListTest.cpp
   TextLayoutTest.h

@@ -5,12 +5,15 @@
 #include <string>
 
 #include "catalog/CollectionModel.h"
+#include "catalog/OnboardingPolicy.h"
 #include "catalog/PetCatalog.h"
+#include "catalog/PetIdentity.h"
 #include "catalog/ShopModel.h"
 #include "content/AnimationDefinition.h"
 #include "core/Localization.h"
 #include "core/Preferences.h"
 #include "productui/CollectionView.h"
+#include "productui/OnboardingView.h"
 #include "productui/SectionNav.h"
 #include "productui/SettingsView.h"
 #include "productui/ShopView.h"
@@ -31,6 +34,8 @@ struct ProductWindowEvent {
     PurchaseRequest purchase;
     bool hasPreferenceChange = false;  // el owner cambió una preferencia en Settings (Block 08)
     SettingsChange preferenceChange;
+    bool hasOnboardingSelection = false;  // el owner confirmó un starter en el onboarding (Block 09A)
+    catalog::PetIdentity onboardingSelection;
 };
 
 // Ventana de aplicación NORMAL (con marco, enfocable, redimensionable)
@@ -86,6 +91,23 @@ class ProductWindow {
     // §7, sincronización bidireccional). No-op si está cerrada.
     void SetPreferences(const core::Preferences& prefs);
 
+    // --- Modo ONBOARDING de primer arranque (Block 09A) --------------
+    //
+    // Onboarding NO es una sección (brief §19): es un GATE. Mientras está
+    // activo, la ventana ignora por completo Collection/Shop/Settings y
+    // su navegación — no se puede saltear la selección de starter.
+    // src/app entra a este modo en Init() SOLO cuando un usuario
+    // genuinamente nuevo se topa con un onboarding ARMADO (producción
+    // con contenido listo, o el harness DEV — ver docs/ONBOARDING.md).
+    void EnterOnboarding(catalog::OnboardingOffer offer);
+    void ExitOnboarding();
+    bool IsOnboarding() const { return onboarding_; }
+
+    // src/app la llama UNA vez, en el deadline monotónico de los 44 s de
+    // dwell de sesión (brief §10/§12). Revela el candidato secreto sin
+    // ruido. No-op si no está en modo onboarding.
+    void RevealOnboardingSecret();
+
     ProductSection Section() const { return section_; }
 
     // Frame de reposo del pet ACTIVO (su pack ya está cargado por
@@ -131,6 +153,15 @@ class ProductWindow {
         settingsView_.SetKeyboardFocusForQA(rowFocusId);
     }
 
+    // Solo-DEV (QA / capturas del onboarding): revela el secreto sin
+    // esperar 44 s, o fuerza una etapa (kBrowse / kFrinVariant / kConfirm
+    // con un `focusId` de candidato a confirmar).
+    void RevealOnboardingSecretForQA() { onboardingView_.RevealSecretForQA(); }
+    void SetOnboardingStageForQA(OnboardingStage stage, const std::string& focusId) {
+        onboardingView_.SetStageForQA(stage, focusId);
+        pendingExpose_ = true;
+    }
+
  private:
     void RecomputeScale();
     void DestroyResources();
@@ -145,7 +176,11 @@ class ProductWindow {
     CollectionView view_;
     ShopView shopView_;
     SettingsView settingsView_;
+    OnboardingView onboardingView_;
     ProductSection section_ = ProductSection::kCollection;
+    // Gate de primer arranque activo — reemplaza a `section_` para todo
+    // efecto de input / dibujo mientras está true (brief §19).
+    bool onboarding_ = false;
 
     float scale_ = 1.0f;
     bool pendingExpose_ = true;

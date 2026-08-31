@@ -34,6 +34,8 @@ add_library(nimvlets_productui_core STATIC
   ShopLayout.cpp
   SettingsLayout.h
   SettingsLayout.cpp
+  OnboardingLayout.h
+  OnboardingLayout.cpp
 )
 
 target_include_directories(nimvlets_productui_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
@@ -55,6 +57,8 @@ add_library(nimvlets_productui STATIC
   ShopView.cpp
   SettingsView.h
   SettingsView.cpp
+  OnboardingView.h
+  OnboardingView.cpp
   ProductWindow.h
   ProductWindow.cpp
 )

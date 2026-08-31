@@ -25,6 +25,19 @@ namespace {
 // el directorio de trabajo del proceso — ver docs/CATALOG.md.
 constexpr const char* kCatalogPath = "assets/dev/pet_catalog.nvcat";
 
+// Catálogo SINTÉTICO solo-DEV para el harness de onboarding (Block 09A):
+// artu_dev/rato_dev/rinrin_dev toman prestados packs existentes para
+// ejercitar la máquina de estados/presentación ANTES de que exista
+// contenido real de Artu/Rato/Rin Rin. Se carga EN LUGAR de kCatalogPath
+// SOLO cuando NIMVLETS_DEV_ONBOARDING está seteada. NUNCA se envía. Ver
+// docs/ONBOARDING.md.
+constexpr const char* kOnboardingDevCatalogPath = "assets/dev/onboarding_dev_catalog.nvcat";
+
+// NIMVLETS_DEV_ONBOARDING — harness solo-DEV: carga el catálogo
+// sintético de arriba y fuerza el gate de onboarding (si el lifecycle es
+// kPending). Ausente/vacía: no-op total, arranque de producción normal.
+constexpr const char* kDevOnboardingEnvVar = "NIMVLETS_DEV_ONBOARDING";
+
 // Reads NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS — see
 // SpikeApp::ComputeEffectiveAmbientIntervalSeconds()'s doc comment.
 constexpr const char* kDevPassiveIntervalEnvVar = "NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS";
@@ -264,11 +277,23 @@ bool SpikeApp::Init() {
         return false;
     }
 
+    const bool devOnboarding =
+        [] {
+            const char* v = std::getenv(kDevOnboardingEnvVar);
+            return v != nullptr && v[0] != '\0' && v[0] != '0';
+        }();
+    const char* catalogPath = devOnboarding ? kOnboardingDevCatalogPath : kCatalogPath;
+
     std::string catalogError;
-    if (!catalog::LoadCatalogFromFile(kCatalogPath, catalog_, catalogError)) {
-        SDL_Log("nimvlets: FATAL: could not load pet catalog '%s': %s", kCatalogPath, catalogError.c_str());
+    if (!catalog::LoadCatalogFromFile(catalogPath, catalog_, catalogError)) {
+        SDL_Log("nimvlets: FATAL: could not load pet catalog '%s': %s", catalogPath, catalogError.c_str());
         SDL_Log("nimvlets: (run from the repository root, or regenerate it: python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat)");
         return false;
+    }
+    if (devOnboarding) {
+        SDL_Log(
+            "nimvlets: DEV override active — %s (synthetic onboarding catalog '%s' — NOT production content)",
+            kDevOnboardingEnvVar, catalogPath);
     }
 
     std::string appDataDir;
@@ -300,11 +325,16 @@ bool SpikeApp::Init() {
     // reconciliación de propiedad legacy más abajo. Sin save / corrupto
     // -> queda en la actual: nada legacy que migrar (DEC-129).
     std::uint32_t loadedOnDiskSchema = persistence::AppState::kCurrentSchemaVersion;
+    // ¿Había un archivo de estado en disco? (aunque no se pueda parsear).
+    // Un usuario genuinamente NUEVO no tiene archivo — así se distingue
+    // de una recuperación de un archivo corrupto, que NUNCA se manda a
+    // onboarding (brief §4 / §27, DEC-131).
+    bool saveFileExisted = false;
     if (!appDataDir.empty()) {
         appStateStore_.emplace(appDataDir);
 
         std::string loadWarning;
-        appState_ = appStateStore_->Load(&loadWarning, &loadedOnDiskSchema);
+        appState_ = appStateStore_->Load(&loadWarning, &loadedOnDiskSchema, &saveFileExisted);
         if (!loadWarning.empty()) {
             SDL_Log("nimvlets: %s", loadWarning.c_str());
         }
@@ -354,6 +384,15 @@ bool SpikeApp::Init() {
         }
     }
 
+    // --- Gate de onboarding de primer arranque (Block 09A) ---------
+    //
+    // Decide si ESTA sesión arranca en la selección de starter. Se
+    // consulta ANTES de la reconciliación/siembra de propiedad: un
+    // usuario genuinamente nuevo NO tiene propiedad legacy que migrar ni
+    // se le siembra nada — su propiedad la fija la transacción de
+    // completitud. Ver ResolveOnboarding / docs/ONBOARDING.md.
+    ResolveOnboarding(saveFileExisted);
+
     // --- Estado de propiedad (Block 06 -> Block 07 autorizaciones) ---
     //
     // (1) Reconcilia la propiedad "por pet lógico" de un save v1/v2/v3.
@@ -368,7 +407,8 @@ bool SpikeApp::Init() {
     //     schema legacy en disco; sobre un v4 nunca (no se puede
     //     fabricar propiedad reinterpretando un `{frin, ""}` de un save
     //     actual editado a mano).
-    if (loadedOnDiskSchema < persistence::AppState::kCurrentSchemaVersion) {
+    if (!onboardingActive_ &&
+        loadedOnDiskSchema < persistence::AppState::kFirstExplicitEntitlementSchema) {
         std::vector<catalog::PetEntitlement> ents = CurrentEntitlements();
         if (catalog::ExpandHistoricalWholePetEntitlements(ents)) {
             appState_.ownedEntitlements = ToPersistedEntitlements(ents);
@@ -382,18 +422,31 @@ bool SpikeApp::Init() {
     // (2) Siembra de desarrollo/default SOLO en el primer arranque (o si
     //     el conjunto quedó vacío por corrupción — un estado post-siembra
     //     nunca puede tener cero autorizaciones, no hay forma de "vender"
-    //     un Nimvlet). Un bloque futuro de onboarding reemplaza esto sin
-    //     tocar el catálogo. La semilla otorga la autorización EXPLÍCITA
-    //     de cada entrada `initiallyOwned` — Frin siembra sus dos
-    //     variantes, no un `{frin, ""}`.
-    if (!appState_.ownershipSeeded || appState_.ownedEntitlements.empty()) {
+    //     un Nimvlet). La semilla otorga la autorización EXPLÍCITA de
+    //     cada entrada `initiallyOwned` — Frin siembra sus dos variantes,
+    //     no un `{frin, ""}`.
+    //
+    //     Block 09A: NO se siembra si esta sesión entró al gate de
+    //     onboarding — un usuario nuevo no posee nada hasta que elige su
+    //     starter, y esa elección (transacción de completitud) es la que
+    //     escribe `ownedEntitlements` + `ownershipSeeded`. La siembra por
+    //     catálogo sigue siendo el camino de dev/legacy hasta que Block
+    //     09B habilite el onboarding de producción (brief §17).
+    if (!onboardingActive_ && (!appState_.ownershipSeeded || appState_.ownedEntitlements.empty())) {
         appState_.ownedEntitlements =
             ToPersistedEntitlements(catalog::SeedEntitlementsFromCatalog(catalog_));
         appState_.ownershipSeeded = true;
+        // La siembra por catálogo es el camino dev/legacy, no onboarding:
+        // este estado se considera YA onboardeado (brief §17). Un usuario
+        // que entró al gate no llega acá (onboardingActive_).
+        if (appState_.onboardingLifecycle == persistence::OnboardingLifecycle::kPending) {
+            appState_.onboardingLifecycle = persistence::OnboardingLifecycle::kLegacyComplete;
+        }
         persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
         SDL_Log("nimvlets: ownership seeded from catalog (%zu entitlement(s))",
                 appState_.ownedEntitlements.size());
     }
+
 
     // (3) Resolver el pet activo: primero contra el CATÁLOGO (identidad
     //     desconocida -> default), luego contra la PROPIEDAD (identidad
@@ -403,10 +456,17 @@ bool SpikeApp::Init() {
     //     (brief §4, DEC-128). Se salta en una selección solo-DEV
     //     (NIMVLETS_DEV_SELECT_PET carga lo que se le pide sin tocar el
     //     estado real).
+    // Durante el onboarding se carga el pet default SOLO para que la
+    // ventana del pet tenga dimensiones válidas (queda oculta); no se
+    // resuelve contra propiedad (no hay ninguna todavía) ni se repara /
+    // persiste ninguna selección — la elección de starter la fija la
+    // transacción de completitud.
+    const bool bypassOwnershipResolution = haveDevSelection || onboardingActive_;
+
     const catalog::ResolvedSelection resolved = catalog::ResolveActiveSelection(catalog_, requestedIdentity);
     catalog::PetIdentity target = resolved.entry->identity;
     bool selectionRepaired = resolved.usedFallback;
-    if (!haveDevSelection) {
+    if (!bypassOwnershipResolution) {
         bool ownershipFellBack = false;
         target = catalog::ResolveOwnedActiveIdentity(CurrentEntitlements(), catalog_, target, ownershipFellBack);
         if (ownershipFellBack) {
@@ -446,8 +506,9 @@ bool SpikeApp::Init() {
 
     // (5) Repara la selección persistida en memoria si terminamos usando
     //     algo distinto de lo guardado -- NUNCA en una selección solo-DEV
-    //     transitoria.
-    if (selectionRepaired && !haveDevSelection) {
+    //     transitoria, ni durante el onboarding (el pet default es solo
+    //     transitorio; la selección real la fija la completitud).
+    if (selectionRepaired && !bypassOwnershipResolution) {
         appState_.activePetId = loadedIdentity.petId;
         appState_.activeVariantId = loadedIdentity.variantId;
         persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
@@ -639,7 +700,196 @@ bool SpikeApp::Init() {
         static_cast<unsigned long long>(appState_.clickBalance),
         appStateStore_.has_value() ? "persisted locally" : "persistence unavailable this run");
 
+    // --- Block 09A: arrancar en el gate de onboarding ---------------
+    //
+    // La ventana del pet queda OCULTA (el usuario nuevo no posee ningún
+    // Nimvlet todavía; el pet default se cargó solo para dimensionar la
+    // ventana). El Product UI se abre en modo onboarding y NO se puede
+    // saltear (brief §19). El deadline de los 44 s se arma acá — cuando
+    // la pantalla ya está activa y capaz de recibir input (brief §11).
+    if (onboardingActive_) {
+        petHidden_ = true;
+        SDL_HideWindow(window_);
+
+        if (productWindow_.Open(catalog_)) {
+            productWindow_.SetLanguage(language_);
+            productWindow_.SetPreferences(CurrentPreferences());
+            productWindow_.EnterOnboarding(onboardingOffer_);
+            productWindow_.FocusWindow();
+        } else {
+            SDL_Log("nimvlets: FATAL: could not open the Product UI for onboarding");
+            return false;
+        }
+
+        double revealMs = catalog::kSecretRevealDwellMs;
+        if (const char* env = std::getenv("NIMVLETS_DEV_ONBOARDING_REVEAL_MS");
+            env != nullptr && env[0] != '\0') {
+            char* end = nullptr;
+            const double parsed = std::strtod(env, &end);
+            if (end != env && parsed >= 0.0) {
+                revealMs = parsed;
+                SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ONBOARDING_REVEAL_MS=%.0f", revealMs);
+            }
+        }
+        onboardingRevealDeadlineMs_ = static_cast<double>(SDL_GetTicks()) + revealMs;
+
+        // QA: revelar el secreto de una / forzar una etapa, para
+        // capturas — sin correr el event loop.
+        if (const char* rv = std::getenv("NIMVLETS_DEV_ONBOARDING_REVEAL");
+            rv != nullptr && rv[0] != '\0' && rv[0] != '0') {
+            RevealOnboardingSecret(static_cast<double>(SDL_GetTicks()));
+        }
+        if (const char* st = std::getenv("NIMVLETS_DEV_ONBOARDING_STAGE"); st != nullptr && st[0] != '\0') {
+            const std::string spec(st);
+            const std::size_t colon = spec.find(':');
+            const std::string stageName = colon == std::string::npos ? spec : spec.substr(0, colon);
+            const std::string focusId = colon == std::string::npos ? std::string() : spec.substr(colon + 1);
+            const productui::OnboardingStage stage =
+                stageName == "confirm"   ? productui::OnboardingStage::kConfirm
+                : stageName == "variant" ? productui::OnboardingStage::kFrinVariant
+                                         : productui::OnboardingStage::kBrowse;
+            productWindow_.SetOnboardingStageForQA(stage, focusId);
+        }
+
+        SDL_Log(
+            "nimvlets: onboarding ARMED — %zu normal starter(s), secret=%s; reveal in %.0f ms of session dwell",
+            onboardingOffer_.normal.size(), onboardingOffer_.secret.has_value() ? "yes" : "no", revealMs);
+    }
+
     return true;
+}
+
+void SpikeApp::ResolveOnboarding(bool saveFileExisted) {
+    // Un estado que YA pasó por la inicialización de propiedad VIEJA
+    // (`ownershipSeeded` — siembra por catálogo, no onboarding) pero
+    // quedó en kPending es un usuario dev/legacy: se lo considera YA
+    // onboardeado. Se normaliza a kLegacyComplete acá, así el schema v5
+    // refleja la verdad y Block 09B no lo trata como usuario nuevo (brief
+    // §3.A / §17). Un usuario genuinamente nuevo (sin archivo,
+    // !ownershipSeeded) mantiene kPending hasta la transacción de
+    // completitud. NO es "inferir completitud de la propiedad" (brief
+    // §3): `ownershipSeeded` es un flag EXPLÍCITO de "hubo init".
+    if (saveFileExisted &&
+        appState_.onboardingLifecycle == persistence::OnboardingLifecycle::kPending &&
+        appState_.ownershipSeeded) {
+        appState_.onboardingLifecycle = persistence::OnboardingLifecycle::kLegacyComplete;
+        persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+        SDL_Log("nimvlets: legacy/dev state (seeded, pending) normalized to onboarding=legacy-complete");
+    }
+
+    const bool devOnboarding = [] {
+        const char* v = std::getenv(kDevOnboardingEnvVar);
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    const catalog::OnboardingReadiness readiness = catalog::EvaluateCatalogOnboardingReadiness(catalog_);
+    const bool pending =
+        appState_.onboardingLifecycle == persistence::OnboardingLifecycle::kPending;
+
+    if (devOnboarding) {
+        // El harness DEV fuerza el gate mientras el lifecycle sea
+        // kPending (un dir de app-data aislado y fresco -> kPending por
+        // default; un run previo incompleto sigue en kPending y se
+        // re-entra). Un onboarding COMPLETADO lo detiene.
+        onboardingActive_ = pending;
+        if (!onboardingActive_) {
+            SDL_Log("nimvlets: %s set but onboarding already completed (lifecycle != pending); normal startup",
+                    kDevOnboardingEnvVar);
+        }
+    } else {
+        // Producción: onboarding ARMADO (contenido de starters listo) +
+        // usuario genuinamente nuevo (kPending + sin archivo de estado
+        // previo). Un archivo corrupto (`saveFileExisted`) se trata como
+        // usuario existente, NUNCA se onboardea (brief §4/§27).
+        onboardingActive_ = readiness.armed && pending && !saveFileExisted;
+        if (readiness.armed && pending && saveFileExisted) {
+            SDL_Log(
+                "nimvlets: onboarding armed and lifecycle pending, but a state file exists "
+                "(recovered) -- treating as an existing user; not onboarding");
+        }
+    }
+
+    if (!onboardingActive_) {
+        if (!readiness.armed && !devOnboarding) {
+            SDL_Log("nimvlets: production onboarding not armed (%s)", readiness.reason.c_str());
+        }
+        return;
+    }
+
+    onboardingOffer_ = catalog::BuildOnboardingOffer(catalog_);
+    onboardingOffer_.secretRevealed = false;
+    SDL_Log(
+        "nimvlets: entering ONBOARDING gate (lifecycle=pending%s)",
+        devOnboarding ? ", DEV harness" : ", production content ready");
+}
+
+void SpikeApp::RevealOnboardingSecret(double nowMs) {
+    if (!onboardingActive_ || onboardingOffer_.secretRevealed) {
+        onboardingRevealDeadlineMs_.reset();
+        return;
+    }
+    onboardingOffer_.secretRevealed = true;
+    productWindow_.RevealOnboardingSecret();
+    onboardingRevealDeadlineMs_.reset();
+    SDL_Log("nimvlets: onboarding — secret candidate revealed after ~%.0f ms of session dwell",
+            nowMs);
+}
+
+void SpikeApp::HandleOnboardingSelection(const catalog::PetIdentity& selection) {
+    // Idempotencia (brief §15): una vez fuera del gate, cualquier pedido
+    // que haya quedado encolado no hace nada.
+    if (!onboardingActive_) {
+        return;
+    }
+
+    const bool alreadyComplete =
+        persistence::OnboardingConsideredComplete(appState_.onboardingLifecycle);
+    const catalog::OnboardingGrant grant =
+        catalog::EvaluateOnboardingSelection(onboardingOffer_, selection, alreadyComplete);
+
+    if (grant.result != catalog::OnboardingSelectionResult::kOk) {
+        SDL_Log(
+            "nimvlets: onboarding selection '%s'%s%s not applied (%s)", selection.petId.c_str(),
+            selection.variantId.empty() ? "" : "/", selection.variantId.c_str(),
+            catalog::ToString(grant.result));
+        return;
+    }
+
+    // --- Transacción de completitud (brief §14): balance 0 + grant
+    //     EXACTO + activo + lifecycle + ownershipSeeded en el MISMO
+    //     AppState, una sola escritura atómica. Un crash no puede dejar
+    //     "completado sin starter" ni "starter sin completar".
+    std::vector<catalog::PetEntitlement> owned = {grant.entitlement};
+    catalog::CanonicalizePetEntitlements(owned);
+    appState_.clickBalance = grant.newBalance;  // 0 — un usuario nuevo no recibe clics (brief §16)
+    appState_.ownedEntitlements = ToPersistedEntitlements(owned);
+    appState_.ownershipSeeded = true;
+    appState_.activePetId = grant.activeIdentity.petId;
+    appState_.activeVariantId = grant.activeIdentity.variantId;
+    appState_.onboardingLifecycle = persistence::OnboardingLifecycle::kCompleted;
+    persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    FlushPersistedState();  // inmediato, atómico — igual que una compra del Shop (DEC-126)
+
+    SDL_Log(
+        "nimvlets: onboarding COMPLETE — starter '%s'%s%s granted, balance 0, active set, lifecycle=completed",
+        grant.entitlement.petId.c_str(), grant.entitlement.variantId.empty() ? "" : "/",
+        grant.entitlement.variantId.c_str());
+
+    // Salir del gate y entrar a Nimvlets normal: cargar el starter,
+    // mostrar la ventana del pet, cerrar el onboarding.
+    onboardingActive_ = false;
+    onboardingRevealDeadlineMs_.reset();
+    productWindow_.ExitOnboarding();
+    productWindow_.Close();
+
+    if (TrySwitchActivePet(grant.activeIdentity)) {
+        activeCatalogIdentity_ = grant.activeIdentity;
+    } else {
+        SDL_Log("nimvlets: onboarding: starter pack failed to load; the granted entitlement stands");
+    }
+    petHidden_ = false;
+    SDL_ShowWindow(window_);
+    MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
+    PushShellState();
 }
 
 void SpikeApp::FlushPersistedState() {
@@ -852,6 +1102,13 @@ void SpikeApp::ApplyPetWindowMetrics() {
 }
 
 void SpikeApp::OpenProductWindow() {
+    // Durante el onboarding la ventana ya está abierta EN EL GATE:
+    // "Collection…" del menú solo la re-enfoca, no cambia a la
+    // Collection (brief §19 — no se puede saltear la selección).
+    if (onboardingActive_) {
+        productWindow_.FocusWindow();
+        return;
+    }
     if (!productWindow_.Open(catalog_)) {
         SDL_Log("nimvlets: could not open the Product UI window");
         return;
@@ -935,6 +1192,12 @@ void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
     const double nowMs = static_cast<double>(SDL_GetTicks());
     switch (action) {
         case platform::ShellAction::kTogglePetVisibility:
+            if (onboardingActive_) {
+                // El usuario nuevo no posee ningún Nimvlet todavía — no
+                // hay pet real que mostrar hasta que elija su starter.
+                SDL_Log("nimvlets: Show/Hide ignored during onboarding (no Nimvlet chosen yet)");
+                break;
+            }
             petHidden_ = !petHidden_;
             if (petHidden_) {
                 SDL_HideWindow(window_);
@@ -1489,8 +1752,18 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 // rápido (block brief 08 §6).
                 ApplyPreferenceChange(pe.preferenceChange);
             }
+            if (pe.hasOnboardingSelection) {
+                HandleOnboardingSelection(pe.onboardingSelection);
+            }
             if (pe.closeRequested) {
-                productWindow_.Close();
+                if (onboardingActive_) {
+                    // El onboarding es OBLIGATORIO: no se puede cerrar la
+                    // ventana para saltearlo (brief §19/§25). Se
+                    // re-enfoca en vez de cerrar.
+                    productWindow_.FocusWindow();
+                } else {
+                    productWindow_.Close();
+                }
             }
             return;
         }
@@ -1885,6 +2158,38 @@ int SpikeApp::Run() {
         HandleActivateRequest(req);
     }
 
+    // Solo-DEV (Block 09A): confirma una selección de starter sin
+    // interacción ("petId" o "petId/variantId", p. ej. "artu_dev" o
+    // "frin/male") — misma ruta que "Choose <name>": evalúa la política,
+    // aplica la transacción de completitud atómica, sale del gate. Para
+    // smoke-testear completitud + reinicio. Requiere NIMVLETS_DEV_ONBOARDING.
+    if (onboardingActive_) {
+        if (const char* ch = std::getenv("NIMVLETS_DEV_ONBOARDING_CHOOSE");
+            ch != nullptr && ch[0] != '\0') {
+            const std::string spec(ch);
+            const std::size_t slash = spec.find('/');
+            const catalog::PetIdentity sel{
+                slash == std::string::npos ? spec : spec.substr(0, slash),
+                slash == std::string::npos ? std::string() : spec.substr(slash + 1)};
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ONBOARDING_CHOOSE='%s'", ch);
+            HandleOnboardingSelection(sel);
+        }
+    }
+
+    // Solo-DEV (Block 09A): captura la pantalla de onboarding a un BMP y
+    // sale — para QA de la presentación sin correr el event loop (ni
+    // esperar 44 s). Requiere NIMVLETS_DEV_ONBOARDING; combinable con
+    // NIMVLETS_DEV_ONBOARDING_REVEAL / _STAGE / NIMVLETS_DEV_LANGUAGE.
+    if (onboardingActive_) {
+        if (const char* shot = std::getenv("NIMVLETS_DEV_PRODUCT_SHOT");
+            shot != nullptr && shot[0] != '\0') {
+            productWindow_.CaptureToBmpForQA(shot);
+            productWindow_.Close();
+            Shutdown();
+            return 0;
+        }
+    }
+
     bool running = true;
 
     SDL_Event event;
@@ -1903,6 +2208,13 @@ int SpikeApp::Run() {
         }
         if (confirmRedrawDeadlineMs_) {
             waitMs = std::min(waitMs, *confirmRedrawDeadlineMs_ - nowMs);
+        }
+        if (onboardingRevealDeadlineMs_) {
+            // El reveal secreto de los 44 s se integra al MISMO cálculo
+            // de next-deadline (brief §12): antes del deadline el loop
+            // puede dormir hasta el próximo evento o deadline, lo que
+            // venga primero; no hay ningún timer thread ni polling.
+            waitMs = std::min(waitMs, *onboardingRevealDeadlineMs_ - nowMs);
         }
         if (hoverDwellDeadlineMs_) {
             // Ver el comentario del campo en SpikeApp.h -- despierta el
@@ -2016,6 +2328,13 @@ int SpikeApp::Run() {
         if (confirmRedrawDeadlineMs_ && afterMs >= *confirmRedrawDeadlineMs_) {
             needsRedraw_ = true;
             confirmRedrawDeadlineMs_.reset();
+        }
+
+        // Deadline del reveal secreto de onboarding: transición UNA vez,
+        // un redibujo, y se acabó (brief §12: "after reveal: no ongoing
+        // secret timer work" — RevealOnboardingSecret limpia el deadline).
+        if (onboardingRevealDeadlineMs_ && afterMs >= *onboardingRevealDeadlineMs_) {
+            RevealOnboardingSecret(afterMs);
         }
 
         if (needsRedraw_) {

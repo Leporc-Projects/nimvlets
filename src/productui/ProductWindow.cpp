@@ -63,6 +63,8 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     view_ = CollectionView{};
     shopView_ = ShopView{};
     settingsView_ = SettingsView{};
+    onboardingView_ = OnboardingView{};
+    onboarding_ = false;
     section_ = ProductSection::kCollection;
 
     RecomputeScale();
@@ -99,6 +101,8 @@ void ProductWindow::Close() {
     view_ = CollectionView{};
     shopView_ = ShopView{};
     settingsView_ = SettingsView{};
+    onboardingView_ = OnboardingView{};
+    onboarding_ = false;
     section_ = ProductSection::kCollection;
     SDL_Log("nimvlets: Product UI window closed (resources released; pet runtime unaffected)");
 }
@@ -150,13 +154,43 @@ void ProductWindow::SetLanguage(core::Language language) {
     view_.SetLanguage(language);
     shopView_.SetLanguage(language);
     settingsView_.SetLanguage(language);
+    onboardingView_.SetLanguage(language);
 }
 
 void ProductWindow::SetPreferences(const core::Preferences& prefs) {
     settingsView_.SetPreferences(prefs);
 }
 
+void ProductWindow::EnterOnboarding(catalog::OnboardingOffer offer) {
+    onboarding_ = true;
+    onboardingView_.SetOffer(std::move(offer));
+    onboardingView_.OnEnter();
+    pendingExpose_ = true;
+    SDL_Log("nimvlets: Product UI entered ONBOARDING mode (first-run starter selection)");
+}
+
+void ProductWindow::ExitOnboarding() {
+    if (!onboarding_) {
+        return;
+    }
+    onboarding_ = false;
+    onboardingView_ = OnboardingView{};
+    section_ = ProductSection::kCollection;
+    pendingExpose_ = true;
+    SDL_Log("nimvlets: Product UI left onboarding mode (starter chosen)");
+}
+
+void ProductWindow::RevealOnboardingSecret() {
+    if (!onboarding_) {
+        return;
+    }
+    onboardingView_.RevealSecret();
+}
+
 bool ProductWindow::ActiveViewDirty() const {
+    if (onboarding_) {
+        return onboardingView_.Dirty();
+    }
     switch (section_) {
         case ProductSection::kShop:
             return shopView_.Dirty();
@@ -213,6 +247,7 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
                 view_.OnViewportChanged();
                 shopView_.OnViewportChanged();
                 settingsView_.OnViewportChanged();
+                onboardingView_.OnViewportChanged();
                 break;
             default:
                 break;
@@ -229,6 +264,41 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
             break;
         default:
             return out;
+    }
+
+    // Modo ONBOARDING (Block 09A): el gate de primer arranque se come
+    // TODO el input; la navegación de secciones no existe hasta que se
+    // elige un starter (brief §19). Un close de ventana igual se
+    // reporta — src/app decide re-enfocar en vez de cerrar (brief §25).
+    if (onboarding_) {
+        OnboardingViewResult r;
+        switch (event.type) {
+            case SDL_EVENT_MOUSE_MOTION:
+                if (event.motion.windowID != myId) return out;
+                out.consumed = true;
+                r = onboardingView_.OnMouseMove(event.motion.x, event.motion.y);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (event.button.windowID != myId || event.button.button != SDL_BUTTON_LEFT) return out;
+                out.consumed = true;
+                r = onboardingView_.OnMouseDown(event.button.x, event.button.y);
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (event.wheel.windowID != myId) return out;
+                out.consumed = true;
+                r = onboardingView_.OnWheel(event.wheel.y);
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (event.key.windowID != myId) return out;
+                out.consumed = true;
+                r = onboardingView_.OnKey(static_cast<int>(event.key.key), KeycodeShift(event.key.mod));
+                break;
+        }
+        if (r.hasSelection) {
+            out.hasOnboardingSelection = true;
+            out.onboardingSelection = r.selection;
+        }
+        return out;
     }
 
     // Rutea el input a la sección visible. Los tres ViewResult comparten
@@ -359,7 +429,13 @@ void ProductWindow::DrawFrame() {
     UiPainter painter(renderer_, scale_);
     const float w = static_cast<float>(logicalW);
     const float h = static_cast<float>(logicalH);
-    if (section_ == ProductSection::kShop) {
+    if (onboarding_) {
+        // El onboarding usa el arte `.nvprev` de los candidatos (mismo
+        // bundle liviano que la Collection) — NUNCA abre un `.nvpack`
+        // (brief §26).
+        onboardingView_.Render(painter, *text_, *previews_, w, h);
+        onboardingView_.ClearDirty();
+    } else if (section_ == ProductSection::kShop) {
         shopView_.Render(painter, *text_, *previews_, w, h);
         shopView_.ClearDirty();
     } else if (section_ == ProductSection::kSettings) {
