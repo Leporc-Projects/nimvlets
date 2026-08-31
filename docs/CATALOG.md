@@ -60,9 +60,10 @@ plataforma que el resto de formatos de este repositorio).
 
 ```
 magic       : 8 bytes, "NVCATLG1"
-schemaVersion: uint32   (4 desde Block 09A; ver §11–§13)
+schemaVersion: uint32   (5 desde la pasada de endurecimiento de Block 09A; ver §11–§13)
 entryCount  : uint32
 productionOnboardingReady : uint8 (0/1)   -- agregado en schema v4 (Block 09A), ver §13
+devSyntheticOnboarding    : uint8 (0/1)   -- agregado en schema v5 (Block 09A, endurecimiento), ver §13
 entries[entryCount]:
   petId              : string  (uint32 byte-length + UTF-8 bytes)
   variantId          : string
@@ -93,11 +94,20 @@ datos):
 - una entrada con `publiclyPurchasable=1` y `priceClicks=0` se rechaza
   (precio cero no soportado — brief §26). El compilador Python la
   rechaza también, y además rechaza un `price_clicks` negativo.
-- un `starterRole` fuera de {0,1,2} se rechaza. `productionOnboardingReady=1`
-  con menos de 3 entradas `starterRole=1` (normal) se rechaza — defensa
-  en profundidad del gate de contenido de onboarding (ver §13 y
-  `docs/ONBOARDING.md` §8). El compilador Python exige además que el
-  contenido (pack + `.nvprev`) de cada starter normal exista en disco.
+- un `starterRole` fuera de {0,1,2} se rechaza.
+- un `starterRole=1` (normal) con `variantId` no vacío se rechaza — un
+  starter normal es un Nimvlet lógico entero, así dos variantes del
+  mismo pet no inflan la tríada (DEC-133).
+- `productionOnboardingReady=1` o `devSyntheticOnboarding=1` con menos de
+  3 IDENTIDADES LÓGICAS distintas de starter normal (petId distinto) se
+  rechaza — defensa en profundidad del gate de contenido de onboarding
+  (ver §13 y `docs/ONBOARDING.md` §8). `productionOnboardingReady=1` y
+  `devSyntheticOnboarding=1` a la vez se rechaza (mutuamente
+  excluyentes). El compilador Python exige además, para
+  `productionOnboardingReady`, que el `.nvpack` y el `.nvprev` de cada
+  starter normal existan, parseen, y su identidad EMBEBIDA coincida con
+  la de la entrada de catálogo (ver §13) — que un archivo exista nunca
+  alcanza.
 
 **Deliberadamente NO valida** que cada `packPath` apunte a un archivo
 que realmente existe: eso requeriría tocar el filesystem desde un
@@ -467,8 +477,10 @@ Ver `docs/PRODUCT_UI.md` §16–§19 y DEC-125/DEC-126/DEC-127.
 
 Block 09A sube `"NVCATLG1"` a **v4**: `starterRole` (u8) por entrada +
 `productionOnboardingReady` (u8) a nivel de catálogo — DATO, nunca una
-rama `if (pet == "artu")` en el runtime/UI (brief §7). Ver
-`docs/ONBOARDING.md` para el diseño completo y DEC-132.
+rama `if (pet == "artu")` en el runtime/UI (brief §7). La pasada de
+endurecimiento lo sube a **v5**: agrega `devSyntheticOnboarding` (u8) a
+nivel de catálogo. Ver `docs/ONBOARDING.md` para el diseño completo y
+DEC-132 / DEC-133.
 
 **Tres caminos, tres responsabilidades distintas** (brief §17):
 
@@ -479,10 +491,32 @@ rama `if (pet == "artu")` en el runtime/UI (brief §7). Ver
 | **Grant de onboarding** (futuro) | `starterRole` (u8, schema v4) | El usuario nuevo elige un starter; se otorga EXACTAMENTE esa identidad (para Frin, la variante concreta). Balance 0. Política NUEVA — no reutiliza la migración histórica. | `catalog::OnboardingPolicy` (DEC-132) |
 
 `productionOnboardingReady` arma el onboarding de PRODUCCIÓN y solo se
-puede compilar en `true` con la tríada de starters normales
-(Artu/Rato/Rin Rin) presente y su contenido (pack + `.nvprev`) en disco
-— ver `tools/compile_pet_catalog.py` y `docs/ONBOARDING.md` §8. El
-catálogo de dev actual: `false`, cero `starterRole` → **el arranque
-normal es idéntico al de antes de Block 09A**. Block 09B lo activa; el
-harness solo-DEV (`NIMVLETS_DEV_ONBOARDING`) usa un catálogo sintético
-aparte (`assets/dev/onboarding_dev_catalog.nvcat`).
+puede compilar en `true` cuando el onboarding tiene contenido REAL Y
+COINCIDENTE con la identidad de cada starter (DEC-133): ≥ 3
+IDENTIDADES LÓGICAS distintas de starter normal (Artu/Rato/Rin Rin),
+y para cada una el `.nvpack` y el `.nvprev` existen, parsean, y su
+identidad EMBEBIDA pertenece a ese starter — el `id` del pack ==
+`petId` y sin `variantGroup`; el `pet_id`/`variant_id` de la preview
+== los de la entrada y su `source_pack` == basename del `packPath`.
+Un `pet_id: "artu"` que apunta al pack/preview de Bunny se RECHAZA
+aunque los archivos de Bunny existan. Ver `tools/compile_pet_catalog.py`
+(`_validate_starter_content`) y `docs/ONBOARDING.md` §8.
+
+`devSyntheticOnboarding` es el opt-in EXPLÍCITO del harness solo-DEV
+(`NIMVLETS_DEV_ONBOARDING`), que usa un catálogo sintético aparte
+(`assets/dev/onboarding_dev_catalog.nvcat`) con descriptores ALIAS
+(`artu_dev` → pack de Bunny…). Con él se sigue exigiendo la tríada de
+identidades lógicas distintas y que cada pack/preview exista y parsee,
+pero NO la coincidencia de identidad. Es MUTUAMENTE EXCLUYENTE con
+`productionOnboardingReady` (el compilador y el loader rechazan ambos
+en `true`), y `src/app` exige este byte para forzar el gate DEV — así
+un alias nunca alcanza el camino de producción. El loader, en runtime,
+NO reabre los `.nvpack` de decenas de MB para re-verificar identidad:
+esa es una garantía de TIEMPO DE COMPILACIÓN; el loader solo re-checa
+lo estructural barato (tríada de identidades lógicas, regla
+normal-sin-variante, exclusión mutua).
+
+El catálogo de producción actual (`assets/dev/pet_catalog.nvcat`):
+`productionOnboardingReady = false`, `devSyntheticOnboarding = false`,
+cero `starterRole` → **el arranque normal es idéntico al de antes de
+Block 09A**. Block 09B lo activa (ver `docs/ONBOARDING.md` §14).

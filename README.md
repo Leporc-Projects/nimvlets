@@ -277,9 +277,13 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa3 NIMVLETS_DEV_HIDE_PET=1 \
 # máquina de estados/UI real con descriptores SINTÉTICOS. Usar SIEMPRE
 # un NIMVLETS_DEV_APPDATA_DIR aislado y fresco.
 # NIMVLETS_DEV_ONBOARDING=1              -> carga el catálogo sintético
-#   assets/dev/onboarding_dev_catalog.nvcat y fuerza el gate (si el
-#   lifecycle es kPending). artu_dev/rato_dev/rinrin_dev NO son
-#   Artu/Rato/Rin Rin — nunca se envían.
+#   assets/dev/onboarding_dev_catalog.nvcat (compilado con
+#   dev_synthetic_onboarding: true) y fuerza el gate si el lifecycle es
+#   kPending Y ese catálogo se declaró sintético. artu_dev/rato_dev/
+#   rinrin_dev NO son Artu/Rato/Rin Rin (packs/previews ALIAS) — nunca
+#   se envían; ese byte es mutuamente excluyente con
+#   production_onboarding_ready, así el alias nunca arma producción
+#   (DEC-133).
 # NIMVLETS_DEV_ONBOARDING_REVEAL_MS=<n>  -> deadline del secreto en <n> ms
 #   en vez de 44000 (smoke sin dormir 44 s).
 # NIMVLETS_DEV_ONBOARDING_REVEAL=1       -> revela el secreto al arranque.

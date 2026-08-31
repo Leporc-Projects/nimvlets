@@ -4912,3 +4912,88 @@ Smokes: arranque normal sin cambios, flujo DEV de starter normal,
 reveal a 722 ms, selección de Frin macho y hembra, completitud +
 reinicio (lifecycle=completed, balance 0, solo la variante elegida
 poseída), ciclo de vida del Product UI.
+
+### DEC-133 — El gate de onboarding de producción exige contenido que COINCIDE con la identidad del starter, no solo que exista; y separa el harness DEV con un byte propio
+**Status:** DECIDIDO · Block 09A (pasada de endurecimiento). **Depende de**
+DEC-132. **Refina** el gate de contenido de DEC-132 sin reabrir la
+arquitectura de onboarding/persistencia/timing. NO habilita el
+onboarding de producción (sigue sin contenido de Artu/Rato/Rin Rin).
+
+**Contexto.** El gate de DEC-132 probaba que los archivos de starter
+EXISTEN (conteo de `starter_role: normal`, `pack_path` presente,
+`.nvprev` hermano presente). Necesario pero no suficiente: un
+`pet_id: "artu"` que apunta al `.nvpack`/`.nvprev` de Bunny compilaba
+`production_onboarding_ready: true` sin problema, porque los archivos de
+Bunny existen. "El archivo existe" no puede significar "el contenido del
+starter está listo para producción". Además el conteo era por FILAS, así
+que filas duplicadas o variantes de un mismo Nimvlet podían inflar la
+tríada. Y el catálogo sintético del harness DEV declaraba
+`production_onboarding_ready: true` con alias a propósito — exactamente
+la misconfiguración que el gate de producción debe rechazar.
+
+**Decisión.**
+
+- **Señal de identidad/procedencia (ya en los formatos en disco).** El
+  `.nvpack` ("NVPACK2") lleva embebidos `id` y `variantGroup`; el
+  `.nvprev` ("NVPREV1") lleva `pet_id`, `variant_id` y `source_pack`
+  (basename del pack de origen). No se inventa ningún campo nuevo en
+  esos formatos, ni firmas criptográficas, ni un registro de assets.
+- **Gate de producción (compilador, prueba primaria) —
+  `tools/compile_pet_catalog.py` `_validate_starter_content`.** Con
+  `production_onboarding_ready: true`, para cada starter normal: su
+  `.nvpack` y su `.nvprev` existen, PARSEAN (lectores reales
+  `read_pet_pack` / el nuevo `read_pet_preview`), y su identidad
+  EMBEBIDA pertenece a ese starter — `pack.id == pet_id` y
+  `pack.variantGroup` vacío; `prev.pet_id`/`prev.variant_id` == los de
+  la entrada y `prev.source_pack == basename(pack_path)`. Cualquier
+  desajuste → la compilación FALLA ruidosamente.
+- **Identidades lógicas distintas.** La readiness cuenta `pet_id`
+  distintos entre los `starter_role: normal`, no filas. Un
+  `starter_role: normal` con `variant_id` no vacío se rechaza (un
+  starter normal es un Nimvlet lógico entero). El secreto (Frin) sigue
+  sin contar.
+- **`devSyntheticOnboarding` — catálogo "NVCATLG1" v5.** Un byte a nivel
+  de catálogo, tras `productionOnboardingReady`, MUTUAMENTE EXCLUYENTE
+  con él (el compilador y el loader rechazan ambos en `true`). Es el
+  opt-in EXPLÍCITO del harness solo-DEV: se sigue exigiendo la tríada de
+  identidades lógicas distintas + que cada pack/preview exista y parsee,
+  pero NO la coincidencia de identidad (los alias `artu_dev` → pack de
+  Bunny son el punto). El catálogo sintético dejó de declarar
+  `production_onboarding_ready`.
+- **`src/app` (`ResolveOnboarding`).** La rama DEV ahora exige
+  `catalog_.DevSyntheticOnboarding()` además de `NIMVLETS_DEV_ONBOARDING`
+  + `kPending`; si el catálogo cargado no es sintético, loguea y NO
+  fuerza el gate. Las dos ramas quedan simétricas y disjuntas: un alias
+  nunca alcanza producción (`ProductionOnboardingReady()` siempre
+  `false` en el sintético), y un catálogo real bajo el env var no se
+  fuerza a un onboarding cuyo contenido no coincide.
+- **Defensa del loader (barata, runtime) — `PetCatalogLoader`.** Lee el
+  byte v5, expone `PetCatalog::DevSyntheticOnboarding()`, rechaza ambos
+  flags en `true`, rechaza un `starterRole` normal con `variantId`, y
+  rechaza `productionOnboardingReady`/`devSyntheticOnboarding` con < 3
+  identidades lógicas distintas de starter normal. **NO** reabre los
+  `.nvpack` de decenas de MB para re-verificar identidad embebida: el
+  `.nvcat` no lleva esa metadata y "el runtime no debe cargar todos los
+  packs al arranque". La coincidencia de identidad pack/preview es una
+  garantía de TIEMPO DE COMPILACIÓN; el loader re-checa solo lo
+  estructural. `catalog::CountNormalStarters` también dedupe por `petId`.
+
+**Verificado.** `tools/test_asset_pipeline.py` `PetCatalogCompileTest`
+(+14: acepta 3 starters reales y coincidentes; rechaza pack faltante /
+preview faltante / identidad de pack alias / identidad de preview alias /
+preview derivada de otro pack / pack malformado / preview malformada /
+solo 2 identidades lógicas / el secreto no cuenta / filas-variante no
+inflan / ambos flags a la vez; `dev_synthetic_onboarding` permite alias
+pero exige la tríada y no arma producción; el `.nvcat` de dev versionado
+es sintético, el de producción tiene onboarding deshabilitado).
+`tests/PetCatalogLoaderTest.cpp` (+3: byte v5 round-trip + exclusión
+mutua + tríada de identidades lógicas para devSynthetic; normal con
+variante rechazado; el secreto no cuenta). `tests/OnboardingPolicyTest.cpp`
+(+1: `CountNormalStarters` cuenta identidades lógicas distintas).
+418 tests C++, 162 Python. Smokes: arranque normal idéntico (catálogo
+v5, "production onboarding not armed", siembra, bunny, balance 0); flujo
+DEV (catálogo sintético → gate → reveal → CHOOSE frin/female →
+"onboarding COMPLETE … lifecycle=completed") + reinicio (no re-onboarda)
++ re-run bajo el env var ("already completed"); `NIMVLETS_DEV_ONBOARDING`
+con un catálogo NO sintético → "not a dev-synthetic onboarding catalog;
+not forcing the gate" → arranque normal.

@@ -31,16 +31,28 @@ no se justificaba frente a ningún beneficio real).
 - **`pet_catalog_manifest.json`** — el manifest del catálogo (ver
   `docs/CATALOG.md`): hand-written, no generado — no hay paso de
   derivación para un catálogo como sí lo hay para frames de pixeles.
-  Schema v3 desde Block 07: cada entrada declara además `price_clicks`
-  (precio de compra en el Shop) y `publicly_purchasable`. Precios
-  provisionales de QA: Bunny 120, Nidir 300; Frin `publicly_purchasable:
-  false` en las dos variantes (no aparece en el Shop normal).
+  Schema v5 desde la pasada de endurecimiento de Block 09A: cada entrada
+  declara `price_clicks` / `publicly_purchasable` (Block 07) y
+  `starter_role` (Block 09A); a nivel de catálogo,
+  `production_onboarding_ready` (Block 09A) y `dev_synthetic_onboarding`
+  (endurecimiento). Precios provisionales de QA: Bunny 120, Nidir 300;
+  Frin `publicly_purchasable: false` en las dos variantes (no aparece en
+  el Shop normal). `production_onboarding_ready: false` y sin roles de
+  starter — el onboarding de producción no está habilitado.
 - **`pet_catalog.nvcat`** — el catálogo compilado que `src/app` carga
   de verdad al arrancar (`catalog::LoadCatalogFromFile`), construido
   desde `pet_catalog_manifest.json` por `tools/compile_pet_catalog.py`
-  ("NVCATLG1" v3). Binario, no pensado para leerse directamente.
+  ("NVCATLG1" v5). Binario, no pensado para leerse directamente.
   Regenerar tras editar el manifest:
   `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
+- **`onboarding_dev_catalog_manifest.json` / `onboarding_dev_catalog.nvcat`**
+  — catálogo SÓLO-DEV para el harness de onboarding de Block 09A
+  (`dev_synthetic_onboarding: true`): descriptores sintéticos
+  `artu_dev` / `rato_dev` / `rinrin_dev` que prestan packs/previews
+  existentes para ejercitar la máquina de estados/UI. **NUNCA se
+  envía**; sólo lo carga `src/app` con `NIMVLETS_DEV_ONBOARDING` seteada.
+  Ver `docs/ONBOARDING.md` §10 y DEC-133. Regenerar:
+  `python3 tools/compile_pet_catalog.py assets/dev/onboarding_dev_catalog_manifest.json assets/dev/onboarding_dev_catalog.nvcat`.
 - **`<pack>.nvprev`** (Block 06.2) — la vista previa estática y liviana
   (`"NVPREV1"`, ~0.3–0.4 MB c/u) que el Product UI usa para dibujar el
   arte del hero/gallery de la Collection **sin abrir el `.nvpack`

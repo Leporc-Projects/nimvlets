@@ -12,9 +12,13 @@ oculto para comprar la variante de Frin no elegida.
 Fuentes: `src/persistence/AppState.h` (v5), `src/catalog/OnboardingPolicy.{h,cpp}`,
 `src/catalog/PetCatalog.h` (StarterRole), `src/productui/OnboardingLayout.{h,cpp}`
 + `OnboardingView.{h,cpp}`, `src/app/SpikeApp.cpp` (`ResolveOnboarding` /
-`HandleOnboardingSelection`), `tools/compile_pet_catalog.py`. Decisiones:
-DEC-131 (lifecycle / schema v5) y DEC-132 (metadata de starter + gate +
-44 s + harness).
+`HandleOnboardingSelection`), `tools/compile_pet_catalog.py`
+(`_validate_starter_content`), `tools/read_pet_pack.py` /
+`tools/read_pet_preview.py`. Decisiones: DEC-131 (lifecycle / schema v5),
+DEC-132 (metadata de starter + gate + 44 s + harness), y **DEC-133**
+(el gate de producción exige contenido COINCIDENTE con la identidad del
+starter, no solo existente; catálogo "NVCATLG1" v5 con
+`devSyntheticOnboarding`).
 
 ## 1. La distinción crítica: dos poblaciones
 
@@ -198,29 +202,73 @@ onboarding:
 ## 8. Gate de contenido listo para producción
 
 **El arranque normal de producción NUNCA debe mostrar un onboarding roto
-cuyos assets de starter no existen** (brief §8/§31). El gate:
+cuyos assets de starter no existen — ni uno cuyos assets son ALIAS del
+contenido de otro Nimvlet** (brief §8/§31; endurecido por DEC-133). Que
+un archivo EXISTA no significa "el contenido del starter está listo para
+producción": el gate exige contenido REAL Y COINCIDENTE CON LA IDENTIDAD
+del starter.
 
-1. **A nivel de manifest / compilador** (`tools/compile_pet_catalog.py`):
-   `production_onboarding_ready: true` solo se puede COMPILAR si el
-   manifest declara ≥ 3 entradas `starter_role: "normal"` **y** el
-   contenido de cada una (el `pack_path` **y** su `.nvprev` hermano)
-   existe en disco. Si no, la compilación FALLA ruidosamente. La
-   metadata del secreto (Frin) sola nunca cuenta.
-2. **A nivel de loader** (`PetCatalogLoader`): defensa en profundidad —
-   un `.nvcat` hecho a mano con `productionOnboardingReady = true` y < 3
-   starters normales se RECHAZA.
-3. **A nivel de runtime** (`catalog::EvaluateOnboardingReadiness`):
-   `armed` sii `catalog.ProductionOnboardingReady()` **y** el conteo de
-   starters normales ≥ `kRequiredNormalStarterCount` (== 3). El runtime
-   confía en el datum ya validado y re-verifica el conteo.
+### Señales de identidad / procedencia (ya en los formatos en disco)
+
+- **`.nvpack` ("NVPACK2")** lleva embebidos `id` y `variantGroup` del
+  pet (`src/content/PetPackLoader.cpp`).
+- **`.nvprev` ("NVPREV1")** lleva embebidos `pet_id`, `variant_id`, y
+  `source_pack` (el basename del `.nvpack` del que se derivó —
+  `src/productui/PreviewArtifact.cpp`).
+
+### El gate, en capas
+
+1. **Compilador** (`tools/compile_pet_catalog.py`,
+   `_validate_starter_content`) — **prueba primaria**.
+   `production_onboarding_ready: true` solo COMPILA si:
+   - el manifest declara ≥ 3 **identidades lógicas distintas** con
+     `starter_role: "normal"` (un `pet_id` distinto cada una; un starter
+     normal no lleva `variant_id`, así dos variantes de un mismo pet no
+     cuentan como dos — brief de endurecimiento §6);
+   - para cada starter normal, su `.nvpack` existe, **parsea** (lector
+     real `read_pet_pack`), y su identidad embebida coincide:
+     `id == pet_id` **y** `variantGroup` vacío;
+   - su `.nvprev` hermano existe, **parsea**
+     (`read_pet_preview`), y su identidad embebida coincide:
+     `pet_id`/`variant_id` iguales a los de la entrada **y**
+     `source_pack == basename(pack_path)` (prueba que la preview se
+     derivó de ESE pack).
+   Un `pet_id: "artu"` que apunta al pack/preview de Bunny se RECHAZA
+   aunque los archivos de Bunny existan. La metadata del secreto (Frin)
+   sola nunca cuenta.
+2. **Loader** (`PetCatalogLoader`) — defensa barata en runtime (brief de
+   endurecimiento §9). Rechaza un `.nvcat` hecho a mano con
+   `productionOnboardingReady` (o `devSyntheticOnboarding`) y < 3
+   identidades lógicas distintas de starter normal; rechaza un
+   `starterRole` normal con `variantId`; rechaza ambos flags de
+   onboarding en `true`. **NO** reabre los `.nvpack` de decenas de MB
+   para re-verificar identidad embebida — el `.nvcat` no lleva esa
+   metadata y "el runtime no debe cargar todos los packs al arranque".
+   La coincidencia de identidad pack/preview es una **garantía de tiempo
+   de compilación**; el loader confía en el `productionOnboardingReady`
+   ya validado y re-checa solo lo estructural.
+3. **Runtime** (`catalog::EvaluateOnboardingReadiness`): `armed` sii
+   `catalog.ProductionOnboardingReady()` **y** el conteo de identidades
+   lógicas distintas de starter normal ≥ `kRequiredNormalStarterCount`
+   (== 3). `CountNormalStarters` dedupe por `petId`.
 
 `src/app` (`ResolveOnboarding`) entra al gate de onboarding SOLO si:
 
 ```
-onboarding armado
-  && appState_.onboardingLifecycle == kPending
-  && !saveFileExisted            (producción — un archivo corrupto no se onboardea)
+producción:  readiness.armed
+             && appState_.onboardingLifecycle == kPending
+             && !saveFileExisted            (un archivo corrupto no se onboardea)
+
+DEV harness: catalog_.DevSyntheticOnboarding()
+             && NIMVLETS_DEV_ONBOARDING seteada
+             && appState_.onboardingLifecycle == kPending
 ```
+
+Las dos ramas son simétricas y disjuntas: un catálogo sintético-DEV
+tiene `ProductionOnboardingReady() == false` (nunca arma producción), y
+un catálogo de producción real tiene `DevSyntheticOnboarding() == false`
+(el env var solo no fuerza el gate). El compilador impone que los dos
+bytes sean mutuamente excluyentes.
 
 ## 9. Por qué el onboarding de producción sigue DESHABILITADO tras Block 09A
 
@@ -247,13 +295,19 @@ exista contenido de producción:
 
 - `NIMVLETS_DEV_ONBOARDING=1` — carga `assets/dev/onboarding_dev_catalog.nvcat`
   EN LUGAR de `pet_catalog.nvcat`, y fuerza el gate mientras el lifecycle
-  sea `kPending`. El catálogo DEV declara `artu_dev` / `rato_dev` /
-  `rinrin_dev` (`starter_role: normal`, prestando packs/previews
-  existentes) + `frin` male/female (`starter_role: secret`, packs reales)
-  + `production_onboarding_ready: true`. **`artu_dev` etc. NO son Artu /
-  Rato / Rin Rin**: son descriptores sintéticos para QA del flujo
-  (selección → confirmación → grant → completitud → reinicio →
-  activación). NUNCA se envía. El `(dev)` en el display name lo hace
+  sea `kPending` **y** ese catálogo tenga `dev_synthetic_onboarding: true`
+  (si no, `src/app` loguea "not a dev-synthetic onboarding catalog" y NO
+  fuerza el gate — DEC-133). El catálogo DEV declara `artu_dev` /
+  `rato_dev` / `rinrin_dev` (`starter_role: normal`, prestando
+  packs/previews existentes) + `frin` male/female (`starter_role: secret`,
+  packs reales) + **`dev_synthetic_onboarding: true`** (NO
+  `production_onboarding_ready` — son mutuamente excluyentes). **`artu_dev`
+  etc. NO son Artu / Rato / Rin Rin**: son descriptores sintéticos para
+  QA del flujo (selección → confirmación → grant → completitud → reinicio
+  → activación). El compilador NO exige coincidencia de identidad bajo
+  `dev_synthetic_onboarding` (los alias son el punto), pero SÍ exige la
+  tríada de identidades lógicas distintas y que cada pack/preview exista
+  y parsee. NUNCA se envía. El `(dev)` en el display name lo hace
   inconfundible.
 - `NIMVLETS_DEV_ONBOARDING_REVEAL_MS=<n>` — usa `<n>` ms en vez de 44000
   para el deadline (smoke sin dormir 44 s).
@@ -334,12 +388,19 @@ onboarding abierta y en reposo es efectivamente ociosa.
 1. Agregar el contenido de producción de **Artu**, **Rato** y **Rin Rin**
    (`assets/source/nimvlets/…`, generadores, `.nvpack` + `.nvprev` en
    `assets/dev/`) — mismo contrato que Nidir/Frin
-   (`docs/PET_CONTENT_SPEC.md` / `docs/NIDIR_CONTENT.md`).
+   (`docs/PET_CONTENT_SPEC.md` / `docs/NIDIR_CONTENT.md`). Cada `.nvpack`
+   debe llevar su `id` embebido == su `pet_id` de catálogo (lo hace el
+   generador al setear `"id"` en el manifest del pack), y su `.nvprev`
+   se genera con `tools/compile_pet_previews.py` (que sella el `pet_id` /
+   `variant_id` / `source_pack` correctos).
 2. En `assets/dev/pet_catalog_manifest.json`: agregar las 3 entradas con
-   `starter_role: "normal"`, y poner `production_onboarding_ready: true`.
-   El compilador validará que los 6 archivos (3 packs + 3 previews)
-   existen; si no, falla.
-3. Recompilar `pet_catalog.nvcat`.
+   `starter_role: "normal"` (sin `variant_id`), y poner
+   `production_onboarding_ready: true`. El compilador valida que los 6
+   archivos existen, **parsean, y su identidad embebida coincide** con
+   cada entrada (DEC-133); si algo no calza, falla ruidosamente. No hace
+   falta tocar `dev_synthetic_onboarding` (queda `false`).
+3. Recompilar `pet_catalog.nvcat`
+   (`python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`).
 4. (Opcional) retirar / ajustar la siembra de propiedad por catálogo
    (`initially_owned` / `SeedEntitlementsFromCatalog`) una vez que todo
    usuario nuevo pasa por onboarding (brief §17). Los usuarios dev/legacy
