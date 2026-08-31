@@ -236,6 +236,25 @@ bool TestReadinessFromCatalog() {
     return true;
 }
 
+// DEC-133: CountNormalStarters cuenta IDENTIDADES LÓGICAS distintas, no
+// filas — así filas duplicadas o "variantes" de un mismo Nimvlet no
+// inflan la tríada de readiness. (El loader/compilador rechazan esas
+// formas de raíz; acá se prueba que aunque una llegara a un PetCatalog
+// construido a mano, la política no la cuenta de más.)
+bool TestNormalStarterCountIsDistinctLogical() {
+    std::vector<CatalogEntry> e;
+    e.push_back(Entry("artu", "", StarterRole::kNormal, /*isDefault=*/true));
+    e.push_back(Entry("artu", "", StarterRole::kNormal));       // fila duplicada
+    e.push_back(Entry("artu", "gold", StarterRole::kNormal));   // "variante" del mismo pet
+    e.push_back(Entry("rato", "", StarterRole::kNormal));
+    const PetCatalog catalog(std::move(e), /*productionOnboardingReady=*/true);
+
+    // 4 filas kNormal, pero solo 2 identidades lógicas (artu, rato).
+    NIMVLETS_CHECK(CountNormalStarters(catalog) == 2);
+    NIMVLETS_CHECK(!EvaluateCatalogOnboardingReadiness(catalog).armed);
+    return true;
+}
+
 // El catálogo de dev REAL (bunny/nidir/frin, sin roles de starter, no
 // marcado ready) nunca arma onboarding de producción — brief §31.
 bool TestCurrentDevCatalogDoesNotArmOnboarding() {
@@ -267,6 +286,8 @@ void RegisterOnboardingPolicyTests(testing::TestRunner& runner) {
     runner.Add("OnboardingPolicy/SecretRevealDeadlineBoundaries", TestSecretRevealDeadlineBoundaries);
     runner.Add("OnboardingPolicy/ReadinessGate", TestReadinessGate);
     runner.Add("OnboardingPolicy/ReadinessFromCatalog", TestReadinessFromCatalog);
+    runner.Add("OnboardingPolicy/NormalStarterCountIsDistinctLogical",
+               TestNormalStarterCountIsDistinctLogical);
     runner.Add("OnboardingPolicy/CurrentDevCatalogDoesNotArmOnboarding",
                TestCurrentDevCatalogDoesNotArmOnboarding);
 }

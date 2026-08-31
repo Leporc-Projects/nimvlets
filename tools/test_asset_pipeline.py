@@ -2932,11 +2932,13 @@ class PetPreviewCompileTest(unittest.TestCase):
 
 
 def _read_nvcat(path: str) -> dict:
-    """Lector del formato "NVCATLG1" v4 (tools/compile_pet_catalog.py) —
+    """Lector del formato "NVCATLG1" v5 (tools/compile_pet_catalog.py) —
     espejo intencional de src/catalog/PetCatalogLoader.cpp. Solo para
     los tests: verifica lo que el compilador realmente escribió. v4
     (Block 09A) agrega `production_onboarding_ready` a nivel de catálogo
-    y `starter_role` por entrada."""
+    y `starter_role` por entrada; v5 (pasada de endurecimiento) agrega
+    `dev_synthetic_onboarding` a nivel de catálogo tras
+    `production_onboarding_ready`."""
     with open(path, "rb") as f:
         data = f.read()
     assert data[:8] == b"NVCATLG1", data[:8]
@@ -2970,6 +2972,7 @@ def _read_nvcat(path: str) -> dict:
     schema_version = u32()
     count = u32()
     production_onboarding_ready = bool(u8())
+    dev_synthetic_onboarding = bool(u8())
     entries = []
     for _ in range(count):
         entries.append(
@@ -2988,33 +2991,103 @@ def _read_nvcat(path: str) -> dict:
     return {
         "schema_version": schema_version,
         "production_onboarding_ready": production_onboarding_ready,
+        "dev_synthetic_onboarding": dev_synthetic_onboarding,
         "entries": entries,
     }
 
 
 class PetCatalogCompileTest(unittest.TestCase):
-    """tools/compile_pet_catalog.py: el catálogo binario "NVCATLG1" v4
+    """tools/compile_pet_catalog.py: el catálogo binario "NVCATLG1" v5
     que src/app carga al arrancar. Block 07 agrega price_clicks +
     publicly_purchasable por entrada (brief §10); Block 09A agrega
     starter_role por entrada + production_onboarding_ready a nivel de
-    catálogo, con un gate de contenido (brief §8/§30)."""
+    catálogo, con un gate de contenido (brief §8/§30); la pasada de
+    endurecimiento (DEC-133) exige que el contenido de cada starter de
+    producción COINCIDA con su identidad y agrega
+    dev_synthetic_onboarding para separar el harness solo-DEV."""
 
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_catalog_compile_")
         self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
         import compile_pet_catalog  # noqa: E402
+        import compile_pet_pack  # noqa: E402
+        import compile_pet_preview  # noqa: E402
 
         self.compile_pet_catalog = compile_pet_catalog
-        # pack_path se valida contra el filesystem al compilar — se crean
-        # archivos vacíos con las rutas esperadas.
+        self.compile_pet_pack = compile_pet_pack
+        self.compile_pet_preview = compile_pet_preview
+        # pack_path se valida contra el filesystem al compilar — para los
+        # tests que NO ejercitan el gate de onboarding basta con archivos
+        # vacíos en las rutas esperadas.
         for name in ("b.nvpack", "n.nvpack", "f.nvpack"):
             with open(os.path.join(self.tmpdir, name), "wb"):
                 pass
 
-    def _compile(self, entries: list, schema_version: int = 4, production_onboarding_ready: bool = False) -> dict:
+    # --- fixtures de contenido REAL y COINCIDENTE ---------------------
+    #
+    # Assets de producción de Artu/Rato/Rin Rin no existen todavía
+    # (brief §8: "Use temporary test fixtures"). Estos son packs
+    # NVPACK2 mínimos de verdad (un estado / un frame) cuya identidad
+    # EMBEBIDA (`id`) coincide con el pet_id, más su `.nvprev` hermano
+    # derivado de ESE pack. Nunca son los assets reales.
+
+    def _matching_starter(self, pet_id: str, pack_basename: str | None = None) -> str:
+        """Compila un `<pack_basename>.nvpack` cuya identidad embebida es
+        `pet_id`, y su `.nvprev` hermano. Devuelve el basename del pack
+        (relativo a self.tmpdir, que es el cwd al compilar el catálogo)."""
+        pack_basename = pack_basename or f"{pet_id}_pack.nvpack"
+        frame_name = f"{pet_id}_frame.png"
+        prep_dev_sprite.write_png_rgba(
+            os.path.join(self.tmpdir, frame_name), 16, 16,
+            _solid_frame(16, 16, (170, 90, 40), (3, 3, 13, 13)))
+        manifest = {
+            "id": pet_id,
+            "display_name": pet_id.title(),
+            "canvas_width": 16,
+            "canvas_height": 16,
+            "states": [
+                {
+                    "id": "default",
+                    "base_animation": {
+                        "id": "idle_base",
+                        "kind": "static",
+                        "frames": [{"source": frame_name, "duration_ms": 0}],
+                    },
+                    "click_actions": [],
+                }
+            ],
+        }
+        mpath = os.path.join(self.tmpdir, f"{pet_id}_pack_manifest.json")
+        with open(mpath, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        pack_path = os.path.join(self.tmpdir, pack_basename)
+        self.compile_pet_pack.compile_pack(mpath, pack_path)
+        self.compile_pet_preview.compile_preview(
+            pack_path, pet_id, "", pack_path.replace(".nvpack", ".nvprev"))
+        return pack_basename
+
+    def _triad_entries(self) -> list:
+        """Artu/Rato/Rin Rin con contenido real y coincidente."""
+        return [
+            {"pet_id": "artu", "display_name": "Artu",
+             "pack_path": self._matching_starter("artu"), "is_default": True, "starter_role": "normal"},
+            {"pet_id": "rato", "display_name": "Rato",
+             "pack_path": self._matching_starter("rato"), "starter_role": "normal"},
+            {"pet_id": "rinrin", "display_name": "Rin Rin",
+             "pack_path": self._matching_starter("rinrin"), "starter_role": "normal"},
+        ]
+
+    def _compile(
+        self,
+        entries: list,
+        schema_version: int = 5,
+        production_onboarding_ready: bool = False,
+        dev_synthetic_onboarding: bool = False,
+    ) -> dict:
         manifest = {
             "schema_version": schema_version,
             "production_onboarding_ready": production_onboarding_ready,
+            "dev_synthetic_onboarding": dev_synthetic_onboarding,
             "entries": entries,
         }
         mpath = os.path.join(self.tmpdir, "manifest.json")
@@ -3028,6 +3101,9 @@ class PetCatalogCompileTest(unittest.TestCase):
         finally:
             os.chdir(old)
         return _read_nvcat(opath)
+
+    def _err(self):
+        return self.assertRaises(self.compile_pet_catalog.CatalogCompileError)
 
     def test_shop_metadata_round_trips(self) -> None:
         cat = self._compile(
@@ -3057,8 +3133,9 @@ class PetCatalogCompileTest(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(cat["schema_version"], 4)
+        self.assertEqual(cat["schema_version"], 5)
         self.assertFalse(cat["production_onboarding_ready"])
+        self.assertFalse(cat["dev_synthetic_onboarding"])
         self.assertEqual(cat["entries"][0]["starter_role"], 0)  # none, por default
         self.assertEqual(cat["entries"][0]["price_clicks"], 120)
         self.assertTrue(cat["entries"][0]["publicly_purchasable"])
@@ -3104,11 +3181,13 @@ class PetCatalogCompileTest(unittest.TestCase):
                 ]
             )
 
-    def test_schema_version_3_is_rejected(self) -> None:
+    def test_schema_version_4_is_rejected(self) -> None:
+        # El .nvcat es un artefacto de build sin ruta de migración: la
+        # pasada de endurecimiento subió el schema a 5.
         with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
             self._compile(
                 [{"pet_id": "p", "display_name": "P", "pack_path": "b.nvpack", "is_default": True}],
-                schema_version=3,
+                schema_version=4,
             )
 
     # --- Block 09A: starter_role + production_onboarding_ready ---------
@@ -3134,39 +3213,176 @@ class PetCatalogCompileTest(unittest.TestCase):
                   "is_default": True, "starter_role": "hero"}]
             )
 
-    def test_production_ready_requires_three_normal_starters(self) -> None:
-        # ready + solo 1 normal -> rechazado (brief §8/§30).
-        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
-            self._compile(
-                [
-                    {"pet_id": "artu", "display_name": "Artu", "pack_path": "b.nvpack",
-                     "is_default": True, "starter_role": "normal"},
-                    {"pet_id": "frin", "variant_id": "male", "display_name": "Frin",
-                     "pack_path": "f.nvpack", "starter_role": "secret"},
-                ],
-                production_onboarding_ready=True,
-            )
+    # --- Pasada de endurecimiento (DEC-133): el gate de producción exige
+    #     contenido REAL Y COINCIDENTE con la identidad del starter ------
+    #
+    # Cada uno de estos tests FALLA bajo la implementación anterior de
+    # "solo existencia": ahí un .nvpack/.nvprev de otro Nimvlet (o vacío)
+    # bastaba para armar producción con solo tocar el filesystem.
 
-    def test_production_ready_requires_preview_assets(self) -> None:
-        # 3 normales pero sin .nvprev -> rechazado (el gate de contenido).
-        entries = [
-            {"pet_id": "artu", "display_name": "Artu", "pack_path": "b.nvpack",
-             "is_default": True, "starter_role": "normal"},
-            {"pet_id": "rato", "display_name": "Rato", "pack_path": "n.nvpack",
-             "starter_role": "normal"},
-            {"pet_id": "rinrin", "display_name": "Rin Rin", "pack_path": "f.nvpack",
-             "starter_role": "normal"},
-        ]
-        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+    def test_production_ready_accepts_three_matching_starters(self) -> None:
+        cat = self._compile(self._triad_entries(), production_onboarding_ready=True)
+        self.assertTrue(cat["production_onboarding_ready"])
+        self.assertFalse(cat["dev_synthetic_onboarding"])
+        self.assertEqual([e["starter_role"] for e in cat["entries"]], [1, 1, 1])
+
+    def test_production_ready_rejects_missing_pack(self) -> None:
+        entries = self._triad_entries()
+        os.remove(os.path.join(self.tmpdir, entries[1]["pack_path"]))
+        with self._err():
             self._compile(entries, production_onboarding_ready=True)
 
-        # Con los .nvprev hermanos presentes -> compila, flag en true.
-        for name in ("b.nvprev", "n.nvprev", "f.nvprev"):
-            with open(os.path.join(self.tmpdir, name), "wb"):
-                pass
-        cat = self._compile(entries, production_onboarding_ready=True)
-        self.assertTrue(cat["production_onboarding_ready"])
-        self.assertEqual([e["starter_role"] for e in cat["entries"]], [1, 1, 1])
+    def test_production_ready_rejects_missing_preview(self) -> None:
+        entries = self._triad_entries()
+        os.remove(os.path.join(self.tmpdir, entries[2]["pack_path"].replace(".nvpack", ".nvprev")))
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_aliased_pack_identity(self) -> None:
+        # entry.pet_id == "artu" pero el pack lleva id embebido "rato".
+        entries = self._triad_entries()
+        entries[0]["pack_path"] = self._matching_starter("rato", pack_basename="artu_pack.nvpack")
+        # ...y una preview con la identidad correcta de "artu", para que
+        # SOLO falle la comprobación del pack.
+        self.compile_pet_preview.compile_preview(
+            os.path.join(self.tmpdir, "artu_pack.nvpack"), "artu", "",
+            os.path.join(self.tmpdir, "artu_pack.nvprev"))
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_aliased_preview_identity(self) -> None:
+        entries = self._triad_entries()
+        # Sobreescribe la preview de "rinrin" con una cuya identidad
+        # embebida es "artu".
+        self.compile_pet_preview.compile_preview(
+            os.path.join(self.tmpdir, entries[2]["pack_path"]), "artu", "",
+            os.path.join(self.tmpdir, entries[2]["pack_path"].replace(".nvpack", ".nvprev")))
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_preview_from_wrong_pack(self) -> None:
+        # La preview de "rato" tiene la identidad correcta pero se derivó
+        # de otro .nvpack (source_pack no coincide con el pack_path).
+        entries = self._triad_entries()
+        other_pack = self._matching_starter("rato", pack_basename="rato_alt.nvpack")
+        self.compile_pet_preview.compile_preview(
+            os.path.join(self.tmpdir, other_pack), "rato", "",
+            os.path.join(self.tmpdir, entries[1]["pack_path"].replace(".nvpack", ".nvprev")))
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_malformed_pack(self) -> None:
+        entries = self._triad_entries()
+        with open(os.path.join(self.tmpdir, entries[0]["pack_path"]), "wb") as f:
+            f.write(b"not a real NVPACK2 file")
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_malformed_preview(self) -> None:
+        entries = self._triad_entries()
+        with open(
+            os.path.join(self.tmpdir, entries[1]["pack_path"].replace(".nvpack", ".nvprev")), "wb"
+        ) as f:
+            f.write(b"NVPREV1\0garbage-not-a-real-preview")
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_production_ready_rejects_two_distinct_normal_starters(self) -> None:
+        entries = self._triad_entries()[:2]  # solo artu + rato
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_secret_role_does_not_count_toward_normal_triad(self) -> None:
+        # 2 normales COINCIDENTES + Frin macho/hembra (secreto): el
+        # secreto no cuenta, así que faltan starters normales.
+        entries = self._triad_entries()[:2]
+        entries += [
+            {"pet_id": "frin", "variant_id": "male", "display_name": "Frin",
+             "pack_path": self._matching_starter("frin", pack_basename="frin_m.nvpack"),
+             "starter_role": "secret"},
+            {"pet_id": "frin", "variant_id": "female", "display_name": "Frin",
+             "pack_path": self._matching_starter("frin", pack_basename="frin_f.nvpack"),
+             "starter_role": "secret"},
+        ]
+        with self._err():
+            self._compile(entries, production_onboarding_ready=True)
+
+    def test_normal_starter_variant_rows_cannot_inflate_the_count(self) -> None:
+        # Dos "variantes" del mismo Nimvlet lógico no son dos candidatos.
+        with self._err():
+            self._compile(
+                [
+                    {"pet_id": "artu", "variant_id": "", "display_name": "Artu",
+                     "pack_path": "b.nvpack", "is_default": True, "starter_role": "normal"},
+                    {"pet_id": "artu", "variant_id": "gold", "display_name": "Artu Gold",
+                     "pack_path": "n.nvpack", "starter_role": "normal"},
+                    {"pet_id": "rato", "variant_id": "", "display_name": "Rato",
+                     "pack_path": "f.nvpack", "starter_role": "normal"},
+                ]
+            )
+
+    # --- Pasada de endurecimiento (DEC-133): dev_synthetic_onboarding ---
+
+    def test_dev_synthetic_and_production_ready_are_mutually_exclusive(self) -> None:
+        with self._err():
+            self._compile(
+                self._triad_entries(),
+                production_onboarding_ready=True,
+                dev_synthetic_onboarding=True,
+            )
+
+    def test_dev_synthetic_allows_aliased_content_but_needs_the_triad(self) -> None:
+        # 3 identidades lógicas distintas, packs+previews que EXISTEN y
+        # PARSEAN, pero con identidad ALIAS -> compila (los alias son el
+        # punto del harness DEV) y marca dev_synthetic_onboarding, NUNCA
+        # production_onboarding_ready.
+        b = self._matching_starter("bunny", pack_basename="shared_bunny.nvpack")
+        n = self._matching_starter("nidir", pack_basename="shared_nidir.nvpack")
+        entries = [
+            {"pet_id": "artu_dev", "display_name": "Artu (dev)", "pack_path": b,
+             "is_default": True, "starter_role": "normal"},
+            {"pet_id": "rato_dev", "display_name": "Rato (dev)", "pack_path": n,
+             "starter_role": "normal"},
+            {"pet_id": "rinrin_dev", "display_name": "Rin Rin (dev)", "pack_path": b,
+             "starter_role": "normal"},
+        ]
+        cat = self._compile(entries, dev_synthetic_onboarding=True)
+        self.assertTrue(cat["dev_synthetic_onboarding"])
+        self.assertFalse(cat["production_onboarding_ready"])
+
+        # Con solo 2 identidades lógicas distintas -> rechazado.
+        with self._err():
+            self._compile(entries[:2], dev_synthetic_onboarding=True)
+
+    def test_dev_synthetic_still_rejects_a_missing_artifact(self) -> None:
+        b = self._matching_starter("bunny", pack_basename="s_b.nvpack")
+        n = self._matching_starter("nidir", pack_basename="s_n.nvpack")
+        entries = [
+            {"pet_id": "artu_dev", "display_name": "Artu (dev)", "pack_path": b,
+             "is_default": True, "starter_role": "normal"},
+            {"pet_id": "rato_dev", "display_name": "Rato (dev)", "pack_path": n,
+             "starter_role": "normal"},
+            {"pet_id": "rinrin_dev", "display_name": "Rin Rin (dev)", "pack_path": b,
+             "starter_role": "normal"},
+        ]
+        os.remove(os.path.join(self.tmpdir, n.replace(".nvpack", ".nvprev")))
+        with self._err():
+            self._compile(entries, dev_synthetic_onboarding=True)
+
+    def test_the_real_dev_onboarding_catalog_is_synthetic_not_production(self) -> None:
+        # El catálogo de dev versionado en el repo: sintético, nunca
+        # producción (así el harness no puede armar el camino de prod).
+        cat = _read_nvcat(os.path.join(_REPO_ROOT, "assets/dev/onboarding_dev_catalog.nvcat"))
+        self.assertEqual(cat["schema_version"], 5)
+        self.assertTrue(cat["dev_synthetic_onboarding"])
+        self.assertFalse(cat["production_onboarding_ready"])
+
+    def test_the_real_production_catalog_has_onboarding_disabled(self) -> None:
+        cat = _read_nvcat(os.path.join(_REPO_ROOT, "assets/dev/pet_catalog.nvcat"))
+        self.assertEqual(cat["schema_version"], 5)
+        self.assertFalse(cat["production_onboarding_ready"])
+        self.assertFalse(cat["dev_synthetic_onboarding"])
+        self.assertTrue(all(e["starter_role"] == 0 for e in cat["entries"]))
 
 
 if __name__ == "__main__":

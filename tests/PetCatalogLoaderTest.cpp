@@ -47,19 +47,22 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
-// Schema actual del formato "NVCATLG1" — Block 09A lo subió a 4 (agrega
-// `productionOnboardingReady` u8 a nivel de catálogo + `starterRole` u8
-// por entrada); Block 07 lo había subido a 3 (`priceClicks` u64 +
-// `publiclyPurchasable` u8), Block 06 a 2 (`initiallyOwned` u8).
-constexpr std::uint32_t kSchema = 4;
+// Schema actual del formato "NVCATLG1" — la pasada de endurecimiento de
+// Block 09A lo subió a 5 (agrega `devSyntheticOnboarding` u8 a nivel de
+// catálogo, tras `productionOnboardingReady`); Block 09A lo había subido
+// a 4 (`productionOnboardingReady` u8 + `starterRole` u8 por entrada);
+// Block 07 a 3 (`priceClicks` u64 + `publiclyPurchasable` u8), Block 06
+// a 2 (`initiallyOwned` u8).
+constexpr std::uint32_t kSchema = 5;
 
 void AppendHeader(
     std::vector<std::uint8_t>& buf, std::uint32_t schemaVersion, std::uint32_t entryCount,
-    bool productionOnboardingReady = false) {
+    bool productionOnboardingReady = false, bool devSyntheticOnboarding = false) {
     AppendMagic(buf);
     AppendUint32(buf, schemaVersion);
     AppendUint32(buf, entryCount);
     AppendUint8(buf, productionOnboardingReady ? 1 : 0);
+    AppendUint8(buf, devSyntheticOnboarding ? 1 : 0);
 }
 
 void AppendEntry(
@@ -205,8 +208,9 @@ bool TestStarterRoleRoundTrips() {
     return true;
 }
 
-// Block 09A: `productionOnboardingReady` solo se acepta con la tríada de
-// starters normales (defensa en profundidad — brief §8/§30).
+// Block 09A: `productionOnboardingReady` solo se acepta con >= 3
+// IDENTIDADES LÓGICAS distintas de starter normal (defensa en
+// profundidad — brief §8/§30, endurecido por DEC-133).
 bool TestProductionOnboardingReadyRequiresThreeNormalStarters() {
     // Ready + solo 1 normal -> rechazado.
     {
@@ -230,7 +234,83 @@ bool TestProductionOnboardingReadyRequiresThreeNormalStarters() {
         std::string error;
         NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
         NIMVLETS_CHECK(catalog.ProductionOnboardingReady());
+        NIMVLETS_CHECK(!catalog.DevSyntheticOnboarding());
     }
+    return true;
+}
+
+// DEC-133: `devSyntheticOnboarding` (schema v5) hace round-trip y es
+// MUTUAMENTE EXCLUYENTE con `productionOnboardingReady`.
+bool TestDevSyntheticOnboardingByte() {
+    // Round-trip del byte, con la tríada de identidades lógicas.
+    {
+        std::vector<std::uint8_t> buf;
+        AppendHeader(buf, kSchema, 3, /*productionOnboardingReady=*/false,
+                     /*devSyntheticOnboarding=*/true);
+        AppendEntry(buf, "artu_dev", "", "Artu (dev)", "b.nvpack", true, false, 0, false, 1);
+        AppendEntry(buf, "rato_dev", "", "Rato (dev)", "n.nvpack", false, false, 0, false, 1);
+        AppendEntry(buf, "rinrin_dev", "", "Rin Rin (dev)", "b.nvpack", false, false, 0, false, 1);
+        PetCatalog catalog;
+        std::string error;
+        NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+        NIMVLETS_CHECK(catalog.DevSyntheticOnboarding());
+        NIMVLETS_CHECK(!catalog.ProductionOnboardingReady());
+    }
+    // Ambos flags en true -> rechazado.
+    {
+        std::vector<std::uint8_t> buf;
+        AppendHeader(buf, kSchema, 3, /*productionOnboardingReady=*/true,
+                     /*devSyntheticOnboarding=*/true);
+        AppendEntry(buf, "artu", "", "Artu", "a.nvpack", true, false, 0, false, 1);
+        AppendEntry(buf, "rato", "", "Rato", "r.nvpack", false, false, 0, false, 1);
+        AppendEntry(buf, "rinrin", "", "Rin Rin", "rr.nvpack", false, false, 0, false, 1);
+        PetCatalog catalog;
+        std::string error;
+        NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+        NIMVLETS_CHECK(error.find("mutually exclusive") != std::string::npos);
+    }
+    // devSynthetic + solo 2 identidades lógicas distintas -> rechazado.
+    {
+        std::vector<std::uint8_t> buf;
+        AppendHeader(buf, kSchema, 2, /*productionOnboardingReady=*/false,
+                     /*devSyntheticOnboarding=*/true);
+        AppendEntry(buf, "artu_dev", "", "Artu (dev)", "b.nvpack", true, false, 0, false, 1);
+        AppendEntry(buf, "rato_dev", "", "Rato (dev)", "n.nvpack", false, false, 0, false, 1);
+        PetCatalog catalog;
+        std::string error;
+        NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+        NIMVLETS_CHECK(error.find("distinct logical normal") != std::string::npos);
+    }
+    return true;
+}
+
+// DEC-133: un starter `normal` con `variantId` no vacío se rechaza — un
+// starter normal es un Nimvlet lógico entero, así dos variantes del
+// mismo pet no inflan la tríada.
+bool TestNormalStarterWithVariantIsRejected() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 1);
+    AppendEntry(buf, "artu", "gold", "Artu Gold", "a.nvpack", true, false, 0, false, /*starterRole=*/1);
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(error.find("variant") != std::string::npos);
+    return true;
+}
+
+// DEC-133: el secreto (Frin) no cuenta para la tríada de normales, así
+// que 2 normales + Frin male/female con el flag de producción -> rechazo.
+bool TestSecretRoleDoesNotCountTowardTheTriad() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 4, /*productionOnboardingReady=*/true);
+    AppendEntry(buf, "artu", "", "Artu", "a.nvpack", true, false, 0, false, 1);
+    AppendEntry(buf, "rato", "", "Rato", "r.nvpack", false, false, 0, false, 1);
+    AppendEntry(buf, "frin", "male", "Frin", "fm.nvpack", false, false, 0, false, 2);
+    AppendEntry(buf, "frin", "female", "Frin", "ff.nvpack", false, false, 0, false, 2);
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(error.find("distinct logical normal") != std::string::npos);
     return true;
 }
 
@@ -390,6 +470,11 @@ void RegisterPetCatalogLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetCatalogLoader/StarterRoleRoundTrips", TestStarterRoleRoundTrips);
     runner.Add("PetCatalogLoader/ProductionOnboardingReadyRequiresThreeNormalStarters",
                TestProductionOnboardingReadyRequiresThreeNormalStarters);
+    runner.Add("PetCatalogLoader/DevSyntheticOnboardingByte", TestDevSyntheticOnboardingByte);
+    runner.Add("PetCatalogLoader/NormalStarterWithVariantIsRejected",
+               TestNormalStarterWithVariantIsRejected);
+    runner.Add("PetCatalogLoader/SecretRoleDoesNotCountTowardTheTriad",
+               TestSecretRoleDoesNotCountTowardTheTriad);
     runner.Add("PetCatalogLoader/SchemaV2IsRejected", TestSchemaV2IsRejected);
     runner.Add("PetCatalogLoader/EntriesLoadInDeterministicOrder", TestEntriesLoadInDeterministicOrder);
     runner.Add("PetCatalogLoader/BadMagicIsRejected", TestBadMagicIsRejected);
