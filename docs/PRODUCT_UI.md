@@ -823,3 +823,111 @@ Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
   `ownedEntitlements` con su propia lógica (una sola variante de Frin,
   la otra por separado) sin tocar el catálogo ni el modelo. **Nada en
   Block 07 lo implementa.**
+
+## 20. Settings — tercera sección del Product UI (Block 08)
+
+Block 08 agrega **Settings** a la navegación de secciones:
+`Collection · Shop · Settings` (mismo `SectionNav` + `SectionHeaderView`
+que Block 07; `ProductSection` gana `kSettings`). Reabrir el Product UI
+vuelve a Collection — no se recuerda la última sección.
+
+### 20.1 Qué expone
+
+EXACTAMENTE las cuatro preferencias que Block 06/07 ya persisten, sin
+ninguna nueva:
+
+| Preferencia | Valores | Efecto de runtime |
+|---|---|---|
+| **Size** | Small 0.80 · Medium 1.00 · Large 1.15 | `ApplyPetWindowMetrics` (igual que un switch de pet) |
+| **Opacity** | 100 · 85 · 70 · 55 % | `SDL_SetWindowOpacity` |
+| **Lock position** | On / Off | gate de inicio de drag (`core::PetDragAllowed`) |
+| **Language** | English / Español (endónimos) | relabela menú + las tres secciones, sin reiniciar |
+
+No hay slider de opacidad, ni tamaños intermedios, ni Hide/Show, ni Quit,
+ni acciones de Collection: Settings son **preferencias**, no un segundo
+menú del sistema (brief §4/§5). Sin filas placeholder de features
+futuras.
+
+### 20.2 Una sola ruta canónica de preferencias (DEC-130)
+
+```
+Menú rápido nativo ──► SpikeApp::HandleShellAction ──┐
+                                                     ├──► SpikeApp::Apply{Size,Opacity,Lock,UiLanguage}
+Settings (SettingsView) ──► ProductWindowEvent ──────┘        │
+   (emite productui::SettingsChange)                          │
+                                                             mutación de UN campo de appState_
+                                                             + MarkDirty (debounce de ~2s, SIN escritura inmediata)
+                                                             + efecto de runtime
+                                                             + PushShellState        (el menú refleja el valor)
+                                                             + PushPreferencesToProductWindow (Settings refleja el valor)
+```
+
+- **No hay un segundo sistema.** Los cuatro `Apply*` son el único punto
+  de mutación; el menú rápido y Settings los llaman a los dos.
+- **`SettingsView` nunca muta sus propias preferencias**: emite un
+  `SettingsChange` y espera que src/app le re-empuje el estado final vía
+  `ProductWindow::SetPreferences` — la misma disciplina de "fuente de
+  verdad única" que el Shop tras una compra. Así el menú rápido y
+  Settings no pueden divergir (brief §6/§7).
+- **`core::Preferences`** (puro, `src/core/Preferences.h`) es la moneda
+  común: `PreferencesFromStored(...)` normaliza los campos crudos de
+  AppState (0 de opacidad → 100, tamaño desconocido → medium, …), así un
+  estado editado a mano nunca produce un valor imposible.
+  `StepSize` / `StepOpacityPercent` / `OtherLanguage` ciclan las
+  opciones del control segmentado.
+
+### 20.3 Presentación
+
+`productui::BuildSettingsLayout` (puro, `nimvlets_productui_core`) +
+`productui::SettingsView` (SDL). Composición **quiet / cálida /
+compacta**: dos grupos separados por aire y una regla hairline —
+**Companion** (Size, Opacity, Lock position + una frase de ayuda) y
+**Language** (el selector; el encabezado del grupo ya lo nombra, la fila
+no repite label). Controles **segmentados**: el valor actual es un pill
+relleno (tinta de texto, no casi-negro-puro del tema), el resto
+contorno hairline. Sin cards, sin acento por pet, sin iconos, **sin
+previews** (Settings no abre ningún `.nvpack` — brief §23). Cabe en
+800×560 sin scroll en EN y ES.
+
+### 20.4 Teclado / foco (brief §18)
+
+El foco de teclado vive en la **fila** (`row:size` / `row:opacity` /
+`row:lock` / `row:language`), no en cada segmento:
+
+- **Tab / Shift+Tab**, y **↑ / ↓**: recorren el anillo de foco
+  (pestañas de nav → filas, de arriba hacia abajo).
+- **← / →**: sobre una fila de preferencia, opción anterior / siguiente
+  (se detiene en los extremos), aplicada de inmediato. Sobre una
+  pestaña de nav, recorren el foco.
+- **Enter / Espacio**: sobre una pestaña, cambia de sección; sobre una
+  fila, avanza a la siguiente opción (cíclico).
+- **Esc**: cierra la ventana.
+
+Chrome de foco solo tras input de teclado ("focus-visible por
+modalidad", Block 06.2); un click de mouse lo apaga. El hit-test de
+mouse SÍ resuelve el segmento exacto (`opt:<field>:<value>`), así un
+click elige esa opción directo. El cambio de una preferencia **no**
+mueve el foco a otro lado.
+
+### 20.5 AppState / rendimiento / privacidad
+
+- **Sin bump de schema**: AppState sigue en **v4**. `sizeChoice`,
+  `opacityPercent`, `lockPosition`, `language` ya existían. Ver
+  `docs/PERSISTENCE.md` §7.
+- **Event-driven**: Settings redibuja solo ante un cambio real
+  (`SettingsView::Dirty()`), sin loop, sin timer, sin thread. Abierto y
+  en reposo = efectivamente ocioso.
+- **Local, sin permisos nuevos, sin red.** "Accesibilidad" acá =
+  teclado/foco usable dentro de nuestra ventana, nunca una API global
+  del SO (brief §19/§24).
+- El menú rápido de la barra **no cambia** (brief §21/§22): no hay item
+  "Settings…"; Settings se alcanza solo por la navegación del Product
+  UI.
+
+### 20.6 Frontera para Settings futuros
+
+Bloques futuros pueden agregar preferencias (launch-at-login,
+fullscreen, modo de clics global opt-in). **Nada de eso se implementa ni
+se insinúa acá** — sin placeholders deshabilitados, sin registry
+especulativo. Un `PreferenceField` nuevo + su fila + su `Apply*` es todo
+lo que haría falta.

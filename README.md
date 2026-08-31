@@ -233,10 +233,17 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 
-# --- Shop (Block 07) ---------------------------------------------------
-# NIMVLETS_DEV_SECTION=shop|collection  -> sección visible al abrir.
+# --- Shop (Block 07) / Settings (Block 08) ---------------------------
+# NIMVLETS_DEV_SECTION=shop|settings|collection -> sección visible al abrir.
 # NIMVLETS_DEV_SHOP_PET=<petId>         -> hero del Shop.
 # NIMVLETS_DEV_SHOP_CONFIRM=1           -> abre la confirmación inline.
+# NIMVLETS_DEV_PREFS=small,70,lock,es   -> aplica preferencias por la MISMA
+#   ruta canónica que el menú rápido (SpikeApp::Apply*). Tokens:
+#   small|medium|large, 100|85|70|55, lock|unlock, en|es. Sirve para
+#   capturar un estado no-default de Settings y como smoke en vivo de que
+#   esa ruta produce el AppState/runtime esperado.
+# NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity -> foco de teclado sobre una fila
+#   de Settings (row:size|row:opacity|row:lock|row:language).
 # NIMVLETS_DEV_BUY=<petId>              -> confirma una compra (no
 #   interactivo) ANTES de abrir el UI: EvaluatePurchase -> mutación
 #   atómica de balance + propiedad -> flush inmediato. Combinar con
@@ -255,6 +262,13 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa2 NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
   NIMVLETS_DEV_BUY=nidir NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
   NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_SHOP_PET=nidir \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/shop_owned.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Settings en un estado no-default (Small / 70% / Lock On):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa3 NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=settings \
+  NIMVLETS_DEV_PREFS=small,70,lock \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/settings.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 ```
 

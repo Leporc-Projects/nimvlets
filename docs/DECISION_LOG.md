@@ -4697,3 +4697,80 @@ un v4 con `{frin, ""}` no se expande ni manufactura activación.
 También: seed v1, Frin legacy v2/v3, propiedad legacy sin variantes,
 idempotencia, y un v4 limpio que pasa por el camino de carga sin
 ensancharse.
+
+---
+
+### DEC-130 — Settings: sección del Product UI sobre la ÚNICA ruta canónica de preferencias, compartida con el menú rápido
+**Status:** DECIDIDO · Block 08. **Extiende** DEC-127 (navegación por
+pestañas de texto del Product UI) y la §8 de Block 06 (controles de
+usuario del menú rápido). NO cambia el schema de AppState, NO toca la
+economía/propiedad de Block 07, NO altera la estructura del menú rápido.
+
+**Contexto.** Block 06 expuso tamaño / opacidad / lock / idioma SOLO por
+el `NSStatusItem`. Block 08 agrega una tercera sección al Product UI
+(`Collection · Shop · Settings`) para configurarlas también desde ahí.
+El riesgo es un segundo sistema de preferencias con sus propias reglas
+de persistencia/runtime (dos `HandleSize(...)`).
+
+**Decisión.**
+
+- **Una sola ruta de mutación/aplicación.** Las cuatro preferencias se
+  mutan EXCLUSIVAMENTE por `SpikeApp::ApplySizeChoice` /
+  `ApplyOpacityChoice` / `ApplyLockPosition` / `ApplyUiLanguage`. Cada
+  una: escribe UN campo crudo de `appState_` (con la normalización que
+  ya existía — `core::PetSizeChoiceId` / `NormalizeOpacityPercent` /
+  `LanguageId`), `persistenceScheduler_.MarkDirty` (mismo debounce de
+  ~2s de siempre — Block 08 NO agrega escrituras inmediatas), aplica el
+  efecto de runtime (`ApplyPetWindowMetrics` / `SDL_SetWindowOpacity` /
+  el gate de drag / `productWindow_.SetLanguage`), `PushShellState` (el
+  menú nativo refleja el nuevo valor) y `PushPreferencesToProductWindow`
+  (Settings refleja el nuevo valor). El menú rápido
+  (`HandleShellAction`) y Settings (`ApplyPreferenceChange`, desde un
+  `productui::SettingsChange` que sube por `ProductWindowEvent`) llaman
+  a esos mismos cuatro Apply*. No hay una segunda ruta.
+
+- **Sincronización bidireccional, una fuente de verdad.** `SettingsView`
+  nunca muta sus propias preferencias: emite un `SettingsChange` y
+  espera que src/app le re-empuje el estado final vía `SetPreferences`
+  (igual que el Shop re-empuja el modelo tras una compra). Un cambio
+  desde el menú rápido mientras Settings está abierto llega por el mismo
+  `PushPreferencesToProductWindow`; un cambio desde Settings actualiza
+  el menú por el mismo `PushShellState`.
+
+- **`core::Preferences`** (puro) — las cuatro preferencias como un valor
+  tipado y normalizado, la moneda común entre las dos superficies.
+  `PreferencesFromStored(...)` reconstruye desde los campos crudos de
+  AppState (0 de opacidad -> 100, id de tamaño desconocido -> medium,
+  etc.): un archivo editado a mano con valores imposibles nunca produce
+  un `Preferences` imposible. `StepSize` / `StepOpacityPercent` /
+  `OtherLanguage` ciclan las opciones de un control segmentado (← →
+  clamp; Enter/Espacio wrap).
+
+- **Sin bump de schema.** AppState sigue en v4: `sizeChoice`,
+  `opacityPercent`, `lockPosition`, `language` ya existían y ya
+  persistían. Settings es UI nueva sobre estado viejo.
+
+- **Presentación.** `productui::BuildSettingsLayout` (puro, en
+  `nimvlets_productui_core`) — cabecera compartida (`SectionNav` gana
+  `kSettings`) + dos grupos ("Companion": Size / Opacity / Lock
+  position; "Language": el selector) con controles segmentados. Quiet,
+  cálido, compacto: sin cards, sin acento por pet, sin previews (no se
+  carga ningún `.nvpack`). El foco de teclado vive en la FILA
+  (`row:size` ...); Tab/Shift+Tab/↑↓ recorren nav + filas, ← →
+  cambian el valor de la fila enfocada, Enter/Espacio avanzan cíclico.
+  El hit-test de mouse SÍ resuelve el segmento exacto.
+
+- **Menú rápido intacto (brief §21/§22).** No se agrega un item
+  "Settings…" al `NSStatusItem`; Settings se alcanza solo por la
+  navegación del Product UI. La estructura y los checkmarks del menú no
+  cambian.
+
+**Verificado.** `tests/SettingsLayoutTest.cpp` (estado seleccionado por
+preferencia, EN/ES, hit-test, cabe sin scroll, sin solapes, y
+`SettingsAndQuickMenuAgreeOnSelection` — para un mismo estado, el
+segmento seleccionado en Settings y el item chequeado en el submenú
+equivalente del menú rápido nombran el mismo valor);
+`tests/PreferencesTest.cpp` (normalización + ciclado);
+`tests/PersistenceIntegrationTest.cpp`
+(`PreferenceChangesSurviveReloadWithoutTouchingEconomy`). QA nativo
+Retina en EN/ES + estado de foco de teclado.
