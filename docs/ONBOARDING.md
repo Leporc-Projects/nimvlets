@@ -129,12 +129,22 @@ grant en su default → **cero mutación** aguas arriba (§28).
 
 Cuando la pantalla de selección está activa y capaz de recibir input, un
 **dwell de sesión** de 44 s sin selección completada revela a **Frin**
-discretamente como cuarto candidato. Sin popup, sin toast, sin cuenta
-regresiva, sin "¡secreto desbloqueado!", sin flash, sin sonido, sin
-notificación (brief §10). La fila de tarjetas se re-ajusta un poco de
-tamaño para que 4 sigan cabiendo sin scroll — un reajuste contenido, no
-una reorganización violenta (brief §21). Frin entra SIEMPRE al final,
-así el reveal no reordena ni arrebata el foco.
+discretamente. Sin popup, sin toast, sin cuenta regresiva, sin "¡secreto
+desbloqueado!", sin flash, sin sonido, sin notificación (brief §10).
+
+**Composición del reveal (DEC-134, corrección de QA del owner).** La
+primera fila —las 3 tarjetas normales— NO se toca: se dibuja EXACTAMENTE
+igual (misma caja / arte / nombre / especie / posición) esté o no
+revelado el secreto. Frin NO entra a esa fila: aparece en una SEGUNDA
+fila debajo, horizontalmente centrada, en el espacio en blanco inferior,
+con una tarjeta más compacta (armoniosa con las normales, no idéntica —
+`kRevealCardW` / `kRevealArt` en `OnboardingLayout.cpp`). La pantalla
+revelada entra en 800×560 sin scroll (EN y ES). El reveal se siente
+"apareció algo más abajo", no "la grilla de selección ganó otro slot".
+Frin entra SIEMPRE al final de `candidates` / `focusOrder` (orden
+[normal 0..2, Frin]); `FocusList::SetItems` preserva el id enfocado, así
+el reveal no reordena ni arrebata el foco, y el `HitTest` (que itera
+`candidates`) cae automáticamente en la nueva caja BAJA de Frin.
 
 ### Semántica del timer (brief §11/§12)
 
@@ -335,10 +345,12 @@ usuario existente nunca lo ve.
 
 Composición cálida / quieta / espaciosa (brief §18/§20): un encabezado
 ("Choose your first Nimvlet" / "Elige tu primer Nimvlet") y una fila de
-tarjetas centrada, el arte manda cuando se ligue contenido real.
-**Sin** precios, lenguaje de Shop, rareza, stats, habilidades, slots
-bloqueados, ni "Paso 1 de 3". Información mínima por tarjeta: nombre
-propio + una etiqueta corta de identidad si hay editorial.
+TRES tarjetas normales centrada (Frin, si el secreto fue revelado, va en
+una segunda fila compacta debajo — ver §5), el arte manda cuando se ligue
+contenido real. **Sin** precios, lenguaje de Shop, rareza, stats,
+habilidades, slots bloqueados, ni "Paso 1 de 3". Información mínima por
+tarjeta: nombre propio + una etiqueta corta de identidad si hay
+editorial.
 
 Etapas (una sola pantalla; `stage` cambia qué se dibuja):
 `kBrowse` → `kFrinVariant` (si se toca Frin) → `kConfirm`. La

@@ -4997,3 +4997,101 @@ DEV (catálogo sintético → gate → reveal → CHOOSE frin/female →
 + re-run bajo el env var ("already completed"); `NIMVLETS_DEV_ONBOARDING`
 con un catálogo NO sintético → "not a dev-synthetic onboarding catalog;
 not forcing the gate" → arranque normal.
+
+---
+
+### DEC-134 — Pasada de corrección de QA del owner sobre Block 09A: composición del reveal de Frin, y la pestaña "Settings" inalcanzable desde Collection/Shop
+**Status:** DECIDIDO · Block 09A (pasada de corrección de QA). **Depende
+de** DEC-130 (ruta canónica de preferencias / sección Settings),
+DEC-132/DEC-133 (onboarding). NO toca la arquitectura de
+persistencia/policy/timing del onboarding (DEC-131/132/133 intactos): es
+una corrección de presentación + un bug de ruteo de navegación.
+
+**Contexto.** El owner probó a mano Blocks 07/08/09A y aceptó casi todo
+(pets, animaciones, click-through, acumulación de clics, compra de Nidir
+a 300, menú rápido nativo con Size/Opacity/Hide, idiomas, pantalla
+inicial de onboarding, timing real de 44 s, selección Male/Female de
+Frin). Dos rechazos:
+
+1. **El reveal de Frin cambiaba la composición aprobada.** La pantalla
+   inicial con exactamente tres tarjetas normales (Artu/Rato/Rin Rin) —
+   su tamaño, espaciado, quietud y espacio en blanco — estaba aprobada.
+   El reveal de los 44 s metía a Frin como CUARTA tarjeta en la misma
+   fila: los tres originales se achicaban y se re-centraban, Frin parecía
+   un starter normal más, y se perdía el espacio negativo que hacía
+   atractiva la pantalla.
+2. **La sección Settings del Product UI "aparecía vacía / no
+   funcionaba"**, sobre todo tras el flujo DEV de onboarding.
+
+**Decisión.**
+
+- **Composición del reveal de Frin (`productui::OnboardingLayout`).** La
+  primera fila se dibuja SIEMPRE idéntica — sus 3 tarjetas conservan
+  EXACTAMENTE su caja/arte/nombre/especie, revelado el secreto o no (ya
+  no se pasa Frin al helper de fila uniforme, así que su ancho no depende
+  del conteo). Cuando el secreto se revela, Frin aparece en una SEGUNDA
+  fila debajo, horizontalmente centrada, en el espacio en blanco
+  inferior, con una tarjeta más compacta (`kRevealCardW` 180 /
+  `kRevealArt` 96 — armoniosa, no idéntica) vía el nuevo
+  `LayoutRevealedSecretCard`. Sin banner, sin "secret unlocked", sin
+  cuenta regresiva, sin flash, sin animación: sigue siendo un recálculo
+  de layout puro + UN redibujo (`OnboardingView::RevealSecret` sin
+  cambios). Frin entra SIEMPRE al final de `candidates`/`focusOrder`
+  (orden [normal 0..2, Frin]); `FocusList::SetItems` preserva el id
+  enfocado, así el reveal no reordena ni arrebata el foco. El `HitTest`
+  itera `candidates`, con lo que el hit-test de mouse cae automáticamente
+  en la nueva caja BAJA de Frin. `contentHeight` con el secreto revelado
+  usa `kRevealBottomPad` en vez de `kMargin`: la pantalla revelada entra
+  en 800×560 sin scroll (EN y ES).
+- **La pestaña "Settings" inalcanzable — bug de ruteo, no de
+  arquitectura.** Block 08 agregó la sección `kSettings` y su pestaña
+  `nav:settings` (que la cabecera compartida `SectionNav` dibuja en las
+  TRES secciones), y enseñó a rutear las tres SOLO a `SettingsView`.
+  `CollectionView::ActivateWidget` y `ShopView::ActivateWidget` seguían
+  con el par `nav:collection`/`nav:shop` de Block 07: un click (o Enter)
+  en "Settings" desde Collection o Shop se descartaba en silencio. Como
+  el arranque del Product UI siempre cae en Collection, Settings era
+  INALCANZABLE con mouse o teclado. Ninguna captura de QA de Block 08 lo
+  vio porque todas forzaban la sección con `NIMVLETS_DEV_SECTION` →
+  `ShowSectionForQA`, que saltea la pestaña. **Fix:** una única tabla,
+  `productui::NavTargetSection(focusId, &outSection)` en `SectionNav`,
+  que las tres vistas usan para rutear sus pestañas — así la tabla de
+  secciones y sus consumidores no pueden volver a divergir. No se creó
+  una segunda ruta de preferencias: la sección Settings ya funcionaba
+  (DEC-130), solo no se podía llegar. La transición onboarding→normal ya
+  era válida (`HandleOnboardingSelection` cierra la ventana; el reopen la
+  reconstruye con `SetLanguage`/`SetPreferences`/`SetModels`), así que no
+  hizo falta tocarla.
+- **Harness DEV.** `NIMVLETS_DEV_ONBOARDING_CHOOSE` corre ahora ANTES del
+  bloque `NIMVLETS_DEV_OPEN_COLLECTION`, para poder fotografiar el
+  Product UI NORMAL post-onboarding (flujo del brief "reopen Product UI →
+  Settings"). Nuevo `NIMVLETS_DEV_UI_NAV_SMOKE=1`: abre el Product UI y
+  sintetiza un click de mouse REAL sobre cada pestaña desde cada sección
+  (`ProductWindow::ClickNavTabForQA` → `HandleEvent` →
+  `View::OnMouseDown` → `ActivateWidget` → `NavTargetSection`), logueando
+  PASS/FAIL por salto — smoke no interactivo de alcanzabilidad, sin
+  permisos del SO.
+
+**Verificado.** `tests/SectionNavTest.cpp` (+4: `NavTargetSection` mapea
+las TRES pestañas — la de Settings era la que faltaba —, rechaza ids
+no-nav sin tocar el out-param, ida y vuelta contra las pestañas que
+dibuja `BuildSectionHeaderLayout`, `NavFocusIdFor`).
+`tests/OnboardingLayoutTest.cpp` (+5 neto: la primera fila queda EXACTA
+byte-a-byte antes/después del reveal; Frin debajo y centrado con tarjeta
+más chica; hit-test de Frin en su posición baja; el reveal no duplica
+Frin; entra sin scroll EN+ES; y `FirstRowFits…RegardlessOfReveal`
+reemplaza a `CardRowFitsHorizontallyForThreeAndFour`). 427 tests C++
+(era 418), 162 Python. Debug + Release + universal2 (lipo: x86_64 arm64),
+`nimvlets_macos_text_check` PASS, `nimvlets_macos_clickthrough_check`
+PASS (sin cambios de plataforma). Smokes: `NIMVLETS_DEV_UI_NAV_SMOKE`
+6/6 saltos alcanzables (y 2/6 con el bug reintroducido a mano —
+Collection→Settings y Shop→Settings FAIL); capturas Retina del reveal
+(EN/ES) con la primera fila sin mover y Frin abajo; Settings
+post-onboarding renderiza completa (EN/ES); `NIMVLETS_DEV_PREFS` por la
+ruta canónica `Apply*` se refleja en Settings y en el menú; Shop del
+catálogo normal intacto (Nidir a 300 comprable); Shop del catálogo
+sintético-DEV vacío = comportamiento esperado del harness (sin entradas
+públicamente comprables; NO se agregan productos falsos). Deuda diferida
+sin tocar: rediseño del Shop (dirección "browse primero"), la posición
+visual de Nidir al subir tras un click, y la política always-on-top del
+pet sobre el Product UI.

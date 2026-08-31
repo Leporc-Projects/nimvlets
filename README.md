@@ -244,6 +244,11 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
 #   esa ruta produce el AppState/runtime esperado.
 # NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity -> foco de teclado sobre una fila
 #   de Settings (row:size|row:opacity|row:lock|row:language).
+# NIMVLETS_DEV_UI_NAV_SMOKE=1           -> smoke NO interactivo de que las
+#   tres pestañas (Collection · Shop · Settings) son ALCANZABLES con un
+#   click desde cualquier sección (mismo camino que un click del owner:
+#   HandleEvent -> View::OnMouseDown -> ActivateWidget -> NavTargetSection).
+#   Loguea PASS/FAIL por salto y sale. Sin permisos del SO. Ver DEC-134.
 # NIMVLETS_DEV_BUY=<petId>              -> confirma una compra (no
 #   interactivo) ANTES de abrir el UI: EvaluatePurchase -> mutación
 #   atómica de balance + propiedad -> flush inmediato. Combinar con
@@ -290,9 +295,13 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa3 NIMVLETS_DEV_HIDE_PET=1 \
 # NIMVLETS_DEV_ONBOARDING_STAGE=browse|variant|confirm[:<focusId>]
 #   -> fuerza una etapa (p. ej. confirm:cand:artu_dev, confirm:var:female).
 # NIMVLETS_DEV_ONBOARDING_CHOOSE=<petId>[/<variant>]  -> confirma la
-#   selección sin interacción (transacción de completitud atómica).
+#   selección sin interacción (transacción de completitud atómica). Corre
+#   ANTES del bloque NIMVLETS_DEV_OPEN_COLLECTION, así que combinarlo con
+#   NIMVLETS_DEV_OPEN_COLLECTION + NIMVLETS_DEV_SECTION + NIMVLETS_DEV_PRODUCT_SHOT
+#   fotografía el Product UI NORMAL de post-onboarding (DEC-134).
 
-# Pantalla de selección de starter (EN), con el secreto revelado:
+# Pantalla de selección de starter (EN), con el secreto revelado
+# (los 3 normales sin moverse + Frin en una segunda fila centrada abajo):
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob1 NIMVLETS_DEV_ONBOARDING=1 \
   NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/onboarding.bmp \
@@ -303,6 +312,13 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob2 NIMVLETS_DEV_ONBOARDING=1 \
   NIMVLETS_DEV_ONBOARDING_REVEAL=1 NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female \
   ./build/macos-debug/src/app/nimvlets_spike
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob2 ./build/macos-debug/src/app/nimvlets_spike  # reinicio: NO re-onboardea
+
+# Settings del Product UI NORMAL tras completar el onboarding DEV (EN):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
+  NIMVLETS_DEV_ONBOARDING_CHOOSE=artu_dev \
+  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=settings \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/post_onboarding_settings.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
 ```
 
 This opens a small, borderless, always-on-top, transparent window

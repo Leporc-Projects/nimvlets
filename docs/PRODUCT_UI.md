@@ -831,6 +831,18 @@ Block 08 agrega **Settings** a la navegación de secciones:
 que Block 07; `ProductSection` gana `kSettings`). Reabrir el Product UI
 vuelve a Collection — no se recuerda la última sección.
 
+> **DEC-134 (corrección de QA).** La cabecera compartida dibuja las TRES
+> pestañas en las tres secciones, pero Block 08 solo enseñó a rutear la
+> pestaña `nav:settings` a `SettingsView`: `CollectionView` y `ShopView`
+> seguían con el par `nav:collection`/`nav:shop` de Block 07, así que un
+> click o Enter en "Settings" desde Collection o Shop se descartaba en
+> silencio — y como el Product UI siempre abre en Collection, Settings
+> quedaba INALCANZABLE. Ahora las tres vistas rutean sus pestañas por una
+> única tabla, `productui::NavTargetSection(focusId, &outSection)` en
+> `SectionNav`, para que la lista de secciones y sus consumidores no
+> puedan volver a divergir. (La sección Settings en sí ya funcionaba;
+> solo no se podía llegar.)
+
 ### 20.1 Qué expone
 
 EXACTAMENTE las cuatro preferencias que Block 06/07 ya persisten, sin
