@@ -42,8 +42,7 @@ const char* SectionLabel(ProductSection section, Language lang) {
     return "";
 }
 
-namespace {
-const char* NavFocusId(ProductSection section) {
+const char* NavFocusIdFor(ProductSection section) {
     switch (section) {
         case ProductSection::kCollection:
             return "nav:collection";
@@ -54,7 +53,17 @@ const char* NavFocusId(ProductSection section) {
     }
     return "";
 }
-}  // namespace
+
+bool NavTargetSection(const std::string& focusId, ProductSection& outSection) {
+    for (const ProductSection section :
+         {ProductSection::kCollection, ProductSection::kShop, ProductSection::kSettings}) {
+        if (focusId == NavFocusIdFor(section)) {
+            outSection = section;
+            return true;
+        }
+    }
+    return false;
+}
 
 SectionHeaderLayout BuildSectionHeaderLayout(
     float viewportW, float marginX, float scrollY, ProductSection active, Language lang) {
@@ -72,7 +81,7 @@ SectionHeaderLayout BuildSectionHeaderLayout(
         tab.section = section;
         tab.label = SectionLabel(section, lang);
         tab.active = (section == active);
-        tab.focusId = NavFocusId(section);
+        tab.focusId = NavFocusIdFor(section);
 
         const float w = ApproxWidth(tab.label);
         tab.labelAnchor = UiRect{x, tabY, w, kTabsH};

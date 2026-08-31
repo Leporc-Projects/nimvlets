@@ -12,6 +12,7 @@
 #include "PurchasePolicyTest.h"
 #include "ShopLayoutTest.h"
 #include "ShopModelTest.h"
+#include "SectionNavTest.h"
 #include "SettingsLayoutTest.h"
 #include "OnboardingLayoutTest.h"
 #include "OnboardingPolicyTest.h"
@@ -66,6 +67,7 @@ int main() {
     nimvlets::tests::RegisterShopModelTests(runner);
     nimvlets::tests::RegisterPurchasePolicyTests(runner);
     nimvlets::tests::RegisterShopLayoutTests(runner);
+    nimvlets::tests::RegisterSectionNavTests(runner);
     nimvlets::tests::RegisterSettingsLayoutTests(runner);
     nimvlets::tests::RegisterOnboardingPolicyTests(runner);
     nimvlets::tests::RegisterOnboardingLayoutTests(runner);

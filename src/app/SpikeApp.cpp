@@ -2009,6 +2009,28 @@ int SpikeApp::Run() {
         HandlePurchaseRequest(req);
     }
 
+    // Solo-DEV (Block 09A): confirma una selección de starter sin
+    // interacción ("petId" o "petId/variantId", p. ej. "artu_dev" o
+    // "frin/male") — misma ruta que "Choose <name>": evalúa la política,
+    // aplica la transacción de completitud atómica, sale del gate. Para
+    // smoke-testear completitud + reinicio. Requiere NIMVLETS_DEV_ONBOARDING.
+    // Corre ANTES del bloque NIMVLETS_DEV_OPEN_COLLECTION: así una captura
+    // de QA compuesta (CHOOSE + OPEN_COLLECTION + SECTION + PRODUCT_SHOT)
+    // fotografía el Product UI NORMAL de post-onboarding — el flujo del
+    // brief §15 "reopen Product UI -> Settings".
+    if (onboardingActive_) {
+        if (const char* ch = std::getenv("NIMVLETS_DEV_ONBOARDING_CHOOSE");
+            ch != nullptr && ch[0] != '\0') {
+            const std::string spec(ch);
+            const std::size_t slash = spec.find('/');
+            const catalog::PetIdentity sel{
+                slash == std::string::npos ? spec : spec.substr(0, slash),
+                slash == std::string::npos ? std::string() : spec.substr(slash + 1)};
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ONBOARDING_CHOOSE='%s'", ch);
+            HandleOnboardingSelection(sel);
+        }
+    }
+
     // Mecanismo solo-DEV (Block 06): abre la Collection al arrancar,
     // para QA / capturas de pantalla sin tener que clickear el menú de
     // la barra. Ausente/vacía: no-op — la Collection solo se abre desde
@@ -2122,6 +2144,48 @@ int SpikeApp::Run() {
         }
     }
 
+    // Solo-DEV (Block 09A-QA): smoke NO interactivo de que las tres
+    // pestañas de la cabecera compartida (Collection · Shop · Settings)
+    // son ALCANZABLES con un click desde cualquier sección — el mismo
+    // camino que un click del owner (ProductWindow::ClickNavTabForQA ->
+    // HandleEvent -> View::OnMouseDown -> ActivateWidget ->
+    // NavTargetSection). El bug de este pase: CollectionView / ShopView
+    // solo ruteaban Collection/Shop, así que "Settings" no hacía nada
+    // desde las dos secciones donde el owner arranca. Requiere
+    // NIMVLETS_DEV_APPDATA_DIR aislado. Ver README.md.
+    if (const char* nav = std::getenv("NIMVLETS_DEV_UI_NAV_SMOKE");
+        nav != nullptr && nav[0] != '\0' && nav[0] != '0') {
+        OpenProductWindow();
+        struct NavHop {
+            productui::ProductSection from;
+            productui::ProductSection to;
+            const char* label;
+        };
+        static constexpr NavHop kHops[] = {
+            {productui::ProductSection::kCollection, productui::ProductSection::kSettings, "Collection -> Settings"},
+            {productui::ProductSection::kShop, productui::ProductSection::kSettings, "Shop -> Settings"},
+            {productui::ProductSection::kSettings, productui::ProductSection::kCollection, "Settings -> Collection"},
+            {productui::ProductSection::kSettings, productui::ProductSection::kShop, "Settings -> Shop"},
+            {productui::ProductSection::kCollection, productui::ProductSection::kShop, "Collection -> Shop"},
+            {productui::ProductSection::kShop, productui::ProductSection::kCollection, "Shop -> Collection"},
+        };
+        int failures = 0;
+        for (const NavHop& hop : kHops) {
+            productWindow_.ShowSectionForQA(hop.from);
+            const productui::ProductSection got = productWindow_.ClickNavTabForQA(hop.to);
+            const bool ok = got == hop.to;
+            failures += ok ? 0 : 1;
+            SDL_Log("nimvlets: [ui-nav-smoke] %-24s %s", hop.label, ok ? "PASS" : "FAIL");
+        }
+        SDL_Log("nimvlets: [ui-nav-smoke] %s (%d/%zu hop(s) reachable)",
+                failures == 0 ? "ALL SECTIONS REACHABLE" : "UNREACHABLE SECTION(S) FOUND",
+                static_cast<int>(sizeof(kHops) / sizeof(kHops[0])) - failures,
+                sizeof(kHops) / sizeof(kHops[0]));
+        productWindow_.Close();
+        Shutdown();
+        return failures == 0 ? 0 : 2;
+    }
+
     // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para
     // capturar la Collection sin la ventana always-on-top del pet en el
     // cuadro. Equivale a elegir "Hide Nimvlet" en el menú. Ver README.md.
@@ -2169,24 +2233,6 @@ int SpikeApp::Run() {
         req.variantId = slash == std::string::npos ? std::string() : spec.substr(slash + 1);
         SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ACTIVATE='%s'", act);
         HandleActivateRequest(req);
-    }
-
-    // Solo-DEV (Block 09A): confirma una selección de starter sin
-    // interacción ("petId" o "petId/variantId", p. ej. "artu_dev" o
-    // "frin/male") — misma ruta que "Choose <name>": evalúa la política,
-    // aplica la transacción de completitud atómica, sale del gate. Para
-    // smoke-testear completitud + reinicio. Requiere NIMVLETS_DEV_ONBOARDING.
-    if (onboardingActive_) {
-        if (const char* ch = std::getenv("NIMVLETS_DEV_ONBOARDING_CHOOSE");
-            ch != nullptr && ch[0] != '\0') {
-            const std::string spec(ch);
-            const std::size_t slash = spec.find('/');
-            const catalog::PetIdentity sel{
-                slash == std::string::npos ? spec : spec.substr(0, slash),
-                slash == std::string::npos ? std::string() : spec.substr(slash + 1)};
-            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_ONBOARDING_CHOOSE='%s'", ch);
-            HandleOnboardingSelection(sel);
-        }
     }
 
     // Solo-DEV (Block 09A): captura la pantalla de onboarding a un BMP y

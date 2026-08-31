@@ -24,6 +24,25 @@ enum class ProductSection {
 // brief 07 §18 / 08 §13).
 const char* SectionLabel(ProductSection section, core::Language lang);
 
+// El focusId ("nav:collection" / "nav:shop" / "nav:settings") de la
+// pestaña de `section`, o "" si no es una sección conocida.
+const char* NavFocusIdFor(ProductSection section);
+
+// Si `focusId` es una pestaña de navegación de la cabecera compartida,
+// escribe su sección destino en `outSection` y devuelve true; si no, deja
+// `outSection` intacto y devuelve false.
+//
+// La cabecera (SectionNav) SIEMPRE dibuja las TRES pestañas en las tres
+// secciones, así que CUALQUIER vista que la incruste tiene que poder
+// rutear las tres. Bloque 08 agregó `kSettings` pero solo enseñó a
+// SettingsView a rutear a ella; CollectionView / ShopView seguían con el
+// par Collection/Shop de Block 07, dejando la pestaña "Settings"
+// inerte — inalcanzable con mouse o teclado — desde las dos secciones
+// donde un usuario realmente arranca. Rutear TODAS las vistas por esta
+// única función evita que la tabla de secciones y sus consumidores
+// vuelvan a divergir.
+bool NavTargetSection(const std::string& focusId, ProductSection& outSection);
+
 // Una pestaña de navegación en la cabecera compartida.
 struct SectionTab {
     ProductSection section = ProductSection::kCollection;

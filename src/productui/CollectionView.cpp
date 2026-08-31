@@ -128,10 +128,11 @@ CollectionViewResult CollectionView::ActivateWidget(const std::string& focusId) 
     if (focusId.empty()) {
         return r;
     }
-    if (focusId == "nav:collection" || focusId == "nav:shop") {
+    if (ProductSection target; NavTargetSection(focusId, target)) {
+        // Las TRES pestañas (Collection · Shop · Settings) se rutean por
+        // la misma tabla — ver productui::NavTargetSection.
         r.switchSection = true;
-        r.targetSection =
-            focusId == "nav:shop" ? ProductSection::kShop : ProductSection::kCollection;
+        r.targetSection = target;
         r.dirty = true;
         return r;
     }

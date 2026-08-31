@@ -146,6 +146,18 @@ class ProductWindow {
     // NIMVLETS_DEV_PREFS por la ruta canónica); acá solo el foco de
     // teclado sobre una fila.
     void ShowSectionForQA(ProductSection section);
+
+    // Solo-DEV (QA / smoke): sintetiza un click de mouse REAL sobre la
+    // pestaña de `target` en la cabecera compartida y lo procesa por el
+    // MISMO camino que un click del owner (HandleEvent -> View::OnMouseDown
+    // -> ActivateWidget -> NavTargetSection -> cambio de sección).
+    // Devuelve la Section() resultante. Permite smoke-testear que las
+    // tres pestañas son alcanzables desde cualquier sección sin un click
+    // humano ni permisos del SO — la pestaña "Settings" quedó inerte
+    // desde Collection/Shop tras Block 08 y ninguna captura de QA lo vio
+    // porque todas usaban ShowSectionForQA (que saltea la pestaña).
+    ProductSection ClickNavTabForQA(ProductSection target);
+
     void SelectShopHeroForQA(const std::string& petId) { shopView_.SelectHeroForQA(petId); }
     void SetShopConfirmingForQA(bool confirming) { shopView_.SetConfirmingForQA(confirming); }
     void SetShopGalleryHoverForQA(const std::string& petId) { shopView_.SetGalleryHoverForQA(petId); }
@@ -184,6 +196,11 @@ class ProductWindow {
 
     float scale_ = 1.0f;
     bool pendingExpose_ = true;
+
+    // Idioma actual del texto de la UI — lo registra SetLanguage (que ya
+    // lo reenvía a cada vista). Solo lo consume ClickNavTabForQA para
+    // reconstruir el layout de la cabecera compartida.
+    core::Language language_ = core::Language::kEn;
 };
 
 }  // namespace nimvlets::productui

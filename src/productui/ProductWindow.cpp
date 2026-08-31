@@ -151,6 +151,7 @@ void ProductWindow::SetModels(
 }
 
 void ProductWindow::SetLanguage(core::Language language) {
+    language_ = language;
     view_.SetLanguage(language);
     shopView_.SetLanguage(language);
     settingsView_.SetLanguage(language);
@@ -210,6 +211,39 @@ void ProductWindow::ShowSectionForQA(ProductSection section) {
         settingsView_.OnEnterSection();
     }
     pendingExpose_ = true;
+}
+
+ProductSection ProductWindow::ClickNavTabForQA(ProductSection target) {
+    if (window_ == nullptr || onboarding_) {
+        return section_;
+    }
+    int logicalW = kDefaultW;
+    int logicalH = kDefaultH;
+    SDL_GetWindowSize(window_, &logicalW, &logicalH);
+    // 40 pt = el kMargin compartido por Collection / Shop / Settings.
+    const SectionHeaderLayout header =
+        BuildSectionHeaderLayout(static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_);
+    const SectionTab* tab = nullptr;
+    for (const SectionTab& t : header.tabs) {
+        if (t.section == target) {
+            tab = &t;
+            break;
+        }
+    }
+    if (tab == nullptr) {
+        return section_;
+    }
+
+    SDL_Event ev{};
+    ev.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    ev.button.windowID = SDL_GetWindowID(window_);
+    ev.button.button = SDL_BUTTON_LEFT;
+    ev.button.down = true;
+    ev.button.clicks = 1;
+    ev.button.x = tab->hitRect.CenterX();
+    ev.button.y = tab->hitRect.CenterY();
+    HandleEvent(ev);  // MISMO camino que un click real (ver el comentario del header)
+    return section_;
 }
 
 void ProductWindow::SetActivePreview(
