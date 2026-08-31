@@ -36,15 +36,15 @@ void NormalizeOwnedEntitlements(std::vector<OwnedEntitlement>& ents);
 // específico) ante un magic inválido, datos truncados, o un
 // schemaVersion que esta build no sabe leer. Con migración hacia
 // adelante lee cualquier versión en [1, kCurrentSchemaVersion] (hoy
-// 1, 2, 3 y 4): un archivo más viejo se lee con su layout, los campos
+// 1..5): un archivo más viejo se lee con su layout, los campos
 // de versiones posteriores quedan en su default (o se derivan del
-// viejo, como la propiedad al pasar de `ownedPetIds` v1-3 a
-// `ownedEntitlements` v4), y `outState.schemaVersion` se fija a la
-// versión actual, así que el próximo Save() lo reescribe al formato
-// actual. Una versión más nueva desconocida (o basura) sigue
-// tratándose como "no se puede usar este dato". `outState` queda en un
-// estado no especificado si falla; siempre verificar el valor de
-// retorno.
+// viejo — la propiedad al pasar de `ownedPetIds` v1-3 a
+// `ownedEntitlements` v4; el `onboardingLifecycle` = kLegacyComplete al
+// pasar de v1-4 a v5), y `outState.schemaVersion` se fija a la versión
+// actual, así que el próximo Save() lo reescribe al formato actual. Una
+// versión más nueva desconocida (o basura) sigue tratándose como "no se
+// puede usar este dato". `outState` queda en un estado no especificado
+// si falla; siempre verificar el valor de retorno.
 //
 // `outOnDiskSchemaVersion` (opcional): la versión que traía el archivo
 // EN DISCO, ANTES de que `outState.schemaVersion` se normalice a la
@@ -52,7 +52,8 @@ void NormalizeOwnedEntitlements(std::vector<OwnedEntitlement>& ents);
 // para decidir si hay que correr la reconciliación de propiedad legacy
 // (`catalog::ExpandHistoricalWholePetEntitlements`) — que solo aplica a
 // un estado que GENUINAMENTE venía del modelo "por pet lógico" de los
-// schemas v1..v3, nunca a un v4 (DEC-129).
+// schemas v1..v3, nunca a v4+ (DEC-129 — el umbral es
+// AppState::kFirstExplicitEntitlementSchema, no kCurrentSchemaVersion).
 bool DeserializeAppState(
     const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError,
     std::uint32_t* outOnDiskSchemaVersion = nullptr);

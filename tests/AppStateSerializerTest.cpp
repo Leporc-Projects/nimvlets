@@ -107,12 +107,16 @@ std::vector<std::uint8_t> BuildLegacyOwnershipBuffer(
     return buf;
 }
 
-// Un archivo v4 completo con propiedad como pares (petId, variantId).
-std::vector<std::uint8_t> BuildValidV4Buffer(
-    std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
-    bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
-    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language) {
-    std::vector<std::uint8_t> buf = BuildValidBuffer(4, clickBalance, petId, variantId, false, 0, 0);
+// Cuerpo v4+: propiedad como pares (petId, variantId) + lock/size/
+// opacity + language. `schemaVersion` == 4 -> archivo v4 (sin byte de
+// lifecycle); >= 5 -> se le agrega el byte de onboardingLifecycle.
+std::vector<std::uint8_t> BuildOwnershipPairBuffer(
+    std::uint32_t schemaVersion, std::uint64_t clickBalance, const std::string& petId,
+    const std::string& variantId, bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language,
+    std::uint8_t onboardingLifecycleByte) {
+    std::vector<std::uint8_t> buf =
+        BuildValidBuffer(schemaVersion, clickBalance, petId, variantId, false, 0, 0);
     AppendUint8(buf, ownershipSeeded ? 1 : 0);
     AppendUint32(buf, static_cast<std::uint32_t>(ownedEntitlements.size()));
     for (const OwnedEntitlement& e : ownedEntitlements) {
@@ -123,7 +127,32 @@ std::vector<std::uint8_t> BuildValidV4Buffer(
     AppendString(buf, sizeChoice);
     AppendUint32(buf, opacityPercent);
     AppendString(buf, language);
+    if (schemaVersion >= 5) {
+        AppendUint8(buf, onboardingLifecycleByte);
+    }
     return buf;
+}
+
+// Un archivo v4 completo (sin lifecycle) — para los tests de migración
+// v4 -> v5.
+std::vector<std::uint8_t> BuildValidV4Buffer(
+    std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
+    bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language) {
+    return BuildOwnershipPairBuffer(4, clickBalance, petId, variantId, ownershipSeeded,
+                                    ownedEntitlements, lockPosition, sizeChoice, opacityPercent,
+                                    language, /*onboardingLifecycleByte=*/0);
+}
+
+// Un archivo v5 completo, con el byte de onboardingLifecycle.
+std::vector<std::uint8_t> BuildValidV5Buffer(
+    std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
+    bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language,
+    std::uint8_t onboardingLifecycleByte) {
+    return BuildOwnershipPairBuffer(5, clickBalance, petId, variantId, ownershipSeeded,
+                                    ownedEntitlements, lockPosition, sizeChoice, opacityPercent,
+                                    language, onboardingLifecycleByte);
 }
 
 bool TestDefaultAppStateRoundTrips() {
@@ -327,9 +356,10 @@ bool TestV3BufferParsesLegacyOwnershipProvisionally() {
     return true;
 }
 
-// Round-trip v4 completo, incluida una autorización de VARIANTE concreta
-// ({"frin","male"}) junto a una de pet entero ({"bunny",""}).
-bool TestV4RoundTrips() {
+// Round-trip v5 completo, incluida una autorización de VARIANTE concreta
+// ({"frin","male"}) junto a una de pet entero ({"bunny",""}), y el
+// lifecycle de onboarding.
+bool TestV5RoundTrips() {
     AppState original;
     original.clickBalance = 77;
     original.activePetId = "frin";
@@ -339,6 +369,7 @@ bool TestV4RoundTrips() {
     original.sizeChoice = "medium";
     original.opacityPercent = 100;
     original.language = "en";
+    original.onboardingLifecycle = nimvlets::persistence::OnboardingLifecycle::kCompleted;
 
     const std::vector<std::uint8_t> bytes = SerializeAppState(original);
     AppState decoded;
@@ -346,13 +377,72 @@ bool TestV4RoundTrips() {
     NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
     NIMVLETS_CHECK(decoded == original);
 
-    // Y un buffer v4 hecho a mano parsea igual.
-    const std::vector<std::uint8_t> handmade = BuildValidV4Buffer(
+    // Y un buffer v5 hecho a mano parsea igual (byte 2 == kCompleted).
+    const std::vector<std::uint8_t> handmade = BuildValidV5Buffer(
         77, "frin", "male", true, {OwnedEntitlement{"bunny", ""}, OwnedEntitlement{"frin", "male"}},
-        false, "medium", 100, "en");
+        false, "medium", 100, "en", /*onboardingLifecycleByte=*/2);
     AppState fromHandmade;
     NIMVLETS_CHECK(DeserializeAppState(handmade.data(), handmade.size(), fromHandmade, error));
     NIMVLETS_CHECK(fromHandmade == original);
+    return true;
+}
+
+// Un default AppState{} (== "ningún save") es kPending; CUALQUIER archivo
+// v1/v2/v3/v4 migra a kLegacyComplete (usuario existente, ya
+// onboardeado — brief §4/§27, DEC-131). Un v5 conserva su byte.
+bool TestOnboardingLifecycleMigration() {
+    using nimvlets::persistence::OnboardingLifecycle;
+
+    NIMVLETS_CHECK(AppState{}.onboardingLifecycle == OnboardingLifecycle::kPending);
+
+    AppState decoded;
+    std::string error;
+
+    // v1
+    {
+        const auto buf = BuildValidBuffer(1, 9, "bunny", "", false, 0, 0);
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+    }
+    // v2 / v3
+    for (std::uint32_t v : {2u, 3u}) {
+        const auto buf =
+            BuildLegacyOwnershipBuffer(v, 9, "bunny", true, {"bunny"}, false, "medium", 100, "es");
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+    }
+    // v4
+    {
+        const auto buf = BuildValidV4Buffer(9, "bunny", "", true, {OwnedEntitlement{"bunny", ""}},
+                                            false, "medium", 100, "en");
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+    }
+    // v5: cada valor del byte se conserva; uno fuera de rango -> kLegacyComplete (no destructivo).
+    for (auto [byteVal, expected] :
+         {std::pair<std::uint8_t, OnboardingLifecycle>{0, OnboardingLifecycle::kPending},
+          {1, OnboardingLifecycle::kLegacyComplete},
+          {2, OnboardingLifecycle::kCompleted},
+          {7, OnboardingLifecycle::kLegacyComplete}}) {
+        const auto buf = BuildValidV5Buffer(9, "bunny", "", true, {OwnedEntitlement{"bunny", ""}},
+                                            false, "medium", 100, "en", byteVal);
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.onboardingLifecycle == expected);
+    }
+    return true;
+}
+
+// Un v5 truncado justo antes del byte de lifecycle se RECHAZA (no se
+// adivina).
+bool TestTruncatedV5LifecycleByteRejected() {
+    std::vector<std::uint8_t> buf = BuildValidV5Buffer(
+        1, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 2);
+    buf.pop_back();  // el byte de lifecycle
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(!DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(!error.empty());
     return true;
 }
 
@@ -416,13 +506,25 @@ bool TestOnDiskSchemaVersionOutParam() {
         NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
     }
 
-    // v4: el out-param reporta la versión actual (no hay nada legacy que migrar).
+    // v4: el out-param reporta 4 (ANTES de normalizar a la actual). El
+    // gate de reconciliación legacy de src/app es
+    // `< kFirstExplicitEntitlementSchema` (== 4), así que un v4 NO se
+    // reconcilia — pero el out-param igual dice la verdad sobre el disco.
     {
         const std::vector<std::uint8_t> buf = BuildValidV4Buffer(
             10, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en");
         std::uint32_t onDisk = 0;
         NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
+        NIMVLETS_CHECK(onDisk == 4);
+    }
+    // v5: reporta 5.
+    {
+        const std::vector<std::uint8_t> buf = BuildValidV5Buffer(
+            10, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 2);
+        std::uint32_t onDisk = 0;
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
         NIMVLETS_CHECK(onDisk == AppState::kCurrentSchemaVersion);
+        NIMVLETS_CHECK(onDisk == 5);
     }
 
     // Parseo fallido (magic malo): el out-param queda intacto.
@@ -477,7 +579,9 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
                TestV2BufferParsesLegacyOwnershipProvisionally);
     runner.Add("AppStateSerializer/V3BufferParsesLegacyOwnershipProvisionally",
                TestV3BufferParsesLegacyOwnershipProvisionally);
-    runner.Add("AppStateSerializer/V4RoundTrips", TestV4RoundTrips);
+    runner.Add("AppStateSerializer/V5RoundTrips", TestV5RoundTrips);
+    runner.Add("AppStateSerializer/OnboardingLifecycleMigration", TestOnboardingLifecycleMigration);
+    runner.Add("AppStateSerializer/TruncatedV5LifecycleByteRejected", TestTruncatedV5LifecycleByteRejected);
     runner.Add("AppStateSerializer/OwnedEntitlementsNormalizedOnSerialize", TestOwnedEntitlementsNormalizedOnSerialize);
     runner.Add("AppStateSerializer/V4TruncatedOwnershipIsRejected", TestV4TruncatedOwnershipIsRejected);
     runner.Add("AppStateSerializer/OnDiskSchemaVersionOutParam", TestOnDiskSchemaVersionOutParam);

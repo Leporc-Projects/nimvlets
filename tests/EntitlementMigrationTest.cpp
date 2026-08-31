@@ -224,8 +224,11 @@ Ents DecodeToEntitlements(const std::vector<std::uint8_t>& buf) {
 // Reproduce EXACTAMENTE lo que hace src/app (SpikeApp::Init) al cargar
 // un save: deserializa, lee la versión EN DISCO por out-param, y SOLO
 // corre la expansión histórica cuando ese save vino GENUINAMENTE de un
-// schema legacy (< actual). Sobre un v4 no toca nada — igual que la app.
-// El catálogo no participa: la expansión ya no lo recibe.
+// schema que guardaba `ownedPetIds` sueltos (v1/v2/v3, es decir <
+// kFirstExplicitEntitlementSchema == 4). Sobre un v4+ no toca nada —
+// igual que la app. Subir el schema por otra razón (v5, onboarding — no
+// relacionado con propiedad) NO cambia este umbral. El catálogo no
+// participa: la expansión ya no lo recibe.
 Ents MigrateThroughAppPath(const std::vector<std::uint8_t>& buf) {
     AppState st;
     std::string err;
@@ -237,7 +240,7 @@ Ents MigrateThroughAppPath(const std::vector<std::uint8_t>& buf) {
     for (const OwnedEntitlement& e : st.ownedEntitlements) {
         ents.push_back(PetEntitlement{e.petId, e.variantId});
     }
-    if (onDiskVer < AppState::kCurrentSchemaVersion) {
+    if (onDiskVer < AppState::kFirstExplicitEntitlementSchema) {
         ExpandHistoricalWholePetEntitlements(ents);
     }
     return ents;
@@ -250,6 +253,57 @@ bool HasBareFrin(const Ents& ents) {
         }
     }
     return false;
+}
+
+// Deserializa un buffer al AppState completo (para chequear
+// onboardingLifecycle + campos preservados), sin correr la expansión.
+AppState DecodeFull(const std::vector<std::uint8_t>& buf) {
+    AppState st;
+    std::string err;
+    if (!DeserializeAppState(buf.data(), buf.size(), st, err)) {
+        return AppState{};
+    }
+    return st;
+}
+
+// --- Block 09A: TODO save pre-onboarding (v1..v4) se considera con el
+//     onboarding YA COMPLETO (kLegacyComplete), y nada más se pierde ---
+bool TestLegacySavesAreOnboardingComplete() {
+    using nimvlets::persistence::OnboardingLifecycle;
+
+    // v1: balance + activo preservados, lifecycle kLegacyComplete.
+    {
+        const AppState st = DecodeFull(BuildV1("nidir", ""));
+        NIMVLETS_CHECK(st.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+        NIMVLETS_CHECK(st.clickBalance == 100);
+        NIMVLETS_CHECK(st.activePetId == "nidir");
+        NIMVLETS_CHECK(st.schemaVersion == AppState::kCurrentSchemaVersion);
+    }
+    // v2 / v3: propiedad + preferencias + (v3) idioma preservados.
+    for (std::uint32_t v : {2u, 3u}) {
+        const AppState st =
+            DecodeFull(BuildLegacyOwned(v, "bunny", {"bunny", "frin"}, "es"));
+        NIMVLETS_CHECK(st.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+        NIMVLETS_CHECK(st.ownershipSeeded);
+        NIMVLETS_CHECK(st.ownedEntitlements.size() == 2);  // {bunny,""} {frin,""} provisional
+        NIMVLETS_CHECK(st.clickBalance == 100);
+        if (v == 3) {
+            NIMVLETS_CHECK(st.language == "es");
+        }
+    }
+    // v4: propiedad explícita + idioma preservados.
+    {
+        const AppState st = DecodeFull(BuildV4("frin", "male",
+                                               {{"bunny", ""}, {"frin", "male"}, {"frin", "female"}}, "en"));
+        NIMVLETS_CHECK(st.onboardingLifecycle == OnboardingLifecycle::kLegacyComplete);
+        NIMVLETS_CHECK(st.ownedEntitlements.size() == 3);
+        NIMVLETS_CHECK(st.activePetId == "frin" && st.activeVariantId == "male");
+        NIMVLETS_CHECK(st.language == "en");
+    }
+    // Un default AppState{} (== "ningún save") NO es legacy: es kPending
+    // — un usuario potencialmente nuevo, distinguible de un migrado.
+    NIMVLETS_CHECK(AppState{}.onboardingLifecycle == OnboardingLifecycle::kPending);
+    return true;
 }
 
 // --- v1: Frin legacy llega por la SIEMBRA (v1 no tiene propiedad) ---
@@ -437,6 +491,7 @@ void RegisterEntitlementMigrationTests(testing::TestRunner& runner) {
                TestCurrentV4BareWholeFrinIsNotExpanded);
     runner.Add("EntitlementMigration/CleanV4ThroughAppPathIsUnchanged", TestCleanV4ThroughAppPathIsUnchanged);
     runner.Add("EntitlementMigration/CleanV4IsIdempotentUnderExpansion", TestCleanV4IsIdempotentUnderExpansion);
+    runner.Add("EntitlementMigration/LegacySavesAreOnboardingComplete", TestLegacySavesAreOnboardingComplete);
 }
 
 }  // namespace nimvlets::tests

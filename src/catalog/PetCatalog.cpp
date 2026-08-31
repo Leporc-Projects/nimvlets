@@ -4,7 +4,11 @@
 
 namespace nimvlets::catalog {
 
-PetCatalog::PetCatalog(std::vector<CatalogEntry> entries) : entries_(std::move(entries)) {
+PetCatalog::PetCatalog(std::vector<CatalogEntry> entries)
+    : PetCatalog(std::move(entries), /*productionOnboardingReady=*/false) {}
+
+PetCatalog::PetCatalog(std::vector<CatalogEntry> entries, bool productionOnboardingReady)
+    : entries_(std::move(entries)), productionOnboardingReady_(productionOnboardingReady) {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         if (entries_[i].isDefault) {
             defaultIndex_ = i;

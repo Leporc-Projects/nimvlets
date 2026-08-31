@@ -56,4 +56,8 @@ std::string FormatSpendPrompt(std::uint64_t price, const std::string& petName, c
     return Substitute(std::move(out), "{pet}", petName);
 }
 
+std::string FormatOnboardingConfirmPrompt(const std::string& petName, core::Language lang) {
+    return Substitute(core::Localized(core::StringKey::kOnboardingConfirmStarter, lang), "{pet}", petName);
+}
+
 }  // namespace nimvlets::productui

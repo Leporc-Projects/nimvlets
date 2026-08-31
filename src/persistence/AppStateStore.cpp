@@ -24,12 +24,19 @@ std::string AppStateStore::TempPath() const {
     return (std::filesystem::path(directoryPath_) / kTempFileName).string();
 }
 
-AppState AppStateStore::Load(std::string* outWarning, std::uint32_t* outOnDiskSchemaVersion) const {
+AppState AppStateStore::Load(
+    std::string* outWarning, std::uint32_t* outOnDiskSchemaVersion, bool* outSaveFileExisted) const {
     // Por defecto "el estado ES del schema actual" — solo un parseo
     // exitoso de un save viejo lo baja. Sin save / ilegible / corrupto
     // -> queda acá: no hay migración legacy que correr.
     if (outOnDiskSchemaVersion != nullptr) {
         *outOnDiskSchemaVersion = AppState::kCurrentSchemaVersion;
+    }
+    // Por defecto "no había archivo" — un usuario genuinamente nuevo.
+    // Se sube a true en cuanto el archivo se abre, ANTES de intentar
+    // parsearlo, así un archivo corrupto igual cuenta como "existía".
+    if (outSaveFileExisted != nullptr) {
+        *outSaveFileExisted = false;
     }
 
     std::ifstream file(StatePath(), std::ios::binary);
@@ -38,6 +45,9 @@ AppState AppStateStore::Load(std::string* outWarning, std::uint32_t* outOnDiskSc
             *outWarning = "no existing app-state save found; using defaults";
         }
         return AppState{};
+    }
+    if (outSaveFileExisted != nullptr) {
+        *outSaveFileExisted = true;
     }
 
     // Mismo enfoque de "todo el archivo a un buffer" que

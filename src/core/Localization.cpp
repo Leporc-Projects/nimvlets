@@ -54,6 +54,12 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
                                "Evita que puedas mover tu Nimvlet al arrastrarlo."},
     /* kOn */                  {"On", "Activado"},
     /* kOff */                 {"Off", "Desactivado"},
+
+    /* kOnboardingChooseFirst */        {"Choose your first Nimvlet", "Elige tu primer Nimvlet"},
+    /* kOnboardingConfirmStarter */     {"Make {pet} your first Nimvlet?",
+                                        "¿Quieres que {pet} sea tu primer Nimvlet?"},
+    /* kOnboardingConfirmChoosePrefix */ {"Choose ", "Elegir a "},
+    /* kOnboardingWhichVariant */       {"Which Frin?", "¿Qué Frin?"},
 };
 
 }  // namespace

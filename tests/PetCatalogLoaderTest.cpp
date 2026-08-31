@@ -47,15 +47,19 @@ void AppendMagic(std::vector<std::uint8_t>& buf) {
     AppendBytes(buf, magic, sizeof(magic));
 }
 
-// Schema actual del formato "NVCATLG1" — Block 07 lo subió a 3 (agrega
-// `priceClicks` u64 + `publiclyPurchasable` u8 por entrada); Block 06
-// lo había subido a 2 (`initiallyOwned` u8).
-constexpr std::uint32_t kSchema = 3;
+// Schema actual del formato "NVCATLG1" — Block 09A lo subió a 4 (agrega
+// `productionOnboardingReady` u8 a nivel de catálogo + `starterRole` u8
+// por entrada); Block 07 lo había subido a 3 (`priceClicks` u64 +
+// `publiclyPurchasable` u8), Block 06 a 2 (`initiallyOwned` u8).
+constexpr std::uint32_t kSchema = 4;
 
-void AppendHeader(std::vector<std::uint8_t>& buf, std::uint32_t schemaVersion, std::uint32_t entryCount) {
+void AppendHeader(
+    std::vector<std::uint8_t>& buf, std::uint32_t schemaVersion, std::uint32_t entryCount,
+    bool productionOnboardingReady = false) {
     AppendMagic(buf);
     AppendUint32(buf, schemaVersion);
     AppendUint32(buf, entryCount);
+    AppendUint8(buf, productionOnboardingReady ? 1 : 0);
 }
 
 void AppendEntry(
@@ -67,7 +71,8 @@ void AppendEntry(
     bool isDefault,
     bool initiallyOwned = false,
     std::uint64_t priceClicks = 0,
-    bool publiclyPurchasable = false) {
+    bool publiclyPurchasable = false,
+    std::uint8_t starterRole = 0) {
     AppendString(buf, petId);
     AppendString(buf, variantId);
     AppendString(buf, displayName);
@@ -76,6 +81,7 @@ void AppendEntry(
     AppendUint8(buf, initiallyOwned ? 1 : 0);
     AppendUint64(buf, priceClicks);
     AppendUint8(buf, publiclyPurchasable ? 1 : 0);
+    AppendUint8(buf, starterRole);
 }
 
 std::vector<std::uint8_t> BuildSingleEntryCatalog() {
@@ -172,6 +178,59 @@ bool TestPublicWithZeroPriceIsRejected() {
     std::string error;
     NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
     NIMVLETS_CHECK(error.find("price") != std::string::npos);
+    return true;
+}
+
+// Block 09A: `starterRole` (0/1/2) por entrada hace round-trip; un byte
+// de rol desconocido se rechaza.
+bool TestStarterRoleRoundTrips() {
+    std::vector<std::uint8_t> buf;
+    AppendHeader(buf, kSchema, 3);
+    AppendEntry(buf, "artu", "", "Artu", "a.nvpack", true, false, 0, false, /*starterRole=*/1);
+    AppendEntry(buf, "frin", "male", "Frin", "f.nvpack", false, false, 0, false, /*starterRole=*/2);
+    AppendEntry(buf, "bunny", "", "Bunny", "b.nvpack", false, false, 0, false, /*starterRole=*/0);
+    PetCatalog catalog;
+    std::string error;
+    NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+    NIMVLETS_CHECK(catalog.Entries()[0].starterRole == nimvlets::catalog::StarterRole::kNormal);
+    NIMVLETS_CHECK(catalog.Entries()[1].starterRole == nimvlets::catalog::StarterRole::kSecret);
+    NIMVLETS_CHECK(catalog.Entries()[2].starterRole == nimvlets::catalog::StarterRole::kNone);
+    NIMVLETS_CHECK(!catalog.ProductionOnboardingReady());
+
+    std::vector<std::uint8_t> bad;
+    AppendHeader(bad, kSchema, 1);
+    AppendEntry(bad, "p", "", "P", "p.nvpack", true, false, 0, false, /*starterRole=*/7);
+    NIMVLETS_CHECK(!LoadCatalogFromMemory(bad.data(), bad.size(), catalog, error));
+    NIMVLETS_CHECK(error.find("starter role") != std::string::npos);
+    return true;
+}
+
+// Block 09A: `productionOnboardingReady` solo se acepta con la tríada de
+// starters normales (defensa en profundidad — brief §8/§30).
+bool TestProductionOnboardingReadyRequiresThreeNormalStarters() {
+    // Ready + solo 1 normal -> rechazado.
+    {
+        std::vector<std::uint8_t> buf;
+        AppendHeader(buf, kSchema, 2, /*productionOnboardingReady=*/true);
+        AppendEntry(buf, "artu", "", "Artu", "a.nvpack", true, false, 0, false, 1);
+        AppendEntry(buf, "frin", "male", "Frin", "f.nvpack", false, false, 0, false, 2);
+        PetCatalog catalog;
+        std::string error;
+        NIMVLETS_CHECK(!LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+        NIMVLETS_CHECK(error.find("normal starter") != std::string::npos);
+    }
+    // Ready + 3 normales -> carga, ProductionOnboardingReady() == true.
+    {
+        std::vector<std::uint8_t> buf;
+        AppendHeader(buf, kSchema, 3, /*productionOnboardingReady=*/true);
+        AppendEntry(buf, "artu", "", "Artu", "a.nvpack", true, false, 0, false, 1);
+        AppendEntry(buf, "rato", "", "Rato", "r.nvpack", false, false, 0, false, 1);
+        AppendEntry(buf, "rinrin", "", "Rin Rin", "rr.nvpack", false, false, 0, false, 1);
+        PetCatalog catalog;
+        std::string error;
+        NIMVLETS_CHECK(LoadCatalogFromMemory(buf.data(), buf.size(), catalog, error));
+        NIMVLETS_CHECK(catalog.ProductionOnboardingReady());
+    }
     return true;
 }
 
@@ -328,6 +387,9 @@ void RegisterPetCatalogLoaderTests(testing::TestRunner& runner) {
     runner.Add("PetCatalogLoader/InitiallyOwnedFlagRoundTrips", TestInitiallyOwnedFlagRoundTrips);
     runner.Add("PetCatalogLoader/ShopMetadataRoundTrips", TestShopMetadataRoundTrips);
     runner.Add("PetCatalogLoader/PublicWithZeroPriceIsRejected", TestPublicWithZeroPriceIsRejected);
+    runner.Add("PetCatalogLoader/StarterRoleRoundTrips", TestStarterRoleRoundTrips);
+    runner.Add("PetCatalogLoader/ProductionOnboardingReadyRequiresThreeNormalStarters",
+               TestProductionOnboardingReadyRequiresThreeNormalStarters);
     runner.Add("PetCatalogLoader/SchemaV2IsRejected", TestSchemaV2IsRejected);
     runner.Add("PetCatalogLoader/EntriesLoadInDeterministicOrder", TestEntriesLoadInDeterministicOrder);
     runner.Add("PetCatalogLoader/BadMagicIsRejected", TestBadMagicIsRejected);

@@ -2932,9 +2932,11 @@ class PetPreviewCompileTest(unittest.TestCase):
 
 
 def _read_nvcat(path: str) -> dict:
-    """Lector del formato "NVCATLG1" v3 (tools/compile_pet_catalog.py) —
+    """Lector del formato "NVCATLG1" v4 (tools/compile_pet_catalog.py) —
     espejo intencional de src/catalog/PetCatalogLoader.cpp. Solo para
-    los tests: verifica lo que el compilador realmente escribió."""
+    los tests: verifica lo que el compilador realmente escribió. v4
+    (Block 09A) agrega `production_onboarding_ready` a nivel de catálogo
+    y `starter_role` por entrada."""
     with open(path, "rb") as f:
         data = f.read()
     assert data[:8] == b"NVCATLG1", data[:8]
@@ -2967,6 +2969,7 @@ def _read_nvcat(path: str) -> dict:
 
     schema_version = u32()
     count = u32()
+    production_onboarding_ready = bool(u8())
     entries = []
     for _ in range(count):
         entries.append(
@@ -2979,15 +2982,22 @@ def _read_nvcat(path: str) -> dict:
                 "initially_owned": bool(u8()),
                 "price_clicks": u64(),
                 "publicly_purchasable": bool(u8()),
+                "starter_role": u8(),
             }
         )
-    return {"schema_version": schema_version, "entries": entries}
+    return {
+        "schema_version": schema_version,
+        "production_onboarding_ready": production_onboarding_ready,
+        "entries": entries,
+    }
 
 
 class PetCatalogCompileTest(unittest.TestCase):
-    """tools/compile_pet_catalog.py: el catálogo binario "NVCATLG1" v3
+    """tools/compile_pet_catalog.py: el catálogo binario "NVCATLG1" v4
     que src/app carga al arrancar. Block 07 agrega price_clicks +
-    publicly_purchasable por entrada (brief §10)."""
+    publicly_purchasable por entrada (brief §10); Block 09A agrega
+    starter_role por entrada + production_onboarding_ready a nivel de
+    catálogo, con un gate de contenido (brief §8/§30)."""
 
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="nimvlets_catalog_compile_")
@@ -3001,8 +3011,12 @@ class PetCatalogCompileTest(unittest.TestCase):
             with open(os.path.join(self.tmpdir, name), "wb"):
                 pass
 
-    def _compile(self, entries: list, schema_version: int = 3) -> dict:
-        manifest = {"schema_version": schema_version, "entries": entries}
+    def _compile(self, entries: list, schema_version: int = 4, production_onboarding_ready: bool = False) -> dict:
+        manifest = {
+            "schema_version": schema_version,
+            "production_onboarding_ready": production_onboarding_ready,
+            "entries": entries,
+        }
         mpath = os.path.join(self.tmpdir, "manifest.json")
         with open(mpath, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
@@ -3043,7 +3057,9 @@ class PetCatalogCompileTest(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(cat["schema_version"], 3)
+        self.assertEqual(cat["schema_version"], 4)
+        self.assertFalse(cat["production_onboarding_ready"])
+        self.assertEqual(cat["entries"][0]["starter_role"], 0)  # none, por default
         self.assertEqual(cat["entries"][0]["price_clicks"], 120)
         self.assertTrue(cat["entries"][0]["publicly_purchasable"])
         self.assertEqual(cat["entries"][1]["price_clicks"], 300)
@@ -3088,12 +3104,69 @@ class PetCatalogCompileTest(unittest.TestCase):
                 ]
             )
 
-    def test_schema_version_2_is_rejected(self) -> None:
+    def test_schema_version_3_is_rejected(self) -> None:
         with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
             self._compile(
                 [{"pet_id": "p", "display_name": "P", "pack_path": "b.nvpack", "is_default": True}],
-                schema_version=2,
+                schema_version=3,
             )
+
+    # --- Block 09A: starter_role + production_onboarding_ready ---------
+
+    def test_starter_role_round_trips(self) -> None:
+        cat = self._compile(
+            [
+                {"pet_id": "artu", "display_name": "Artu", "pack_path": "b.nvpack",
+                 "is_default": True, "starter_role": "normal"},
+                {"pet_id": "frin", "variant_id": "male", "display_name": "Frin",
+                 "pack_path": "f.nvpack", "starter_role": "secret"},
+                {"pet_id": "bunny", "display_name": "Bunny", "pack_path": "n.nvpack"},
+            ]
+        )
+        self.assertEqual(cat["entries"][0]["starter_role"], 1)  # normal
+        self.assertEqual(cat["entries"][1]["starter_role"], 2)  # secret
+        self.assertEqual(cat["entries"][2]["starter_role"], 0)  # none
+
+    def test_unknown_starter_role_is_rejected(self) -> None:
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(
+                [{"pet_id": "p", "display_name": "P", "pack_path": "b.nvpack",
+                  "is_default": True, "starter_role": "hero"}]
+            )
+
+    def test_production_ready_requires_three_normal_starters(self) -> None:
+        # ready + solo 1 normal -> rechazado (brief §8/§30).
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(
+                [
+                    {"pet_id": "artu", "display_name": "Artu", "pack_path": "b.nvpack",
+                     "is_default": True, "starter_role": "normal"},
+                    {"pet_id": "frin", "variant_id": "male", "display_name": "Frin",
+                     "pack_path": "f.nvpack", "starter_role": "secret"},
+                ],
+                production_onboarding_ready=True,
+            )
+
+    def test_production_ready_requires_preview_assets(self) -> None:
+        # 3 normales pero sin .nvprev -> rechazado (el gate de contenido).
+        entries = [
+            {"pet_id": "artu", "display_name": "Artu", "pack_path": "b.nvpack",
+             "is_default": True, "starter_role": "normal"},
+            {"pet_id": "rato", "display_name": "Rato", "pack_path": "n.nvpack",
+             "starter_role": "normal"},
+            {"pet_id": "rinrin", "display_name": "Rin Rin", "pack_path": "f.nvpack",
+             "starter_role": "normal"},
+        ]
+        with self.assertRaises(self.compile_pet_catalog.CatalogCompileError):
+            self._compile(entries, production_onboarding_ready=True)
+
+        # Con los .nvprev hermanos presentes -> compila, flag en true.
+        for name in ("b.nvprev", "n.nvprev", "f.nvprev"):
+            with open(os.path.join(self.tmpdir, name), "wb"):
+                pass
+        cat = self._compile(entries, production_onboarding_ready=True)
+        self.assertTrue(cat["production_onboarding_ready"])
+        self.assertEqual([e["starter_role"] for e in cat["entries"]], [1, 1, 1])
 
 
 if __name__ == "__main__":

@@ -85,6 +85,15 @@ enum class StringKey {
     kOn,               // "On" / "Activado"
     kOff,              // "Off" / "Desactivado"
 
+    // Onboarding de primer arranque (Block 09A). Los nombres propios
+    // (Nimvlet, Artu, Rato, Rin Rin, Frin) NUNCA se traducen; "Male"/
+    // "Female" reusan kMale/kFemale; "Cancel" reusa kCancel. Ver
+    // docs/ONBOARDING.md.
+    kOnboardingChooseFirst,      // "Choose your first Nimvlet" / "Elige tu primer Nimvlet"
+    kOnboardingConfirmStarter,   // "Make {pet} your first Nimvlet?" / "¿Quieres que {pet} sea tu primer Nimvlet?"
+    kOnboardingConfirmChoosePrefix,  // "Choose " / "Elegir a " — se concatena con un nombre propio
+    kOnboardingWhichVariant,     // "Which Frin?" / "¿Qué Frin?"
+
     kCount,  // centinela — no es una clave real
 };
 

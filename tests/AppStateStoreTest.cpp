@@ -112,6 +112,48 @@ bool TestLoadRecoversFromCorruptFile() {
     return true;
 }
 
+// Block 09A: `outSaveFileExisted` distingue "usuario genuinamente nuevo"
+// (sin archivo) de "recuperación de un archivo corrupto" (existía) —
+// src/app NUNCA manda a onboarding a este último (brief §4/§27).
+bool TestSaveFileExistedFlag() {
+    TempTestDirectory dir;
+    const AppStateStore store(dir.path());
+
+    // Sin archivo: existed == false, lifecycle default kPending.
+    {
+        bool existed = true;
+        std::uint32_t onDisk = 999;
+        const AppState state = store.Load(nullptr, &onDisk, &existed);
+        NIMVLETS_CHECK(!existed);
+        NIMVLETS_CHECK(state.onboardingLifecycle == nimvlets::persistence::OnboardingLifecycle::kPending);
+    }
+
+    // Tras un Save(): existed == true.
+    {
+        AppState s;
+        s.clickBalance = 5;
+        std::string err;
+        NIMVLETS_CHECK(store.Save(s, err));
+        bool existed = false;
+        const AppState loaded = store.Load(nullptr, nullptr, &existed);
+        NIMVLETS_CHECK(existed);
+        NIMVLETS_CHECK(loaded.clickBalance == 5);
+    }
+
+    // Archivo corrupto: TAMBIÉN existed == true (el archivo está ahí).
+    {
+        std::ofstream garbage(std::filesystem::path(dir.path()) / "state.nvstate", std::ios::binary);
+        const std::vector<std::uint8_t> junk = {0x01, 0x02, 0x03};
+        garbage.write(reinterpret_cast<const char*>(junk.data()), static_cast<std::streamsize>(junk.size()));
+        garbage.close();
+        bool existed = false;
+        const AppState state = store.Load(nullptr, nullptr, &existed);
+        NIMVLETS_CHECK(existed);
+        NIMVLETS_CHECK(state == AppState{});
+    }
+    return true;
+}
+
 bool TestFailedWriteDoesNotCrashAndReportsError() {
     TempTestDirectory dir;
     // Pre-crea un *directorio* exactamente en la ruta que
@@ -173,6 +215,7 @@ void RegisterAppStateStoreTests(testing::TestRunner& runner) {
     runner.Add("AppStateStore/LoadRecoversFromCorruptFile", TestLoadRecoversFromCorruptFile);
     runner.Add("AppStateStore/FailedWriteDoesNotCrashAndReportsError", TestFailedWriteDoesNotCrashAndReportsError);
     runner.Add("AppStateStore/FailedWritePreservesPriorValidSave", TestFailedWritePreservesPriorValidSave);
+    runner.Add("AppStateStore/SaveFileExistedFlag", TestSaveFileExistedFlag);
 }
 
 }  // namespace nimvlets::tests

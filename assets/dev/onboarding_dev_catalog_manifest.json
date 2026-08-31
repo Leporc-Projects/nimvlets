@@ -1,0 +1,43 @@
+{
+  "schema_version": 4,
+  "production_onboarding_ready": true,
+  "_comment": "SÓLO-DEV — descriptores SINTÉTICOS de onboarding para QA de la máquina de estados/presentación de Block 09A ANTES de que exista contenido real de Artu/Rato/Rin Rin. artu_dev/rato_dev/rinrin_dev NO son Artu/Rato/Rin Rin: toman prestados packs/previews existentes sólo para ejercitar el flujo (selección -> confirmación -> grant -> completitud -> reinicio -> activación). NUNCA se envía. Sólo lo carga src/app cuando NIMVLETS_DEV_ONBOARDING está seteada. Ver docs/ONBOARDING.md §DEV harness. Regenerar: python3 tools/compile_pet_catalog.py assets/dev/onboarding_dev_catalog_manifest.json assets/dev/onboarding_dev_catalog.nvcat",
+  "entries": [
+    {
+      "pet_id": "frin",
+      "variant_id": "male",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_male_pack.nvpack",
+      "is_default": true,
+      "starter_role": "secret"
+    },
+    {
+      "pet_id": "frin",
+      "variant_id": "female",
+      "display_name": "Frin",
+      "pack_path": "assets/dev/frin_female_pack.nvpack",
+      "starter_role": "secret"
+    },
+    {
+      "pet_id": "artu_dev",
+      "variant_id": "",
+      "display_name": "Artu (dev)",
+      "pack_path": "assets/dev/bunny_pack.nvpack",
+      "starter_role": "normal"
+    },
+    {
+      "pet_id": "rato_dev",
+      "variant_id": "",
+      "display_name": "Rato (dev)",
+      "pack_path": "assets/dev/nidir_pack.nvpack",
+      "starter_role": "normal"
+    },
+    {
+      "pet_id": "rinrin_dev",
+      "variant_id": "",
+      "display_name": "Rin Rin (dev)",
+      "pack_path": "assets/dev/bunny_pack.nvpack",
+      "starter_role": "normal"
+    }
+  ]
+}

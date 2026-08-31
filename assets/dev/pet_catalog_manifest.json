@@ -1,5 +1,6 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
+  "production_onboarding_ready": false,
   "entries": [
     {
       "pet_id": "bunny",
@@ -9,7 +10,8 @@
       "is_default": true,
       "initially_owned": true,
       "price_clicks": 120,
-      "publicly_purchasable": true
+      "publicly_purchasable": true,
+      "starter_role": "none"
     },
     {
       "pet_id": "nidir",
@@ -19,7 +21,8 @@
       "is_default": false,
       "initially_owned": false,
       "price_clicks": 300,
-      "publicly_purchasable": true
+      "publicly_purchasable": true,
+      "starter_role": "none"
     },
     {
       "pet_id": "frin",
@@ -29,7 +32,8 @@
       "is_default": false,
       "initially_owned": true,
       "price_clicks": 0,
-      "publicly_purchasable": false
+      "publicly_purchasable": false,
+      "starter_role": "none"
     },
     {
       "pet_id": "frin",
@@ -39,7 +43,8 @@
       "is_default": false,
       "initially_owned": true,
       "price_clicks": 0,
-      "publicly_purchasable": false
+      "publicly_purchasable": false,
+      "starter_role": "none"
     }
   ]
 }

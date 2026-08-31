@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -7,6 +8,32 @@
 #include "catalog/PetIdentity.h"
 
 namespace nimvlets::catalog {
+
+// Cuántas entradas `StarterRole::kNormal` tiene que declarar un catálogo
+// para que su onboarding de producción PUEDA armarse — la tríada
+// canónica Artu / Rato / Rin Rin (brief §1/§7). El compilador de
+// catálogo y el loader lo exigen cuando `productionOnboardingReady`
+// viene en true; el catálogo de dev de Block 09A tiene 0.
+inline constexpr std::size_t kRequiredNormalStarterCount = 3;
+
+// Rol de una entrada de catálogo dentro del ONBOARDING de primer
+// arranque (Block 09A, schema "NVCATLG1" v4). DATO, nunca una rama
+// `if (pet == "artu")` en el runtime/UI (brief §7). Deliberadamente
+// mínimo: sin metadatos especulativos de economía — un starter NO es
+// `publiclyPurchasable` solo por serlo (brief §7), y el shop oculto de
+// starters es trabajo de Block 10, no de acá.
+enum class StarterRole : std::uint8_t {
+    // No participa del onboarding.
+    kNone = 0,
+    // Candidato de starter NORMAL — la tríada Artu / Rato / Rin Rin. El
+    // usuario nuevo elige exactamente uno gratis.
+    kNormal = 1,
+    // Candidato de starter SECRETO — Frin. Aparece discretamente tras 44
+    // s de dwell en la pantalla de selección (brief §10). Un pet lógico
+    // con variantes (macho / hembra): elegir Frin otorga EXACTAMENTE la
+    // variante elegida (brief §5/§13).
+    kSecret = 2,
+};
 
 // Una fila del catálogo: qué pet/variante es, cómo se llama, y dónde
 // está su pack compilado. `packPath` se resuelve en runtime desde el
@@ -54,6 +81,16 @@ struct CatalogEntry {
     // Frin), la propiedad es del petId: alcanza con que UNA lo marque,
     // pero el manifest de dev las marca a las dos por claridad.
     bool initiallyOwned = false;
+
+    // --- Onboarding (Block 09A, schema "NVCATLG1" v4) ----------------
+    //
+    // Rol de esta entrada en la selección de starter de primer arranque.
+    // Ver StarterRole arriba y docs/ONBOARDING.md. El default `kNone` +
+    // `PetCatalog::productionOnboardingReady == false` significa "este
+    // catálogo no habilita onboarding de producción" — el estado del
+    // catálogo de dev de Block 09A (todavía no existe contenido de
+    // Artu/Rato/Rin Rin).
+    StarterRole starterRole = StarterRole::kNone;
 };
 
 // Un catálogo de pets ya validado y listo para consultarse: sin ids
@@ -82,6 +119,8 @@ class PetCatalog {
 
     explicit PetCatalog(std::vector<CatalogEntry> entries);
 
+    explicit PetCatalog(std::vector<CatalogEntry> entries, bool productionOnboardingReady);
+
     // nullptr si `identity` no aparece en el catálogo.
     const CatalogEntry* Find(const PetIdentity& identity) const;
 
@@ -93,9 +132,19 @@ class PetCatalog {
 
     const std::vector<CatalogEntry>& Entries() const { return entries_; }
 
+    // El datum EXPLÍCITO que arma el onboarding de PRODUCCIÓN (Block
+    // 09A, schema v4). false por defecto y en el catálogo de dev actual:
+    // el onboarding de producción NUNCA se muestra hasta que un bloque
+    // futuro (09B) lo ponga en true — y el compilador
+    // (tools/compile_pet_catalog.py) solo deja compilarlo en true si
+    // existen las 3 entradas `starterRole == kNormal` con su contenido
+    // (pack + .nvprev) en disco. Ver docs/ONBOARDING.md y DEC-132.
+    bool ProductionOnboardingReady() const { return productionOnboardingReady_; }
+
  private:
     std::vector<CatalogEntry> entries_;
     std::size_t defaultIndex_ = 0;
+    bool productionOnboardingReady_ = false;
 };
 
 }  // namespace nimvlets::catalog

@@ -142,6 +142,26 @@ bool TestSettingsStrings() {
     return true;
 }
 
+// Onboarding de primer arranque (Block 09A). Los nombres propios
+// (Nimvlet, Artu, Rato, Rin Rin, Frin) NO se traducen; se concatenan
+// con kOnboardingConfirmChoosePrefix o se sustituyen en {pet}.
+bool TestOnboardingStrings() {
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingChooseFirst, Language::kEn),
+                      "Choose your first Nimvlet"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingChooseFirst, Language::kEs),
+                      "Elige tu primer Nimvlet"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingConfirmChoosePrefix, Language::kEn), "Choose "));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingConfirmChoosePrefix, Language::kEs), "Elegir a "));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingWhichVariant, Language::kEn), "Which Frin?"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOnboardingWhichVariant, Language::kEs), "¿Qué Frin?"));
+    // La plantilla del confirm lleva {pet} en los dos idiomas.
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kOnboardingConfirmStarter, Language::kEn))
+                       .find("{pet}") != std::string::npos);
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kOnboardingConfirmStarter, Language::kEs))
+                       .find("{pet}") != std::string::npos);
+    return true;
+}
+
 // El header de la Collection.
 bool TestCollectionHeaderStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kCollection, Language::kEn), "Collection"));
@@ -184,6 +204,7 @@ void RegisterLocalizationTests(testing::TestRunner& runner) {
     runner.Add("Localization/CollectionHeaderStrings", TestCollectionHeaderStrings);
     runner.Add("Localization/ShopStrings", TestShopStrings);
     runner.Add("Localization/SettingsStrings", TestSettingsStrings);
+    runner.Add("Localization/OnboardingStrings", TestOnboardingStrings);
     runner.Add("Localization/EveryKeyIsPopulatedAndDistinct", TestEveryKeyIsPopulatedAndDistinct);
 }
 

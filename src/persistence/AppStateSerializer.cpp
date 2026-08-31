@@ -182,8 +182,32 @@ std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
     // --- Añadido de v3 (Block 06.1) ---
     AppendString(out, state.language);
 
+    // --- Añadido de v5 (Block 09A) ---
+    // El lifecycle de primer arranque, un solo byte. Ver AppState.h /
+    // docs/ONBOARDING.md. NUNCA se escribe ningún detalle transitorio del
+    // UI de onboarding (brief §4).
+    AppendUint8(out, static_cast<std::uint8_t>(state.onboardingLifecycle));
+
     return out;
 }
+
+namespace {
+// Mapea el byte persistido del lifecycle. Un valor fuera de {0,1,2}
+// (archivo v5 editado a mano, o de una build futura leída dentro del
+// rango) se trata como `kLegacyComplete`: la opción NO DESTRUCTIVA —
+// "este estado tiene datos, no lo mandes a onboarding" — en vez de
+// rechazar el archivo entero y perder la propiedad/balance del usuario.
+OnboardingLifecycle ParseOnboardingLifecycleByte(std::uint8_t b) {
+    switch (b) {
+        case 0:
+            return OnboardingLifecycle::kPending;
+        case 2:
+            return OnboardingLifecycle::kCompleted;
+        default:
+            return OnboardingLifecycle::kLegacyComplete;
+    }
+}
+}  // namespace
 
 bool DeserializeAppState(
     const std::uint8_t* data, std::size_t size, AppState& outState, std::string& outError,
@@ -279,11 +303,29 @@ bool DeserializeAppState(
         }
     }
 
+    // Bloque v5 (Block 09A): lifecycle de primer arranque.
+    if (schemaVersion >= 5) {
+        std::uint8_t lifecycleByte = 0;
+        if (!reader.ReadUint8(lifecycleByte)) {
+            outError = reader.Error();  // v5 truncado antes del byte -> falla, no adivina
+            return false;
+        }
+        state.onboardingLifecycle = ParseOnboardingLifecycleByte(lifecycleByte);
+    } else {
+        // MIGRACIÓN v1/v2/v3/v4 -> v5: cualquier estado que precede al
+        // onboarding es un usuario EXISTENTE, ya onboardeado. Se preserva
+        // TODO lo demás exacto; solo se le pone este flag (brief §3.A /
+        // §4). Distinto del default `kPending` de un `AppState{}` sin
+        // save, que representa un usuario potencialmente nuevo.
+        state.onboardingLifecycle = OnboardingLifecycle::kLegacyComplete;
+    }
+
     // schemaVersion == 1: los campos v2/v3/v4 quedan en su default.
     // schemaVersion == 2: `language` queda "" (src/app lo resuelve
     // desde el locale del OS en el próximo arranque); la propiedad se
     // parsea provisionalmente a `{petId, ""}` y src/app la reconcilia.
     // schemaVersion == 3: idem propiedad; `language` se conserva.
+    // schemaVersion <= 4: `onboardingLifecycle` = kLegacyComplete.
 
     outState = std::move(state);
     outError.clear();

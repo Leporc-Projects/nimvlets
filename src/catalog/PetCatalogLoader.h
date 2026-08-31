@@ -22,7 +22,11 @@ namespace nimvlets::catalog {
 // v3 (Block 07): agrega `priceClicks` (u64) y `publiclyPurchasable` (u8)
 //   por entrada — el precio y la elegibilidad para el Shop público, como
 //   dato. Ver docs/CATALOG.md §12.
-constexpr std::uint32_t kCurrentCatalogSchemaVersion = 3;
+// v4 (Block 09A): agrega un `productionOnboardingReady` (u8) a nivel de
+//   catálogo — el datum que arma el onboarding de producción — y un
+//   `starterRole` (u8) por entrada (0=none / 1=normal / 2=secret). Ver
+//   docs/ONBOARDING.md y DEC-132.
+constexpr std::uint32_t kCurrentCatalogSchemaVersion = 4;
 
 // Parsea un catálogo compilado (ver tools/compile_pet_catalog.py para
 // el productor) desde un buffer de bytes en memoria. Parseo puro — sin

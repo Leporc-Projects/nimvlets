@@ -42,7 +42,17 @@ class AppStateStore {
     // disco. En cualquier otro caso (sin save, ilegible, corrupto)
     // queda en el valor actual — así "no hay estado legacy que migrar".
     // Ver DEC-129.
-    AppState Load(std::string* outWarning = nullptr, std::uint32_t* outOnDiskSchemaVersion = nullptr) const;
+    //
+    // Si `outSaveFileExisted` no es nulo, se pone en `true` cuando había
+    // un archivo de estado en disco (aunque no se pueda leer o parsear),
+    // y `false` SOLO cuando genuinamente no existía. src/app lo usa para
+    // distinguir un USUARIO NUEVO (sin archivo -> onboarding, cuando esté
+    // armado) de una RECUPERACIÓN de un archivo corrupto (existía -> se
+    // trata como usuario existente, NUNCA se lo manda a onboarding —
+    // brief §4 / §27, DEC-131).
+    AppState Load(
+        std::string* outWarning = nullptr, std::uint32_t* outOnDiskSchemaVersion = nullptr,
+        bool* outSaveFileExisted = nullptr) const;
 
     // Serializa `state` y lo escribe atómicamente: el contenido
     // completo se escribe primero a un archivo temporal en el mismo

@@ -33,4 +33,11 @@ std::string FormatNeedMoreClicks(std::uint64_t shortBy, core::Language lang);
 // se sustituye "{n}" y "{pet}".
 std::string FormatSpendPrompt(std::uint64_t price, const std::string& petName, core::Language lang);
 
+// "Make Artu your first Nimvlet?" / "¿Quieres que Artu sea tu primer
+// Nimvlet?" (Block 09A onboarding, brief §23). `petName` es un nombre
+// propio — se inserta tal cual (para Frin, ya incluye la variante
+// elegida si el caller la formatea así). Plantilla:
+// StringKey::kOnboardingConfirmStarter; acá solo se sustituye "{pet}".
+std::string FormatOnboardingConfirmPrompt(const std::string& petName, core::Language lang);
+
 }  // namespace nimvlets::productui
