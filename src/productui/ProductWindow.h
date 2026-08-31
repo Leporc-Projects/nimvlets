@@ -9,8 +9,10 @@
 #include "catalog/ShopModel.h"
 #include "content/AnimationDefinition.h"
 #include "core/Localization.h"
+#include "core/Preferences.h"
 #include "productui/CollectionView.h"
 #include "productui/SectionNav.h"
+#include "productui/SettingsView.h"
 #include "productui/ShopView.h"
 
 struct SDL_Window;
@@ -27,6 +29,8 @@ struct ProductWindowEvent {
     ActivateRequest activate;
     bool hasPurchase = false;     // el owner confirmó una compra en el Shop (Block 07)
     PurchaseRequest purchase;
+    bool hasPreferenceChange = false;  // el owner cambió una preferencia en Settings (Block 08)
+    SettingsChange preferenceChange;
 };
 
 // Ventana de aplicación NORMAL (con marco, enfocable, redimensionable)
@@ -71,9 +75,16 @@ class ProductWindow {
         const catalog::ShopModel& shop,
         std::uint64_t clickBalance);
 
-    // Idioma de TODO el texto de ambas secciones. Cambiarlo redibuja de
-    // inmediato, sin reiniciar (block brief §5). No-op si está cerrada.
+    // Idioma de TODO el texto de las tres secciones. Cambiarlo redibuja
+    // de inmediato, sin reiniciar (block brief 06 §5 / 08 §17). No-op si
+    // está cerrada.
     void SetLanguage(core::Language language);
+
+    // Preferencias actuales (tamaño / opacidad / lock / idioma) para la
+    // sección Settings. src/app la llama al abrir y CADA vez que una
+    // preferencia cambia — venga de Settings o del menú rápido (Block 08
+    // §7, sincronización bidireccional). No-op si está cerrada.
+    void SetPreferences(const core::Preferences& prefs);
 
     ProductSection Section() const { return section_; }
 
@@ -108,11 +119,17 @@ class ProductWindow {
     }
 
     // Solo-DEV (QA / capturas): sección visible, hero del Shop, y estado
-    // de confirmación de compra del Shop (Block 07).
+    // de confirmación de compra del Shop (Block 07). Los valores de
+    // Settings los empuja src/app (preferencias reales, vía
+    // NIMVLETS_DEV_PREFS por la ruta canónica); acá solo el foco de
+    // teclado sobre una fila.
     void ShowSectionForQA(ProductSection section);
     void SelectShopHeroForQA(const std::string& petId) { shopView_.SelectHeroForQA(petId); }
     void SetShopConfirmingForQA(bool confirming) { shopView_.SetConfirmingForQA(confirming); }
     void SetShopGalleryHoverForQA(const std::string& petId) { shopView_.SetGalleryHoverForQA(petId); }
+    void SetSettingsKeyboardFocusForQA(const std::string& rowFocusId) {
+        settingsView_.SetKeyboardFocusForQA(rowFocusId);
+    }
 
  private:
     void RecomputeScale();
@@ -127,6 +144,7 @@ class ProductWindow {
     std::unique_ptr<PetPreviewCache> previews_;
     CollectionView view_;
     ShopView shopView_;
+    SettingsView settingsView_;
     ProductSection section_ = ProductSection::kCollection;
 
     float scale_ = 1.0f;

@@ -72,14 +72,16 @@ ShopLayout Layout(std::uint64_t balance, const Ents& owned, const std::string& s
     return BuildShopLayout(model, in);
 }
 
-// La cabecera trae las pestañas con "Shop" (Tienda) activa.
+// La cabecera trae las tres pestañas con "Shop" (Tienda) activa.
 bool TestHeaderShopTabActive() {
     const ShopLayout es = Layout(0, {}, "", false, Language::kEs);
-    NIMVLETS_CHECK(es.header.tabs.size() == 2);
+    NIMVLETS_CHECK(es.header.tabs.size() == 3);
     NIMVLETS_CHECK(es.header.tabs[0].label == "Colección" && !es.header.tabs[0].active);
     NIMVLETS_CHECK(es.header.tabs[1].label == "Tienda" && es.header.tabs[1].active);
+    NIMVLETS_CHECK(es.header.tabs[2].label == "Ajustes" && !es.header.tabs[2].active);
     NIMVLETS_CHECK(Has(es.focusOrder, "nav:collection"));
     NIMVLETS_CHECK(Has(es.focusOrder, "nav:shop"));
+    NIMVLETS_CHECK(Has(es.focusOrder, "nav:settings"));
     return true;
 }
 

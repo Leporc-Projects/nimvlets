@@ -63,6 +63,8 @@ add_executable(nimvlets_tests
   PurchasePolicyTest.cpp
   ShopLayoutTest.h
   ShopLayoutTest.cpp
+  SettingsLayoutTest.h
+  SettingsLayoutTest.cpp
   FocusListTest.h
   FocusListTest.cpp
   TextLayoutTest.h
@@ -71,6 +73,8 @@ add_executable(nimvlets_tests
   FormatTest.cpp
   DisplayControlsTest.h
   DisplayControlsTest.cpp
+  PreferencesTest.h
+  PreferencesTest.cpp
   LocalizationTest.h
   LocalizationTest.cpp
   PetAccentTest.h

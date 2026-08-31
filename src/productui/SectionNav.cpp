@@ -36,9 +36,25 @@ const char* SectionLabel(ProductSection section, Language lang) {
             return Localized(StringKey::kCollection, lang);
         case ProductSection::kShop:
             return Localized(StringKey::kShop, lang);
+        case ProductSection::kSettings:
+            return Localized(StringKey::kSettings, lang);
     }
     return "";
 }
+
+namespace {
+const char* NavFocusId(ProductSection section) {
+    switch (section) {
+        case ProductSection::kCollection:
+            return "nav:collection";
+        case ProductSection::kShop:
+            return "nav:shop";
+        case ProductSection::kSettings:
+            return "nav:settings";
+    }
+    return "";
+}
+}  // namespace
 
 SectionHeaderLayout BuildSectionHeaderLayout(
     float viewportW, float marginX, float scrollY, ProductSection active, Language lang) {
@@ -50,12 +66,13 @@ SectionHeaderLayout BuildSectionHeaderLayout(
 
     const float tabY = kTabsTop - scrollY;
     float x = marginX;
-    for (const ProductSection section : {ProductSection::kCollection, ProductSection::kShop}) {
+    for (const ProductSection section :
+         {ProductSection::kCollection, ProductSection::kShop, ProductSection::kSettings}) {
         SectionTab tab;
         tab.section = section;
         tab.label = SectionLabel(section, lang);
         tab.active = (section == active);
-        tab.focusId = section == ProductSection::kCollection ? "nav:collection" : "nav:shop";
+        tab.focusId = NavFocusId(section);
 
         const float w = ApproxWidth(tab.label);
         tab.labelAnchor = UiRect{x, tabY, w, kTabsH};

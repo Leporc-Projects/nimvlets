@@ -152,16 +152,18 @@ bool TestHeroOwnedInactiveEnablesUse() {
     NIMVLETS_CHECK(layout.hero.variants[0].selected);
     NIMVLETS_CHECK(!layout.hero.variants[1].selected);
 
-    // Block 07: las pestañas de navegación van primero en el orden de
-    // tabulación, luego los widgets del hero, luego la gallery.
-    NIMVLETS_CHECK(layout.focusOrder.size() == 7);
+    // Block 07/08: las pestañas de navegación van primero en el orden de
+    // tabulación (Collection · Shop · Settings), luego los widgets del
+    // hero, luego la gallery.
+    NIMVLETS_CHECK(layout.focusOrder.size() == 8);
     NIMVLETS_CHECK(layout.focusOrder[0] == "nav:collection");
     NIMVLETS_CHECK(layout.focusOrder[1] == "nav:shop");
-    NIMVLETS_CHECK(layout.focusOrder[2] == "variant:male");
-    NIMVLETS_CHECK(layout.focusOrder[3] == "variant:female");
-    NIMVLETS_CHECK(layout.focusOrder[4] == "use");
-    NIMVLETS_CHECK(layout.focusOrder[5] == "item:bunny");
-    NIMVLETS_CHECK(layout.focusOrder[6] == "item:nidir");
+    NIMVLETS_CHECK(layout.focusOrder[2] == "nav:settings");
+    NIMVLETS_CHECK(layout.focusOrder[3] == "variant:male");
+    NIMVLETS_CHECK(layout.focusOrder[4] == "variant:female");
+    NIMVLETS_CHECK(layout.focusOrder[5] == "use");
+    NIMVLETS_CHECK(layout.focusOrder[6] == "item:bunny");
+    NIMVLETS_CHECK(layout.focusOrder[7] == "item:nidir");
     return true;
 }
 
@@ -378,25 +380,30 @@ bool TestDefaultLayoutFitsWithoutScroll() {
     return true;
 }
 
-// Block 07: la cabecera trae las pestañas "Collection · Shop"
-// localizadas, con la de la sección actual marcada activa, y ambas en el
-// focus order + hit-testeables.
+// Block 07/08: la cabecera trae las pestañas "Collection · Shop ·
+// Settings" localizadas, con la de la sección actual marcada activa, y
+// las tres en el focus order + hit-testeables.
 bool TestSectionNavTabs() {
     CollectionLayoutInput es;
     es.language = Language::kEs;
     const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), es);
-    NIMVLETS_CHECK(layout.header.tabs.size() == 2);
+    NIMVLETS_CHECK(layout.header.tabs.size() == 3);
     NIMVLETS_CHECK(layout.header.tabs[0].label == "Colección");
     NIMVLETS_CHECK(layout.header.tabs[0].active);
     NIMVLETS_CHECK(layout.header.tabs[0].focusId == "nav:collection");
     NIMVLETS_CHECK(layout.header.tabs[1].label == "Tienda");
     NIMVLETS_CHECK(!layout.header.tabs[1].active);
     NIMVLETS_CHECK(layout.header.tabs[1].focusId == "nav:shop");
+    NIMVLETS_CHECK(layout.header.tabs[2].label == "Ajustes");
+    NIMVLETS_CHECK(!layout.header.tabs[2].active);
+    NIMVLETS_CHECK(layout.header.tabs[2].focusId == "nav:settings");
 
     NIMVLETS_CHECK(Has(layout.focusOrder, "nav:collection"));
     NIMVLETS_CHECK(Has(layout.focusOrder, "nav:shop"));
-    const auto& shopTab = layout.header.tabs[1];
-    NIMVLETS_CHECK(layout.HitTest(shopTab.hitRect.CenterX(), shopTab.hitRect.CenterY()) == "nav:shop");
+    NIMVLETS_CHECK(Has(layout.focusOrder, "nav:settings"));
+    const auto& settingsTab = layout.header.tabs[2];
+    NIMVLETS_CHECK(
+        layout.HitTest(settingsTab.hitRect.CenterX(), settingsTab.hitRect.CenterY()) == "nav:settings");
     return true;
 }
 

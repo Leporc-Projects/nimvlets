@@ -12,8 +12,10 @@
 #include "PurchasePolicyTest.h"
 #include "ShopLayoutTest.h"
 #include "ShopModelTest.h"
+#include "SettingsLayoutTest.h"
 #include "DirectionTest.h"
 #include "DisplayControlsTest.h"
+#include "PreferencesTest.h"
 #include "FocusListTest.h"
 #include "TextLayoutTest.h"
 #include "FormatTest.h"
@@ -62,6 +64,7 @@ int main() {
     nimvlets::tests::RegisterShopModelTests(runner);
     nimvlets::tests::RegisterPurchasePolicyTests(runner);
     nimvlets::tests::RegisterShopLayoutTests(runner);
+    nimvlets::tests::RegisterSettingsLayoutTests(runner);
     nimvlets::tests::RegisterFocusListTests(runner);
     nimvlets::tests::RegisterTextLayoutTests(runner);
     nimvlets::tests::RegisterFormatTests(runner);
@@ -72,6 +75,7 @@ int main() {
     nimvlets::tests::RegisterClickThroughPolicyTests(runner);
     nimvlets::tests::RegisterDirectionTests(runner);
     nimvlets::tests::RegisterDisplayControlsTests(runner);
+    nimvlets::tests::RegisterPreferencesTests(runner);
     nimvlets::tests::RegisterLocalizationTests(runner);
     nimvlets::tests::RegisterPetAccentTests(runner);
     nimvlets::tests::RegisterPetEditorialTests(runner);

@@ -62,6 +62,7 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     previews_->LoadBundle(catalog);
     view_ = CollectionView{};
     shopView_ = ShopView{};
+    settingsView_ = SettingsView{};
     section_ = ProductSection::kCollection;
 
     RecomputeScale();
@@ -97,6 +98,7 @@ void ProductWindow::Close() {
     DestroyResources();
     view_ = CollectionView{};
     shopView_ = ShopView{};
+    settingsView_ = SettingsView{};
     section_ = ProductSection::kCollection;
     SDL_Log("nimvlets: Product UI window closed (resources released; pet runtime unaffected)");
 }
@@ -147,16 +149,31 @@ void ProductWindow::SetModels(
 void ProductWindow::SetLanguage(core::Language language) {
     view_.SetLanguage(language);
     shopView_.SetLanguage(language);
+    settingsView_.SetLanguage(language);
+}
+
+void ProductWindow::SetPreferences(const core::Preferences& prefs) {
+    settingsView_.SetPreferences(prefs);
 }
 
 bool ProductWindow::ActiveViewDirty() const {
-    return section_ == ProductSection::kShop ? shopView_.Dirty() : view_.Dirty();
+    switch (section_) {
+        case ProductSection::kShop:
+            return shopView_.Dirty();
+        case ProductSection::kSettings:
+            return settingsView_.Dirty();
+        case ProductSection::kCollection:
+            return view_.Dirty();
+    }
+    return false;
 }
 
 void ProductWindow::ShowSectionForQA(ProductSection section) {
     section_ = section;
     if (section_ == ProductSection::kShop) {
         shopView_.OnEnterSection();
+    } else if (section_ == ProductSection::kSettings) {
+        settingsView_.OnEnterSection();
     }
     pendingExpose_ = true;
 }
@@ -174,8 +191,6 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         return out;
     }
     const std::uint32_t myId = SDL_GetWindowID(window_);
-
-    const bool inShop = section_ == ProductSection::kShop;
 
     // Eventos de ventana.
     if (event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST) {
@@ -197,6 +212,7 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
                 RecomputeScale();
                 view_.OnViewportChanged();
                 shopView_.OnViewportChanged();
+                settingsView_.OnViewportChanged();
                 break;
             default:
                 break;
@@ -204,13 +220,25 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         return out;
     }
 
-    // Rutea el input a la sección visible. Los dos ViewResult comparten
+    // Solo eventos de input de ESTA ventana llegan a la sección visible.
+    switch (event.type) {
+        case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_WHEEL:
+        case SDL_EVENT_KEY_DOWN:
+            break;
+        default:
+            return out;
+    }
+
+    // Rutea el input a la sección visible. Los tres ViewResult comparten
     // dirty/requestClose/switchSection; solo difieren en el "verbo"
-    // (activar un pet vs. comprar uno) — se copia el que corresponda.
+    // (activar un pet / comprar uno / cambiar una preferencia) — se
+    // copia el que corresponda.
     bool wantSwitch = false;
     ProductSection switchTo = ProductSection::kCollection;
 
-    if (inShop) {
+    if (section_ == ProductSection::kShop) {
         ShopViewResult r;
         switch (event.type) {
             case SDL_EVENT_MOUSE_MOTION:
@@ -233,12 +261,43 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
                 out.consumed = true;
                 r = shopView_.OnKey(static_cast<int>(event.key.key), KeycodeShift(event.key.mod));
                 break;
-            default:
-                return out;
         }
         if (r.hasPurchase) {
             out.hasPurchase = true;
             out.purchase = r.purchase;
+        }
+        if (r.requestClose) {
+            out.closeRequested = true;
+        }
+        wantSwitch = r.switchSection;
+        switchTo = r.targetSection;
+    } else if (section_ == ProductSection::kSettings) {
+        SettingsViewResult r;
+        switch (event.type) {
+            case SDL_EVENT_MOUSE_MOTION:
+                if (event.motion.windowID != myId) return out;
+                out.consumed = true;
+                r = settingsView_.OnMouseMove(event.motion.x, event.motion.y);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (event.button.windowID != myId || event.button.button != SDL_BUTTON_LEFT) return out;
+                out.consumed = true;
+                r = settingsView_.OnMouseDown(event.button.x, event.button.y);
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (event.wheel.windowID != myId) return out;
+                out.consumed = true;
+                r = settingsView_.OnWheel(event.wheel.y);
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (event.key.windowID != myId) return out;
+                out.consumed = true;
+                r = settingsView_.OnKey(static_cast<int>(event.key.key), KeycodeShift(event.key.mod));
+                break;
+        }
+        if (r.hasChange) {
+            out.hasPreferenceChange = true;
+            out.preferenceChange = r.change;
         }
         if (r.requestClose) {
             out.closeRequested = true;
@@ -268,8 +327,6 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
                 out.consumed = true;
                 r = view_.OnKey(static_cast<int>(event.key.key), KeycodeShift(event.key.mod));
                 break;
-            default:
-                return out;
         }
         if (r.hasActivate) {
             out.hasActivate = true;
@@ -286,6 +343,8 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         section_ = switchTo;
         if (section_ == ProductSection::kShop) {
             shopView_.OnEnterSection();
+        } else if (section_ == ProductSection::kSettings) {
+            settingsView_.OnEnterSection();
         }
         pendingExpose_ = true;  // redibujar la sección nueva
     }
@@ -303,6 +362,10 @@ void ProductWindow::DrawFrame() {
     if (section_ == ProductSection::kShop) {
         shopView_.Render(painter, *text_, *previews_, w, h);
         shopView_.ClearDirty();
+    } else if (section_ == ProductSection::kSettings) {
+        // Settings no usa previews (no carga ningún `.nvpack` — brief §23).
+        settingsView_.Render(painter, *text_, w, h);
+        settingsView_.ClearDirty();
     } else {
         view_.Render(painter, *text_, *previews_, w, h);
         view_.ClearDirty();

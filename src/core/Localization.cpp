@@ -47,6 +47,13 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     /* kLockPosition */        {"Lock Position", "Bloquear posición"},
     /* kLanguage */            {"Language", "Idioma"},
     /* kQuitNimvlets */        {"Quit Nimvlets", "Salir de Nimvlets"},
+
+    /* kSettings */            {"Settings", "Ajustes"},
+    /* kSettingsCompanion */   {"Companion", "Compañero"},
+    /* kLockPositionHint */    {"Keeps your Nimvlet from being moved by dragging.",
+                               "Evita que puedas mover tu Nimvlet al arrastrarlo."},
+    /* kOn */                  {"On", "Activado"},
+    /* kOff */                 {"Off", "Desactivado"},
 };
 
 }  // namespace

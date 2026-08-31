@@ -122,6 +122,26 @@ bool TestShopStrings() {
     return true;
 }
 
+// Settings (Block 08). "Settings" SÍ se traduce; los nombres de idioma
+// del selector son endónimos (probados arriba), no una clave nueva.
+bool TestSettingsStrings() {
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettings, Language::kEn), "Settings"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettings, Language::kEs), "Ajustes"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettingsCompanion, Language::kEn), "Companion"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettingsCompanion, Language::kEs), "Compañero"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOn, Language::kEn), "On"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOn, Language::kEs), "Activado"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOff, Language::kEn), "Off"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOff, Language::kEs), "Desactivado"));
+    // El hint de Lock position: frase corta, traducida, sin placeholder.
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kLockPositionHint, Language::kEn)).size() > 10);
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kLockPositionHint, Language::kEs)).find("arrastr") !=
+                   std::string::npos);
+    // Settings reusa kSize..kLanguage del menú rápido — se prueban en
+    // TestEnglishMenuStrings / TestSpanishMenuStrings.
+    return true;
+}
+
 // El header de la Collection.
 bool TestCollectionHeaderStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kCollection, Language::kEn), "Collection"));
@@ -163,6 +183,7 @@ void RegisterLocalizationTests(testing::TestRunner& runner) {
     runner.Add("Localization/ClickWording", TestClickWording);
     runner.Add("Localization/CollectionHeaderStrings", TestCollectionHeaderStrings);
     runner.Add("Localization/ShopStrings", TestShopStrings);
+    runner.Add("Localization/SettingsStrings", TestSettingsStrings);
     runner.Add("Localization/EveryKeyIsPopulatedAndDistinct", TestEveryKeyIsPopulatedAndDistinct);
 }
 

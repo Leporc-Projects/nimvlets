@@ -75,6 +75,16 @@ enum class StringKey {
     kLanguage,         // "Language" / "Idioma"
     kQuitNimvlets,     // "Quit Nimvlets" / "Salir de Nimvlets"
 
+    // Settings — sección del Product UI (Block 08). Mismas preferencias
+    // que el menú rápido; kSize..kLanguage de arriba se reusan tal cual.
+    // Los nombres de idioma del selector son endónimos (core::
+    // LanguageEndonym), no una clave nueva. Ver docs/PRODUCT_UI.md §20.
+    kSettings,         // "Settings" / "Ajustes"
+    kSettingsCompanion,  // "Companion" / "Compañero" — encabezado de grupo
+    kLockPositionHint,   // frase corta bajo el control de lock
+    kOn,               // "On" / "Activado"
+    kOff,              // "Off" / "Desactivado"
+
     kCount,  // centinela — no es una clave real
 };
 
