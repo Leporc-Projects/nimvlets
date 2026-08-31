@@ -16,6 +16,7 @@ using nimvlets::catalog::PetIdentity;
 using nimvlets::catalog::StarterRole;
 using nimvlets::core::Language;
 using nimvlets::productui::BuildOnboardingLayout;
+using nimvlets::productui::ClampOnboardingScroll;
 using nimvlets::productui::OnboardingLayout;
 using nimvlets::productui::OnboardingLayoutInput;
 using nimvlets::productui::OnboardingStage;
@@ -83,13 +84,105 @@ bool TestBrowseShowsThreeNormalsSecretHidden() {
 bool TestRevealAddsFrinAtTheEnd() {
     const OnboardingLayout l = Layout(OnboardingStage::kBrowse, /*revealed=*/true);
     NIMVLETS_CHECK(l.candidates.size() == 4);
-    // Frin SIEMPRE al final -> no reordena ni arrebata el foco (brief §21).
+    // Frin SIEMPRE al final -> no reordena ni arrebata el foco (brief §5/§21).
     NIMVLETS_CHECK(l.candidates[3].focusId == "cand:frin");
     NIMVLETS_CHECK(l.candidates[3].identity == (PetIdentity{"frin", ""}));
     NIMVLETS_CHECK(l.candidates[3].displayName == "Frin");
-    NIMVLETS_CHECK(l.focusOrder.size() == 4 && l.focusOrder[3] == "cand:frin");
-    // Los 3 primeros no se movieron.
+    NIMVLETS_CHECK((l.focusOrder ==
+                    std::vector<std::string>{"cand:artu", "cand:rato", "cand:rinrin", "cand:frin"}));
     NIMVLETS_CHECK(l.candidates[0].focusId == "cand:artu");
+    return true;
+}
+
+// El reveal NO toca la primera fila: las 3 tarjetas normales se dibujan
+// EXACTAMENTE en la misma caja / arte / nombre / especie antes y después
+// (brief §4 "first row does not move / shrink / re-center"). El
+// encabezado tampoco cambia (sin banner / "secret unlocked" — brief §4).
+bool TestRevealKeepsFirstRowBoundsExact() {
+    const OnboardingLayout before = Layout(OnboardingStage::kBrowse, /*revealed=*/false);
+    const OnboardingLayout after = Layout(OnboardingStage::kBrowse, /*revealed=*/true);
+    NIMVLETS_CHECK(before.candidates.size() == 3);
+    NIMVLETS_CHECK(after.candidates.size() == 4);
+    NIMVLETS_CHECK(before.heading == after.heading);
+    for (std::size_t i = 0; i < 3; ++i) {
+        const auto& b = before.candidates[i];
+        const auto& a = after.candidates[i];
+        NIMVLETS_CHECK(a.focusId == b.focusId);
+        NIMVLETS_CHECK(a.cell.x == b.cell.x && a.cell.y == b.cell.y);
+        NIMVLETS_CHECK(a.cell.w == b.cell.w && a.cell.h == b.cell.h);
+        NIMVLETS_CHECK(a.art.x == b.art.x && a.art.y == b.art.y);
+        NIMVLETS_CHECK(a.art.w == b.art.w && a.art.h == b.art.h);
+        NIMVLETS_CHECK(a.name.y == b.name.y && a.name.h == b.name.h);
+        NIMVLETS_CHECK(a.species_.y == b.species_.y);
+    }
+    return true;
+}
+
+// Frin aparece en una SEGUNDA fila, debajo de la primera, horizontalmente
+// centrado y con una tarjeta más chica (armoniosa, no idéntica). Sin
+// solape con la primera fila (brief §4).
+bool TestRevealedFrinIsBelowFirstRowCentered() {
+    const OnboardingLayout l = Layout(OnboardingStage::kBrowse, /*revealed=*/true);
+    const auto& first = l.candidates[0];
+    const auto& frin = l.candidates[3];
+    // Debajo: el tope de Frin queda por debajo del fondo de la primera fila.
+    NIMVLETS_CHECK(frin.cell.y >= first.cell.Bottom());
+    // Sin solape vertical con NINGUNA de las 3 normales.
+    for (std::size_t i = 0; i < 3; ++i) {
+        NIMVLETS_CHECK(frin.cell.y >= l.candidates[i].cell.Bottom());
+    }
+    // Centrado (± 1 pt) respecto del viewport de 800.
+    const float dx = frin.cell.CenterX() - 400.0f;
+    NIMVLETS_CHECK(dx > -1.0f && dx < 1.0f);
+    // Tarjeta / arte más compactos que los normales, pero del mismo orden.
+    NIMVLETS_CHECK(frin.cell.w < first.cell.w);
+    NIMVLETS_CHECK(frin.art.w < first.art.w);
+    NIMVLETS_CHECK(frin.cell.w >= first.cell.w * 0.6f);
+    return true;
+}
+
+// El punto medio de la nueva caja BAJA de Frin resuelve a "cand:frin" y
+// está por debajo de la primera fila (brief §5 "mouse hit-testing must
+// match the new lower Frin bounds").
+bool TestRevealedFrinHitTestAtLowerPosition() {
+    const OnboardingLayout l = Layout(OnboardingStage::kBrowse, /*revealed=*/true);
+    const auto& frin = l.candidates[3];
+    NIMVLETS_CHECK(l.HitTest(frin.cell.CenterX(), frin.cell.CenterY()) == "cand:frin");
+    NIMVLETS_CHECK(frin.cell.CenterY() > l.candidates[0].cell.Bottom());
+    // Un punto en la fila de arriba NUNCA cae en Frin.
+    NIMVLETS_CHECK(l.HitTest(l.candidates[0].cell.CenterX(), l.candidates[0].cell.CenterY()) ==
+                   "cand:artu");
+    return true;
+}
+
+// El reveal NO duplica a Frin: exactamente una tarjeta y un focusId.
+bool TestRevealDoesNotDuplicateFrin() {
+    const OnboardingLayout l = Layout(OnboardingStage::kBrowse, /*revealed=*/true);
+    int frinCards = 0;
+    int frinFocus = 0;
+    for (const auto& c : l.candidates) {
+        if (c.identity.petId == "frin") ++frinCards;
+    }
+    for (const auto& f : l.focusOrder) {
+        if (f == "cand:frin") ++frinFocus;
+    }
+    NIMVLETS_CHECK(frinCards == 1);
+    NIMVLETS_CHECK(frinFocus == 1);
+    return true;
+}
+
+// La pantalla revelada entra en la ventana (800x560) sin scroll — EN y
+// ES (brief §4/§13). El encabezado en ES es más largo pero la altura no
+// depende del texto del encabezado.
+bool TestRevealedFitsWithoutScrollEnEs() {
+    const OnboardingLayout en = Layout(OnboardingStage::kBrowse, /*revealed=*/true, Language::kEn);
+    const OnboardingLayout es = Layout(OnboardingStage::kBrowse, /*revealed=*/true, Language::kEs);
+    NIMVLETS_CHECK(en.contentHeight <= 560.0f);
+    NIMVLETS_CHECK(es.contentHeight <= 560.0f);
+    // El fondo real de Frin queda dentro del viewport.
+    NIMVLETS_CHECK(en.candidates.back().cell.Bottom() <= 560.0f);
+    // Sin scroll posible.
+    NIMVLETS_CHECK(ClampOnboardingScroll(50.0f, en.contentHeight, 560.0f) == 0.0f);
     return true;
 }
 
@@ -181,16 +274,20 @@ bool TestFitsWithoutScroll() {
     return true;
 }
 
-// La fila de tarjetas cabe HORIZONTALMENTE con 3 y con 4 candidatos (el
-// secreto revelado no la desborda — brief §21). No hay solape.
-bool TestCardRowFitsHorizontallyForThreeAndFour() {
+// La PRIMERA fila (los 3 normales) cabe horizontalmente y no se solapa,
+// esté o no revelado el secreto — Frin va en su propia fila de abajo, no
+// comprime a los normales (brief §4). Todas las cajas dentro de [0, 800].
+bool TestFirstRowFitsHorizontallyRegardlessOfReveal() {
     for (bool revealed : {false, true}) {
         const OnboardingLayout l = Layout(OnboardingStage::kBrowse, revealed);
-        NIMVLETS_CHECK(!l.candidates.empty());
+        NIMVLETS_CHECK(l.candidates.size() >= 3);
         NIMVLETS_CHECK(l.candidates.front().cell.x >= 0.0f);
-        NIMVLETS_CHECK(l.candidates.back().cell.Right() <= 800.0f);
-        for (std::size_t i = 1; i < l.candidates.size(); ++i) {
+        for (std::size_t i = 1; i < 3; ++i) {
             NIMVLETS_CHECK(l.candidates[i].cell.x >= l.candidates[i - 1].cell.Right());
+        }
+        NIMVLETS_CHECK(l.candidates[2].cell.Right() <= 800.0f);
+        for (const auto& c : l.candidates) {
+            NIMVLETS_CHECK(c.cell.x >= 0.0f && c.cell.Right() <= 800.0f);
         }
     }
     return true;
@@ -211,6 +308,13 @@ bool TestNoSectionNavInFocusOrder() {
 void RegisterOnboardingLayoutTests(testing::TestRunner& runner) {
     runner.Add("OnboardingLayout/BrowseShowsThreeNormalsSecretHidden", TestBrowseShowsThreeNormalsSecretHidden);
     runner.Add("OnboardingLayout/RevealAddsFrinAtTheEnd", TestRevealAddsFrinAtTheEnd);
+    runner.Add("OnboardingLayout/RevealKeepsFirstRowBoundsExact", TestRevealKeepsFirstRowBoundsExact);
+    runner.Add("OnboardingLayout/RevealedFrinIsBelowFirstRowCentered",
+               TestRevealedFrinIsBelowFirstRowCentered);
+    runner.Add("OnboardingLayout/RevealedFrinHitTestAtLowerPosition",
+               TestRevealedFrinHitTestAtLowerPosition);
+    runner.Add("OnboardingLayout/RevealDoesNotDuplicateFrin", TestRevealDoesNotDuplicateFrin);
+    runner.Add("OnboardingLayout/RevealedFitsWithoutScrollEnEs", TestRevealedFitsWithoutScrollEnEs);
     runner.Add("OnboardingLayout/BrowseHeadingLocalized", TestBrowseHeadingLocalized);
     runner.Add("OnboardingLayout/BrowseHitTest", TestBrowseHitTest);
     runner.Add("OnboardingLayout/FrinVariantStage", TestFrinVariantStage);
@@ -218,8 +322,8 @@ void RegisterOnboardingLayoutTests(testing::TestRunner& runner) {
     runner.Add("OnboardingLayout/ConfirmStageEs", TestConfirmStageEs);
     runner.Add("OnboardingLayout/ConfirmStageFrinVariantName", TestConfirmStageFrinVariantName);
     runner.Add("OnboardingLayout/FitsWithoutScroll", TestFitsWithoutScroll);
-    runner.Add("OnboardingLayout/CardRowFitsHorizontallyForThreeAndFour",
-               TestCardRowFitsHorizontallyForThreeAndFour);
+    runner.Add("OnboardingLayout/FirstRowFitsHorizontallyRegardlessOfReveal",
+               TestFirstRowFitsHorizontallyRegardlessOfReveal);
     runner.Add("OnboardingLayout/NoSectionNavInFocusOrder", TestNoSectionNavInFocusOrder);
 }
 
