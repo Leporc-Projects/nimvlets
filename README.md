@@ -270,6 +270,35 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa3 NIMVLETS_DEV_HIDE_PET=1 \
   NIMVLETS_DEV_PREFS=small,70,lock \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/settings.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
+
+# --- Onboarding de primer arranque (Block 09A, SOLO-DEV) --------------
+# El onboarding de PRODUCCIÓN está DESHABILITADO (falta contenido de
+# Artu/Rato/Rin Rin — ver docs/ONBOARDING.md). Este harness ejercita la
+# máquina de estados/UI real con descriptores SINTÉTICOS. Usar SIEMPRE
+# un NIMVLETS_DEV_APPDATA_DIR aislado y fresco.
+# NIMVLETS_DEV_ONBOARDING=1              -> carga el catálogo sintético
+#   assets/dev/onboarding_dev_catalog.nvcat y fuerza el gate (si el
+#   lifecycle es kPending). artu_dev/rato_dev/rinrin_dev NO son
+#   Artu/Rato/Rin Rin — nunca se envían.
+# NIMVLETS_DEV_ONBOARDING_REVEAL_MS=<n>  -> deadline del secreto en <n> ms
+#   en vez de 44000 (smoke sin dormir 44 s).
+# NIMVLETS_DEV_ONBOARDING_REVEAL=1       -> revela el secreto al arranque.
+# NIMVLETS_DEV_ONBOARDING_STAGE=browse|variant|confirm[:<focusId>]
+#   -> fuerza una etapa (p. ej. confirm:cand:artu_dev, confirm:var:female).
+# NIMVLETS_DEV_ONBOARDING_CHOOSE=<petId>[/<variant>]  -> confirma la
+#   selección sin interacción (transacción de completitud atómica).
+
+# Pantalla de selección de starter (EN), con el secreto revelado:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob1 NIMVLETS_DEV_ONBOARDING=1 \
+  NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/onboarding.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Flujo completo: elegir Frin hembra, completar, y reiniciar:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob2 NIMVLETS_DEV_ONBOARDING=1 \
+  NIMVLETS_DEV_ONBOARDING_REVEAL=1 NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female \
+  ./build/macos-debug/src/app/nimvlets_spike
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob2 ./build/macos-debug/src/app/nimvlets_spike  # reinicio: NO re-onboardea
 ```
 
 This opens a small, borderless, always-on-top, transparent window

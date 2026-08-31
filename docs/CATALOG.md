@@ -60,8 +60,9 @@ plataforma que el resto de formatos de este repositorio).
 
 ```
 magic       : 8 bytes, "NVCATLG1"
-schemaVersion: uint32   (3 desde Block 07; ver §11–§12)
+schemaVersion: uint32   (4 desde Block 09A; ver §11–§13)
 entryCount  : uint32
+productionOnboardingReady : uint8 (0/1)   -- agregado en schema v4 (Block 09A), ver §13
 entries[entryCount]:
   petId              : string  (uint32 byte-length + UTF-8 bytes)
   variantId          : string
@@ -71,6 +72,7 @@ entries[entryCount]:
   initiallyOwned      : uint8 (0/1)   -- agregado en schema v2 (Block 06), ver §11
   priceClicks         : uint64        -- agregado en schema v3 (Block 07), ver §12
   publiclyPurchasable : uint8 (0/1)   -- agregado en schema v3 (Block 07), ver §12
+  starterRole         : uint8 (0=none/1=normal/2=secret)  -- agregado en schema v4 (Block 09A), ver §13
 ```
 
 **Determinista:** orden de campos fijo, sin iteración de map/set en
@@ -91,6 +93,11 @@ datos):
 - una entrada con `publiclyPurchasable=1` y `priceClicks=0` se rechaza
   (precio cero no soportado — brief §26). El compilador Python la
   rechaza también, y además rechaza un `price_clicks` negativo.
+- un `starterRole` fuera de {0,1,2} se rechaza. `productionOnboardingReady=1`
+  con menos de 3 entradas `starterRole=1` (normal) se rechaza — defensa
+  en profundidad del gate de contenido de onboarding (ver §13 y
+  `docs/ONBOARDING.md` §8). El compilador Python exige además que el
+  contenido (pack + `.nvprev`) de cada starter normal exista en disco.
 
 **Deliberadamente NO valida** que cada `packPath` apunte a un archivo
 que realmente existe: eso requeriría tocar el filesystem desde un
@@ -450,7 +457,32 @@ build); v2 ya no se acepta.
 - **Precios PROVISIONALES de QA/economía** (no balanceo final): Bunny
   120, Nidir 300. Frin `price_clicks: 0`, `publicly_purchasable:
   false`. El manifest de dev (`assets/dev/pet_catalog_manifest.json`)
-  los declara con `schema_version: 3`. Regenerar tras editar:
+  los declara con `schema_version: 4` (Block 09A). Regenerar tras
+  editar:
   `python3 tools/compile_pet_catalog.py assets/dev/pet_catalog_manifest.json assets/dev/pet_catalog.nvcat`.
 
 Ver `docs/PRODUCT_UI.md` §16–§19 y DEC-125/DEC-126/DEC-127.
+
+## 13. Metadata de onboarding (Block 09A)
+
+Block 09A sube `"NVCATLG1"` a **v4**: `starterRole` (u8) por entrada +
+`productionOnboardingReady` (u8) a nivel de catálogo — DATO, nunca una
+rama `if (pet == "artu")` en el runtime/UI (brief §7). Ver
+`docs/ONBOARDING.md` para el diseño completo y DEC-132.
+
+**Tres caminos, tres responsabilidades distintas** (brief §17):
+
+| Camino | Datum | Qué hace | Dónde |
+|---|---|---|---|
+| **Migración histórica** de propiedad | (ninguno de catálogo) | Un `ownedPetIds` "frin" de un save v1/v2/v3 se expande a `frin/male` + `frin/female` por una tabla CONGELADA. NUNCA variantes futuras. | `catalog::ExpandHistoricalWholePetEntitlements` (DEC-129), gated `onDiskSchema < 4` |
+| **Siembra dev/legacy** | `initiallyOwned` (u8, schema v2) | En el PRIMER arranque sin `ownershipSeeded`, otorga la autorización explícita de cada entrada marcada. Es el camino de dev/legacy HASTA que Block 09B habilite el onboarding de producción. | `catalog::SeedEntitlementsFromCatalog` (DEC-124) |
+| **Grant de onboarding** (futuro) | `starterRole` (u8, schema v4) | El usuario nuevo elige un starter; se otorga EXACTAMENTE esa identidad (para Frin, la variante concreta). Balance 0. Política NUEVA — no reutiliza la migración histórica. | `catalog::OnboardingPolicy` (DEC-132) |
+
+`productionOnboardingReady` arma el onboarding de PRODUCCIÓN y solo se
+puede compilar en `true` con la tríada de starters normales
+(Artu/Rato/Rin Rin) presente y su contenido (pack + `.nvprev`) en disco
+— ver `tools/compile_pet_catalog.py` y `docs/ONBOARDING.md` §8. El
+catálogo de dev actual: `false`, cero `starterRole` → **el arranque
+normal es idéntico al de antes de Block 09A**. Block 09B lo activa; el
+harness solo-DEV (`NIMVLETS_DEV_ONBOARDING`) usa un catálogo sintético
+aparte (`assets/dev/onboarding_dev_catalog.nvcat`).

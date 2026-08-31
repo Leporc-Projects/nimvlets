@@ -142,6 +142,8 @@ sizeChoice        : string  ("small"/"medium"/"large"; "" => "medium")
 opacityPercent    : uint32  (0 => sin preferencia => 100)
 -- añadido de v3 (Block 06.1), sin cambios en v4:
 language          : string  ("en"/"es"; "" => nunca elegido => se resuelve del locale del OS, sin persistir)
+-- añadido de v5 (Block 09A):
+onboardingLifecycle : uint8  (0=kPending / 1=kLegacyComplete / 2=kCompleted — lifecycle de primer arranque, ver docs/ONBOARDING.md)
 ```
 
 **Determinista:** serializar el mismo `AppState` dos veces produce una
@@ -150,12 +152,25 @@ iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
 **Versionado + migración hacia adelante (Block 06 DEC-109, Block 06.1
-DEC-116, Block 07 DEC-124/DEC-128):** `DeserializeAppState` lee
-cualquier versión en `[1, kCurrentSchemaVersion]` — hoy **1, 2, 3 y
-4**. Un archivo más viejo se lee con su layout y los campos de
-versiones posteriores quedan en su default; `outState.schemaVersion` se
-fija a la versión actual, así que el próximo `Save()` lo reescribe al
+DEC-116, Block 07 DEC-124/DEC-128, Block 09A DEC-131):**
+`DeserializeAppState` lee cualquier versión en `[1, kCurrentSchemaVersion]`
+— hoy **1..5**. Un archivo más viejo se lee con su layout y los campos
+de versiones posteriores quedan en su default; `outState.schemaVersion`
+se fija a la versión actual, así que el próximo `Save()` lo reescribe al
 formato actual.
+
+**Migración v1/v2/v3/v4 -> v5 (Block 09A, DEC-131):** cualquier archivo
+que precede al onboarding se lee con `onboardingLifecycle =
+kLegacyComplete` — un usuario EXISTENTE, ya onboardeado: se preserva
+TODO lo demás exacto (balance, propiedad, preferencias, posición, pet
+activo) y NUNCA se lo manda a selección de starter. La AUSENCIA de
+archivo (`AppState{}`) es `kPending` — un usuario potencialmente nuevo,
+distinguible de un migrado. Un byte de lifecycle fuera de {0,1,2} en un
+v5 -> `kLegacyComplete` (no destructivo); un v5 truncado antes del byte
+-> se rechaza. `AppStateStore::Load` gana `outSaveFileExisted` (true si
+había archivo, aunque no parsee) para que src/app distinga un usuario
+nuevo de una recuperación de un archivo corrupto (nunca se onboardea a
+este último). Ver docs/ONBOARDING.md §2.
 
 **Migración de propiedad v2/v3 -> v4, en dos etapas** (DEC-128,
 afinada por DEC-129):
@@ -171,9 +186,12 @@ afinada por DEC-129):
    corrupto).
 2. **Reconciliación por tabla histórica CONGELADA (`src/app`).**
    `SpikeApp::Init()` corre `catalog::ExpandHistoricalWholePetEntitlements(ents)`
-   **solo si la versión en disco es < la actual** (un estado
-   genuinamente v1/v2/v3; nunca sobre un v4). La función **ya no recibe
-   catálogo**: una tabla fija (`HistoricalLegacyVariants`) mapea
+   **solo si la versión en disco es < `AppState::kFirstExplicitEntitlementSchema`
+   (== 4)** — un estado genuinamente v1/v2/v3; nunca sobre un v4+. El
+   umbral es un valor SEMÁNTICO fijo, no `kCurrentSchemaVersion`: subir
+   el schema por una razón no relacionada (v5, onboarding — Block 09A)
+   NO debe empezar a "migrar" la propiedad de un v4. La función **ya no
+   recibe catálogo**: una tabla fija (`HistoricalLegacyVariants`) mapea
    `"frin" -> {frin, "male"} {frin, "female"}` — las variantes que Block
    06 realmente exponía — y deja cualquier otro `{p, ""}` igual (era un
    pet sin variantes). Idempotente. **El AppState persistido nunca queda

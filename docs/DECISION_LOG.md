@@ -4774,3 +4774,141 @@ equivalente del menú rápido nombran el mismo valor);
 `tests/PersistenceIntegrationTest.cpp`
 (`PreferenceChangesSurviveReloadWithoutTouchingEconomy`). QA nativo
 Retina en EN/ES + estado de foco de teclado.
+
+### DEC-131 — Lifecycle de primer arranque: schema v5, `OnboardingLifecycle`, y la migración de usuarios existentes
+**Status:** DECIDIDO · Block 09A. **Extiende** DEC-124 (schema v4) y
+DEC-109/DEC-116 (migración hacia adelante de AppState). NO toca la
+migración histórica de Frin (DEC-129 sigue vigente).
+
+**Contexto.** El roadmap requiere onboarding de primer arranque. Con
+exactamente un Nimvlet poseído, un estado puede ser un usuario NUEVO
+que recién eligió su starter, o un usuario VIEJO al que le queda uno —
+no se puede inferir de la propiedad. Y "sin archivo de estado" (usuario
+genuinamente nuevo) tiene que ser distinguible de "estado viejo
+migrado".
+
+**Decisión.**
+
+- **AppState schema v5** agrega un solo byte, `onboardingLifecycle`
+  (`kPending` 0 / `kLegacyComplete` 1 / `kCompleted` 2). Default de un
+  `AppState{}` = `kPending` (== "ningún save" == usuario potencialmente
+  nuevo).
+- **Migración v1/v2/v3/v4 → v5**: `DeserializeAppState` fija
+  `kLegacyComplete` para CUALQUIER archivo que precede a v5 —
+  preservando balance, propiedad, preferencias, posición y pet activo
+  EXACTOS. Un usuario existente NUNCA se manda a selección de starter,
+  NUNCA se le resetea la propiedad, NUNCA se le pone el balance en 0
+  (brief §3.A/§4). Un byte de lifecycle fuera de {0,1,2} en un v5 →
+  `kLegacyComplete` (NO DESTRUCTIVO — no se rechaza el archivo entero);
+  un v5 truncado antes del byte → se rechaza (no se adivina).
+- **`AppState::kFirstExplicitEntitlementSchema` (== 4)** es el nuevo
+  umbral SEMÁNTICO fijo de la reconciliación de propiedad legacy de
+  Block 07 (`ExpandHistoricalWholePetEntitlements`), en vez de
+  `kCurrentSchemaVersion`: subir el schema por el onboarding (v5) NO
+  debe empezar a "migrar" la propiedad de un v4.
+- **`AppStateStore::Load` gana `outSaveFileExisted`**: `true` si había
+  archivo (aunque no parsee), `false` solo si genuinamente no existía.
+  src/app distingue un usuario nuevo (sin archivo → onboarding, cuando
+  esté armado) de una recuperación de un archivo corrupto (existía → se
+  trata como usuario existente, NUNCA se onboardea — brief §27).
+- **Normalización dev/legacy → `kLegacyComplete`**: cuando corre la
+  siembra de propiedad por catálogo (el camino dev/legacy, no
+  onboarding), src/app pone el lifecycle en `kLegacyComplete` si estaba
+  en `kPending`. NO es "inferir completitud de la propiedad" (brief §3):
+  `ownershipSeeded` es un flag EXPLÍCITO de "hubo init".
+
+**Verificado.** `tests/AppStateSerializerTest.cpp`
+(`OnboardingLifecycleMigration`, `V5RoundTrips`,
+`TruncatedV5LifecycleByteRejected`), `tests/AppStateStoreTest.cpp`
+(`SaveFileExistedFlag`), `tests/EntitlementMigrationTest.cpp`
+(`LegacySavesAreOnboardingComplete` — v1..v4 → kLegacyComplete con
+todo lo demás preservado; `AppState{}` → kPending; el gate de
+reconciliación de Frin ahora es `< kFirstExplicitEntitlementSchema`, así
+que los tests v4 siguen sin expandirse). Smoke: un save v4 real carga,
+migra a v5=legacy-complete, y su propiedad/balance sobreviven.
+
+---
+
+### DEC-132 — Onboarding: metadata de starter data-driven, gate de contenido de producción, política pura, secreto de 44 s event-driven, y harness solo-DEV
+**Status:** DECIDIDO · Block 09A. **Depende de** DEC-131 (lifecycle).
+NO habilita el onboarding de producción (falta contenido de
+Artu/Rato/Rin Rin — se activa en Block 09B).
+
+**Contexto.** Hay que construir la ARQUITECTURA real de
+state/policy/migration/timing del onboarding SIN inventar contenido de
+starter que no existe, y SIN romper el arranque normal actual.
+
+**Decisión.**
+
+- **`catalog::StarterRole` (catálogo schema "NVCATLG1" v4)** — DATO por
+  entrada: `none` / `normal` (la tríada Artu/Rato/Rin Rin) / `secret`
+  (Frin). NUNCA `if (pet == "artu")` en el runtime/UI (brief §7). Sin
+  metadata especulativa de economía: un starter no es
+  `publicly_purchasable` por serlo; el shop oculto es Block 10.
+- **Gate de contenido de producción** (brief §8/§30/§31), en tres
+  capas: (1) `tools/compile_pet_catalog.py` deja compilar
+  `production_onboarding_ready: true` SOLO si el manifest declara ≥ 3
+  starters `normal` Y el contenido de cada uno (pack + `.nvprev`) existe
+  en disco; si no, la compilación FALLA. (2) `PetCatalogLoader` rechaza
+  un `.nvcat` con el flag en true y < 3 starters normales. (3)
+  `catalog::EvaluateOnboardingReadiness` — `armed` sii el flag + conteo
+  ≥ `kRequiredNormalStarterCount`. **La metadata del secreto sola nunca
+  arma nada.** El catálogo de dev actual: flag `false`, cero
+  `starter_role` → nunca armado → **arranque normal idéntico al de
+  antes de Block 09A** (brief §31).
+- **`catalog::OnboardingPolicy`** (puro, sin SDL/I/O): `BuildOnboardingOffer`
+  agrupa por rol (secreto colapsado bajo `{frin,""}` + variantes);
+  `EvaluateOnboardingSelection` → `OnboardingGrant` con reglas exactas
+  (normal ofrecido → grant; secreto sin reveal → rechazo; `{frin,""}`
+  con reveal → "needs variant"; variante del secreto con reveal → grant
+  EXACTO de esa variante; ya completo → `kAlreadyCompleted` con CERO
+  mutación). `newBalance` = 0 SIEMPRE (brief §16). Un target inválido →
+  cero mutación (brief §28).
+- **Grant EXACTO de Frin** (brief §5/§13): elegir Frin Macho otorga
+  `{frin,"male"}` y nada más; la otra variante queda sin otorgar
+  (Block 10). NO se reutiliza `ExpandHistoricalWholePetEntitlements`:
+  el onboarding es una política de grant NUEVA.
+- **Transacción de completitud** (`HandleOnboardingSelection`, brief
+  §14/§15): balance 0 + grant EXACTO + activo + `kCompleted` +
+  `ownershipSeeded`, todo en el MISMO `AppState`, UNA escritura atómica
+  (mismo contrato temp+rename que una compra — DEC-126). Idempotente:
+  `!onboardingActive_` sale temprano y `alreadyCompleted` da cero
+  mutación. Un crash no puede dejar "completado sin starter" ni "starter
+  sin completar".
+- **Secreto de los 44 s** (brief §10/§11/§12): DWELL DE SESIÓN sobre la
+  pantalla activa, reloj MONOTÓNICO, NUNCA acumulado en AppState (una
+  sesión nueva arranca un dwell fresco). `catalog::SecretRevealDeadlineMs`
+  se integra al mismo cálculo `SDL_WaitEventTimeout` / next-deadline que
+  `ambientDeadlineMs_` & co. — sin timer thread, sin polling. Al
+  deadline: transición UNA vez + un redibujo, se limpia el deadline.
+  `SecretRevealedAfterDwell(dwellMs)` = `dwellMs >= 44000` (frontera
+  exacta), testeable con tiempo inyectado (sin `sleep`).
+- **Onboarding NO es una sección** (brief §19): es un GATE. `ProductWindow`
+  gana un modo `onboarding_` que se come todo el input, oculta la nav de
+  secciones, y no se puede saltear (cerrar la ventana la re-enfoca; Esc
+  solo cancela una confirmación). Composición cálida/quieta/espaciosa
+  (`productui::OnboardingLayout` puro + `OnboardingView` SDL): encabezado
+  + fila de candidatos, confirmación inline con el foco en "Cancel"
+  (brief §23), sub-elección contenida de variante para Frin (brief §22).
+  Usa el bundle `.nvprev` liviano — NUNCA abre un `.nvpack` para elegir
+  (brief §26).
+- **Harness solo-DEV** (brief §9): `NIMVLETS_DEV_ONBOARDING` carga
+  `assets/dev/onboarding_dev_catalog.nvcat` (descriptores SINTÉTICOS
+  `artu_dev`/`rato_dev`/`rinrin_dev` que prestan packs existentes — NO
+  son Artu/Rato/Rin Rin, nunca se envían, el `(dev)` en el nombre lo
+  hace inconfundible) y fuerza el gate mientras el lifecycle sea
+  `kPending`. `NIMVLETS_DEV_ONBOARDING_REVEAL[_MS]` / `_STAGE` /
+  `_CHOOSE` para QA sin dormir 44 s.
+
+**Verificado.** `tests/OnboardingPolicyTest.cpp` (§28 selección/grant/
+idempotencia/balance-0, §29 fronteras del deadline con tiempo inyectado,
+§30 gate de contenido incl. "el secreto solo no cuenta" y "el catálogo
+de dev actual no arma"); `tests/OnboardingLayoutTest.cpp` (etapas,
+secreto oculto/revelado al final, EN/ES, hit-test, foco en Cancel,
+cabe sin scroll con 3 y 4 tarjetas, sin nav de secciones);
+`tests/PetCatalogLoaderTest.cpp` + `tools/test_asset_pipeline.py`
+(catálogo v4: `starter_role`, `production_onboarding_ready` + su gate).
+Smokes: arranque normal sin cambios, flujo DEV de starter normal,
+reveal a 722 ms, selección de Frin macho y hembra, completitud +
+reinicio (lifecycle=completed, balance 0, solo la variante elegida
+poseída), ciclo de vida del Product UI.
