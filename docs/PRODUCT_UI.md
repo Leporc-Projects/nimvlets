@@ -37,6 +37,18 @@ estantería baja a un **rail** compacto que sigue permitiendo elegir
 otro. `hovered != selected != confirming`. Ver §16 (reescrito) y §16.2.
 El estado de entrada hero-first de DEC-127 queda **superseded**.
 
+**Actualización Block 09C (Collection = SOLO lo poseído — DEC-136).**
+Pasada de corrección de QA del owner: la Collection ya NO muestra
+Nimvlets que el owner no tiene (antes un Nidir no poseído aparecía en la
+gallery con "Not in your collection"). `BuildCollectionModel` descarta
+los ítems que quedarían `kLocked` — lo públicamente comprable pero no
+poseído vive en el Shop, no en la Collection ("Collection = lo que ya
+tengo; Shop = lo que puedo mirar / comprar"). Un Frin con al menos una
+variante poseída SÍ aparece (con la otra variante marcada no poseída,
+sin ruta de compra). Con un solo Nimvlet poseído la gallery queda vacía:
+sin divisor ni segundo plano, una sola línea quieta hacia el Shop
+(`kCollectionOnlyActive`). Ver §5, §6.3 y DEC-136.
+
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
 el owner; 06.1 solo refina la dirección visual y el idioma:
@@ -65,10 +77,12 @@ Dentro de alcance:
 
 - una **ventana de aplicación normal** (con marco, enfocable,
   redimensionable) para el Product UI;
-- la **Collection**: un álbum de los Nimvlets del owner con tres
-  estados de propiedad (activo, poseído-inactivo, bloqueado), un panel
-  de detalle expandido, y el modelo de variantes de Frin (un Nimvlet
-  lógico, macho/hembra);
+- la **Collection**: un álbum de los Nimvlets del owner con dos estados
+  de propiedad (activo, poseído-inactivo), un panel de detalle
+  expandido, y el modelo de variantes de Frin (un Nimvlet lógico,
+  macho/hembra). *(Block 06 listaba además un tercer estado, "bloqueado"
+  / no poseído — Block 09C lo quita de la Collection: ver la
+  Actualización Block 09C arriba y DEC-136.)*
 - **switching de pet en vivo** desde la Collection, sin reiniciar;
 - el **click balance** visible SOLO dentro del Product UI;
 - un **menú rápido nativo** en macOS (`NSStatusItem`): pet actual,
@@ -194,9 +208,10 @@ Ver `docs/CATALOG.md` §11 para el detalle. En resumen:
 
 - **Semilla de desarrollo/default**: `catalog::CatalogEntry::
   initiallyOwned` (schema `NVCATLG1` v2). El manifest de dev marca
-  Bunny + Frin como `initially_owned`; Nidir queda **bloqueado**, para
-  que la Collection ejercite los tres estados con solo los packs
-  reales que ya existen.
+  Bunny + Frin como `initially_owned`; Nidir queda sin poseer, comprable
+  desde el Shop a 300 clics. *(Block 06 mostraba Nidir en la Collection
+  como "bloqueado"; Block 09C lo quita de la Collection y lo deja solo
+  en el Shop — DEC-136.)*
 - **Autoridad de runtime**: `persistence::AppState::ownedPetIds` (schema
   `NVSTATE1` v2), un conjunto de `petId` (nunca por variante — poseer
   "frin" da acceso a macho y hembra). `ownershipSeeded` (bool)
@@ -334,14 +349,25 @@ cerrar. Regenerar tras regenerar un pack: `python3 tools/compile_pet_previews.py
 
 ### 6.3 Estados de propiedad
 
-**Gallery** (sub-línea bajo el arte):
+**Block 09C / DEC-136 — la Collection es SOLO lo poseído.** Un Nimvlet
+sin ninguna variante en la colección del owner NO aparece (antes se
+listaba como "bloqueado"). `BuildCollectionModel` descarta esos ítems;
+`CollectionLayout` nunca los ve. Un pet no poseído seleccionado a mano
+(un save viejo, un flag DEV) cae al pet activo — nunca hay un hero
+"bloqueado". Un Frin con una sola variante poseída SÍ aparece
+(`kOwnedInactive`), con la otra variante marcada no poseída y SIN ruta
+de compra (§7). **Un solo Nimvlet poseído** → la gallery queda vacía: la
+vista no dibuja el divisor ni el segundo plano, solo una línea quieta
+`Meet more Nimvlets in the Shop.` / `Conoce más Nimvlets en la Tienda.`
+(`kCollectionOnlyActive`).
+
+**Gallery** (sub-línea bajo el arte) — solo Nimvlets poseídos:
 
 | Estado | Sub-línea | Arte |
 |---|---|---|
 | poseído + activo | `On desktop` | sí |
 | poseído + inactivo (sin variantes) | `Use` (en el tono del pet) | sí |
 | poseído + inactivo (Frin) | `Use` | sí (variante por defecto) |
-| bloqueado | `Not in your collection` (tenue) | **sí, más callado** (alpha 150) — visible, no destruido (brief §12) |
 
 **Hero** — la línea de estado y el botón son **mutuamente excluyentes**
 (`showStatusLine == !actionEnabled`), nunca los dos (brief 06.2 §18):
@@ -352,7 +378,7 @@ cerrar. Regenerar tras regenerar un pack: `python3 tools/compile_pet_previews.py
 | activo (Frin), variante mostrada == la activa | línea `● On desktop` — **sin botón** |
 | activo (Frin), variante mostrada != la activa | botón `Use <name>` (re-activa con la otra variante) — sin línea |
 | poseído-inactivo | botón `Use <name>` — sin línea |
-| bloqueado | línea `Not in your collection` — **sin botón, sin compra ni precio** (brief §12) |
+| Frin con la variante mostrada NO poseída | línea `Not in your collection` — **sin botón, sin compra ni precio** (§7) |
 
 El botón usa el `softFill` + borde `line` + texto `deepInk` del acento
 del pet — nunca casi-negro (DEC-121). No se dibuja ningún botón

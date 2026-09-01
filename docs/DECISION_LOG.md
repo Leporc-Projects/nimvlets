@@ -5194,3 +5194,67 @@ Collection marca Nidir como poseído), `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6,
 8 ciclos open/close limpios, idle del Shop 0,0 % CPU. Congelado sin
 tocar: Nidir (arte/animación/escala/geometría/runtime), la deuda
 `lie_to_sit` de Frin, Collection, Settings, onboarding.
+
+---
+
+### DEC-136 — La Collection muestra SOLO los Nimvlets poseídos (owner QA, Block 09C)
+**Status:** DECIDIDO · Block 09C (pasada de corrección de QA del owner).
+**Supersede** el tercer estado "bloqueado" de la Collection que venía de
+DEC-108 / DEC-112 (el álbum enumeraba TODO el roster y pintaba los no
+poseídos con "Not in your collection"). NO cambia la arquitectura:
+sigue `BuildCollectionModel` → `CollectionLayout` → `CollectionView`, y
+el enum `OwnershipStatus` conserva sus tres valores. NO toca el Shop
+browse-first (DEC-135), la compra (DEC-126/128), Settings ni onboarding.
+
+**Contexto.** El owner aprobó el Shop browse-first y luego rechazó que
+la Collection siguiera mostrando Nimvlets que no tiene — un Nidir no
+poseído aparecía en la gallery inferior con "Not in your collection".
+El modelo mental correcto: **Collection = lo que ya tengo; Shop = lo que
+puedo mirar / comprar.** Lo públicamente comprable pero no poseído
+pertenece al Shop, no a la Collection.
+
+**Decisión.**
+- **`catalog::BuildCollectionModel` descarta los ítems `kLocked`** (un
+  Nimvlet sin NINGUNA variante poseída) tras calcular los estados. El
+  pet activo se conserva SIEMPRE (es `kActive`, nunca `kLocked`, aunque
+  un save corrupto lo tuviera sin poseer — `ResolveOwnedActiveIdentity`
+  ya lo repara en el arranque). Un Frin con al menos una variante
+  poseída queda `kOwnedInactive` y SÍ aparece, con la otra variante
+  marcada no poseída y sin ruta de compra (semántica de DEC-128
+  intacta). `CollectionModel::items` pasa a ser "una fila por pet lógico
+  POSEÍDO".
+- **`CanActivate`** no cambia: un pet no poseído ya no está en el modelo
+  → `Find` devuelve nullptr → no activable (mismo resultado que el
+  viejo chequeo `status == kLocked`). `HandleActivateRequest` intacto.
+- **`CollectionLayout` — gallery vacía (un solo Nimvlet poseído,
+  brief §4.A):** sin divisor, sin segundo plano; una sola línea quieta
+  hacia el Shop (`StringKey::kCollectionOnlyActive` — "Meet more Nimvlets
+  in the Shop." / "Conoce más Nimvlets en la Tienda."). Nada de
+  placeholders. La resolución del hero ya caía al pet activo cuando
+  `selectedPetId` no está en el modelo, así que un id no poseído
+  seleccionado a mano nunca produce un hero "bloqueado".
+- **No se rediseña la Collection:** hero + gallery, editorial, acento
+  por pet, flujo "Use <name>", persistencia y refresco Shop↔Collection
+  quedan igual. Es una corrección de filtrado en el modelo, en la capa
+  correcta (la fuente de la gallery ya es owned-only, no se ocultan
+  ítems tarde en el render).
+
+**Verificado.** `tests/CollectionModelTest.cpp` (+2 neto: modelo
+owned-only excluye no poseídos; Frin sin variante poseída excluido; un
+pet recién poseído aparece; un solo poseído → un solo ítem).
+`tests/CollectionLayoutTest.cpp` (+2 neto: la gallery excluye no
+poseídos; un solo poseído → gallery vacía, sin divisor/segundo plano,
+línea EN/ES, cabe en 800×560; el helper `FullyOwnedModel` reemplaza a
+`DevModel` donde un test necesitaba ≥2 entradas de gallery; el viejo
+`HeroLockedHasNoAction` pasa a `UnownedSelectionFallsBackToActivePet`).
+`tests/EntitlementMigrationTest.cpp` (1 test: un `{frin, ""}` v4 suelto
+ya ni aparece en el modelo — prueba más fuerte de "no se fabrica
+propiedad"). 446 tests C++ (era 442), 162 Python. Debug + Release +
+universal2 (lipo: x86_64 arm64), `nimvlets_macos_text_check` PASS,
+`nimvlets_macos_clickthrough_check` PASS. Smokes en vivo: Collection
+default (dev seed) muestra Bunny + Frin, SIN Nidir; tras
+`NIMVLETS_DEV_BUY=nidir` Nidir aparece; Frin como hero conserva el
+selector Male/Female; EN/ES; un solo Nimvlet poseído (vía el harness
+DEV de onboarding) muestra la línea quieta sin divisor. Congelado sin
+tocar: Nidir, deuda `lie_to_sit` de Frin, Shop browse-first, Settings,
+onboarding.

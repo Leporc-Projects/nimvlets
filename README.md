@@ -10,7 +10,10 @@ abre en una estantería de personajes: la rejilla del arte es el
 contenido primario; hover/foco revela precio o propiedad; recién al
 seleccionar un personaje aparece el hero grande con la acción de compra
 — la transacción de compra de Block 07 queda intacta; ver
-[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §16 y DEC-135), sobre
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §16 y DEC-135. Una pasada de
+QA del owner además dejó la **Collection con SOLO los Nimvlets
+poseídos** — los comprables no poseídos viven en el Shop, no en la
+Collection; DEC-136), sobre
 **Block 07 — Shop + Wallet Economy** (el click counter se vuelve un
 wallet real: una segunda sección del Product UI, el **Shop**, alcanzable
 por una navegación de texto `Collection · Shop`; comprar consume clicks
@@ -175,13 +178,15 @@ abre el Product UI: una ventana normal con dos secciones, **Collection**
 y **Shop**, alcanzables por una fila de texto `Collection · Shop`
 (mouse o teclado; el runtime del pet no se toca al cambiar).
 
-La **Collection** es un álbum de tus Nimvlets con una composición
-**hero + gallery** — el Nimvlet seleccionado es el protagonista, con su
-arte grande sobre un *hero stage* teñido con su acento de identidad, su
-especie, una descripción (un par de frases desde Block 07), estado,
-selector tipográfico de variante (Frin) y un botón de acción con el
-tinte del pet; los demás en una gallery discreta sobre un segundo
-plano. Switch de pet en vivo.
+La **Collection** es un álbum de **los Nimvlets que ya tienes** (Block
+09C: los no poseídos viven en el Shop, no acá — DEC-136), con una
+composición **hero + gallery** — el Nimvlet seleccionado es el
+protagonista, con su arte grande sobre un *hero stage* teñido con su
+acento de identidad, su especie, una descripción (un par de frases desde
+Block 07), estado, selector tipográfico de variante (Frin) y un botón de
+acción con el tinte del pet; los demás Nimvlets poseídos en una gallery
+discreta sobre un segundo plano. Con un solo Nimvlet, la gallery se
+reemplaza por una línea quieta hacia el Shop. Switch de pet en vivo.
 
 El **Shop** (Block 07 + 09C — **browse-first**) abre en una **estantería
 de personajes**: una rejilla del arte de cada Nimvlet públicamente
