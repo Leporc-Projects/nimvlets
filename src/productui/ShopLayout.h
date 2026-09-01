@@ -50,7 +50,10 @@ enum class ShopPresentation {
 
 struct ShopTile {
     std::string petId;
-    std::string displayName;        // nombre propio — nunca traducido
+    // Variante EXACTA para resolver la preview `.nvprev` (Block 10 —
+    // Starter Shop de Frin). "" para el Shop público (pets sin variantes).
+    std::string variantId;
+    std::string displayName;        // nombre propio — nunca traducido (Starter Shop: "Frin · Male")
     catalog::ShopItemStatus status = catalog::ShopItemStatus::kAffordable;
     // Info contextual liviana revelada al hacer hover / foco (brief §6):
     // precio formateado ("300 clicks" / "300 clics"), o el estado de
@@ -97,7 +100,10 @@ struct PurchaseConfirm {
 
 struct ShopHero {
     std::string petId;
-    std::string displayName;      // nombre propio — nunca traducido
+    // Variante EXACTA para la preview `.nvprev` (Block 10 — Starter Shop
+    // de Frin). "" para el Shop público.
+    std::string variantId;
+    std::string displayName;      // nombre propio — nunca traducido (Starter Shop: "Frin · Male")
     std::string speciesText;      // etiqueta de especie, "" si no hay
     std::string descriptionText;  // línea(s) de personalidad, "" si no hay
     catalog::ShopItemStatus status = catalog::ShopItemStatus::kAffordable;
@@ -163,6 +169,17 @@ struct ShopLayout {
     std::string emptyText;      // localizado, quieto y no alarmante
     UiRect emptyAnchor;         // ancla centrada
 
+    // --- Afordancia "Starter choices…" (Block 10) -----------------
+    // UNA línea secundaria, quieta, cerca del pie del contenido del Shop
+    // público — NO un banner, NO una pestaña, NO un badge (brief §10).
+    // Solo existe si hay al menos una oferta del Starter Shop oculto
+    // (`ShopLayoutInput::starterAffordanceVisible`). Activarla entra al
+    // submodo del Starter Shop (que la propia sección Shop posee).
+    bool starterAffordanceVisible = false;
+    std::string starterAffordanceText;   // localizado: "Starter choices…"
+    UiRect starterAffordanceAnchor;      // ancla centrada
+    // focusId: "starter:enter" — va al FINAL del focusOrder.
+
     // Orden de tabulación:
     //   kBrowse    -> pestañas de nav, luego "shopitem:<petId>" por tarjeta.
     //   kSelected  -> pestañas de nav, luego los controles del hero
@@ -197,11 +214,70 @@ struct ShopLayoutInput {
     // true => el hero muestra la confirmación inline en vez del botón
     // "Get <pet>". Solo tiene efecto en kSelected + kAffordable.
     bool confirming = false;
+
+    // true => dibujar la afordancia quieta "Starter choices…" cerca del
+    // pie (Block 10). El caller (ShopView) la pone en true SOLO cuando el
+    // modelo del Starter Shop oculto tiene >= 1 oferta.
+    bool starterAffordanceVisible = false;
 };
 
 // Construye el layout del Shop. Puro y determinista. Todo el texto
 // traducible ya viene localizado.
 ShopLayout BuildShopLayout(const catalog::ShopModel& model, const ShopLayoutInput& in);
+
+// --- Helpers de layout compartidos con el Starter Shop (Block 10) ----
+//
+// El Starter Shop oculto reusa la MISMA geometría (rejilla de browse +
+// hero + rail): solo cambia el MODELO (ofertas de identidad EXACTA en
+// vez de filas por pet lógico). Estos helpers son la única copia de esa
+// geometría — ver productui/StarterShopLayout.{h,cpp} y DEC-137. Puros y
+// deterministas.
+
+struct BrowseGridMetrics {
+    int cols = 1;
+    int rows = 1;
+    float tileW = 0.0f;
+    float artSize = 0.0f;
+    float tileH = 0.0f;
+    float blockH = 0.0f;  // alto total de la rejilla (sin encabezado)
+};
+
+BrowseGridMetrics ComputeBrowseGrid(int n, float contentW);
+
+// Coloca `tiles` en la rejilla `m`, cada fila centrada en `viewportW`.
+// Devuelve el bottom de la última fila.
+float LayoutBrowseGrid(
+    std::vector<ShopTile>& tiles, float viewportW, const BrowseGridMetrics& m, float gridTop);
+
+// Coloca el rail compacto bajo un hero. `hoverFocusId` (el focusId de la
+// tarjeta, no un petId — el Starter Shop tiene dos "frin") lleva el
+// micro-lift de hover. Devuelve el bottom de la última fila.
+float LayoutShopRail(
+    std::vector<ShopTile>& rail, float viewportW, float contentW, float railTop,
+    const std::string& hoverFocusId);
+
+// Contenido de un hero ya resuelto: la especie/descripción/nombre
+// compuesto los arma el caller (para el Starter Shop de Frin,
+// `displayName` == "Frin · Male"; `petId`/`variantId` siguen exactos).
+struct ShopHeroContent {
+    std::string petId;         // acento + preview base + editorial
+    std::string variantId;     // preview EXACTA ("" salvo Starter Shop de Frin)
+    std::string displayName;   // ya compuesto
+    std::string speciesText;   // "" si no hay
+    std::string descriptionText;
+    catalog::ShopItemStatus status = catalog::ShopItemStatus::kAffordable;
+    catalog::PetEntitlement entitlementTarget;
+    std::uint64_t priceClicks = 0;
+    std::uint64_t clicksShort = 0;
+};
+
+// Rellena `h` (hero stage / arte / nombre / regla / especie / descr /
+// precio / acción / confirmación) y agrega a `focusOrder` los ids
+// accionables ("get" si asequible sin confirmar; "purchase:cancel" +
+// "purchase:confirm" si confirmando). Devuelve el bottom del hero.
+float LayoutShopHero(
+    ShopHero& h, std::vector<std::string>& focusOrder, const ShopHeroContent& c,
+    float headerBodyTop, float contentW, core::Language language, bool confirming);
 
 // Acota `scrollY` a [0, max(0, contentHeight - viewportH)] (idéntico a
 // productui::ClampScroll de la Collection — se reexpone acá para no

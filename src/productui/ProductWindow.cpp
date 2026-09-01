@@ -62,10 +62,12 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     previews_->LoadBundle(catalog);
     view_ = CollectionView{};
     shopView_ = ShopView{};
+    starterShopView_ = StarterShopView{};
     settingsView_ = SettingsView{};
     onboardingView_ = OnboardingView{};
     onboarding_ = false;
     section_ = ProductSection::kCollection;
+    starterShopSubmode_ = false;
 
     RecomputeScale();
     pendingExpose_ = true;
@@ -100,10 +102,12 @@ void ProductWindow::Close() {
     DestroyResources();
     view_ = CollectionView{};
     shopView_ = ShopView{};
+    starterShopView_ = StarterShopView{};
     settingsView_ = SettingsView{};
     onboardingView_ = OnboardingView{};
     onboarding_ = false;
     section_ = ProductSection::kCollection;
+    starterShopSubmode_ = false;
     SDL_Log("nimvlets: Product UI window closed (resources released; pet runtime unaffected)");
 }
 
@@ -145,15 +149,24 @@ void ProductWindow::RecomputeScale() {
 void ProductWindow::SetModels(
     const catalog::CollectionModel& collection,
     const catalog::ShopModel& shop,
+    const catalog::StarterShopModel& starterShop,
     std::uint64_t clickBalance) {
     view_.SetModel(collection, clickBalance);
     shopView_.SetModel(shop, clickBalance);
+    shopView_.SetStarterAffordanceVisible(!starterShop.Empty());
+    starterShopView_.SetModel(starterShop, clickBalance);
+    // Si el submodo está abierto y el Starter Shop se quedó sin ofertas
+    // (se compró la última), NO se lo cierra: queda con su estado vacío
+    // quieto + "← Shop" (brief §19). El propio layout lo dibuja como
+    // kEmpty. Cuando el owner vuelva al Shop público, la afordancia ya no
+    // existe (arriba).
 }
 
 void ProductWindow::SetLanguage(core::Language language) {
     language_ = language;
     view_.SetLanguage(language);
     shopView_.SetLanguage(language);
+    starterShopView_.SetLanguage(language);
     settingsView_.SetLanguage(language);
     onboardingView_.SetLanguage(language);
 }
@@ -194,7 +207,7 @@ bool ProductWindow::ActiveViewDirty() const {
     }
     switch (section_) {
         case ProductSection::kShop:
-            return shopView_.Dirty();
+            return starterShopSubmode_ ? starterShopView_.Dirty() : shopView_.Dirty();
         case ProductSection::kSettings:
             return settingsView_.Dirty();
         case ProductSection::kCollection:
@@ -205,6 +218,7 @@ bool ProductWindow::ActiveViewDirty() const {
 
 void ProductWindow::ShowSectionForQA(ProductSection section) {
     section_ = section;
+    starterShopSubmode_ = false;  // el submodo del Starter Shop no sobrevive un cambio de sección
     if (section_ == ProductSection::kShop) {
         shopView_.OnEnterSection();
     } else if (section_ == ProductSection::kSettings) {
@@ -280,6 +294,7 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
                 RecomputeScale();
                 view_.OnViewportChanged();
                 shopView_.OnViewportChanged();
+                starterShopView_.OnViewportChanged();
                 settingsView_.OnViewportChanged();
                 onboardingView_.OnViewportChanged();
                 break;
@@ -342,7 +357,45 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
     bool wantSwitch = false;
     ProductSection switchTo = ProductSection::kCollection;
 
-    if (section_ == ProductSection::kShop) {
+    if (section_ == ProductSection::kShop && starterShopSubmode_) {
+        // --- Submodo del Starter Shop oculto (Block 10) --------------
+        StarterShopViewResult r;
+        switch (event.type) {
+            case SDL_EVENT_MOUSE_MOTION:
+                if (event.motion.windowID != myId) return out;
+                out.consumed = true;
+                r = starterShopView_.OnMouseMove(event.motion.x, event.motion.y);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (event.button.windowID != myId || event.button.button != SDL_BUTTON_LEFT) return out;
+                out.consumed = true;
+                r = starterShopView_.OnMouseDown(event.button.x, event.button.y);
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (event.wheel.windowID != myId) return out;
+                out.consumed = true;
+                r = starterShopView_.OnWheel(event.wheel.y);
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (event.key.windowID != myId) return out;
+                out.consumed = true;
+                r = starterShopView_.OnKey(static_cast<int>(event.key.key), KeycodeShift(event.key.mod));
+                break;
+        }
+        if (r.hasPurchase) {
+            out.hasStarterPurchase = true;
+            out.starterPurchase = r.purchase;
+        }
+        if (r.exitSubmode) {
+            // Volver al Shop público — en BROWSE (punto de partida
+            // predecible, brief §11).
+            starterShopSubmode_ = false;
+            shopView_.OnEnterSection();
+            pendingExpose_ = true;
+        }
+        wantSwitch = r.switchSection;
+        switchTo = r.targetSection;
+    } else if (section_ == ProductSection::kShop) {
         ShopViewResult r;
         switch (event.type) {
             case SDL_EVENT_MOUSE_MOTION:
@@ -369,6 +422,14 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         if (r.hasPurchase) {
             out.hasPurchase = true;
             out.purchase = r.purchase;
+        }
+        if (r.enterStarterSubmode) {
+            // La afordancia quieta "Starter choices…" — entrar al submodo
+            // del Starter Shop oculto (Block 10, brief §11). La cabecera
+            // sigue marcando "Shop".
+            starterShopSubmode_ = true;
+            starterShopView_.OnEnterSubmode();
+            pendingExpose_ = true;
         }
         if (r.requestClose) {
             out.closeRequested = true;
@@ -445,6 +506,7 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
 
     if (wantSwitch && switchTo != section_) {
         section_ = switchTo;
+        starterShopSubmode_ = false;  // el submodo no sobrevive un cambio de sección (Block 10)
         if (section_ == ProductSection::kShop) {
             shopView_.OnEnterSection();
         } else if (section_ == ProductSection::kSettings) {
@@ -469,6 +531,9 @@ void ProductWindow::DrawFrame() {
         // (brief §26).
         onboardingView_.Render(painter, *text_, *previews_, w, h);
         onboardingView_.ClearDirty();
+    } else if (section_ == ProductSection::kShop && starterShopSubmode_) {
+        starterShopView_.Render(painter, *text_, *previews_, w, h);
+        starterShopView_.ClearDirty();
     } else if (section_ == ProductSection::kShop) {
         shopView_.Render(painter, *text_, *previews_, w, h);
         shopView_.ClearDirty();

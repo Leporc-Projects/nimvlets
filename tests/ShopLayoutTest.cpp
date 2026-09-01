@@ -517,6 +517,74 @@ bool TestSelectedResize() {
     return true;
 }
 
+// ==================== G. AFORDANCIA "Starter choices…" (Block 10) ====
+
+// Sin `starterAffordanceVisible` (el default) NO hay afordancia: ni
+// texto, ni "starter:enter" en el focus order, ni hit-test — el Shop
+// público se comporta EXACTAMENTE como antes (brief §9/§10).
+bool TestNoStarterAffordanceByDefault() {
+    const ShopLayout browse = Layout(1000, {});
+    NIMVLETS_CHECK(!browse.starterAffordanceVisible);
+    NIMVLETS_CHECK(!Has(browse.focusOrder, "starter:enter"));
+    NIMVLETS_CHECK(browse.focusOrder.size() == 5);  // 3 nav + 2 tiles
+
+    const ShopLayout selected = Layout(1000, {NoVar("bunny")}, "nidir");
+    NIMVLETS_CHECK(!selected.starterAffordanceVisible);
+    NIMVLETS_CHECK(!Has(selected.focusOrder, "starter:enter"));
+
+    ShopModel empty;
+    ShopLayoutInput ein;
+    NIMVLETS_CHECK(!BuildShopLayout(empty, ein).starterAffordanceVisible);
+    return true;
+}
+
+// Con `starterAffordanceVisible = true` aparece UNA línea al final del
+// focus order, hittest-able, en browse / selected / vacío. No reordena
+// las tarjetas ni causa scroll a 800x560 (brief §10).
+bool TestStarterAffordanceWhenRequested() {
+    auto withAffordance = [](std::uint64_t balance, const Ents& owned, const std::string& sel) {
+        const auto model = BuildShopModel(MakeShopCatalog(), balance, owned);
+        ShopLayoutInput in;
+        in.selectedPetId = sel;
+        in.starterAffordanceVisible = true;
+        return BuildShopLayout(model, in);
+    };
+
+    const ShopLayout browse = withAffordance(1000, {}, "");
+    NIMVLETS_CHECK(browse.starterAffordanceVisible);
+    NIMVLETS_CHECK(browse.starterAffordanceText == "Starter choices\xE2\x80\xA6");  // "Starter choices…"
+    NIMVLETS_CHECK(browse.focusOrder.back() == "starter:enter");
+    NIMVLETS_CHECK(browse.focusOrder.size() == 6);  // 3 nav + 2 tiles + starter:enter
+    NIMVLETS_CHECK(browse.HitTest(browse.starterAffordanceAnchor.CenterX(),
+                                  browse.starterAffordanceAnchor.CenterY()) == "starter:enter");
+    NIMVLETS_CHECK(browse.contentHeight <= 560.0f + 0.01f);  // no scroll
+    // Las 2 tarjetas siguen ahí, sin moverse por la afordancia.
+    NIMVLETS_CHECK(browse.tiles.size() == 2);
+
+    const ShopLayout selected = withAffordance(500, {NoVar("bunny")}, "nidir");
+    NIMVLETS_CHECK(selected.starterAffordanceVisible);
+    NIMVLETS_CHECK(Has(selected.focusOrder, "starter:enter"));
+    NIMVLETS_CHECK(selected.HitTest(selected.starterAffordanceAnchor.CenterX(),
+                                    selected.starterAffordanceAnchor.CenterY()) == "starter:enter");
+
+    // Shop vacío (catálogo DEV) + ofertas de starter -> la afordancia
+    // igual aparece (brief §10 "even in empty state").
+    ShopModel empty;
+    ShopLayoutInput ein;
+    ein.starterAffordanceVisible = true;
+    const ShopLayout e = BuildShopLayout(empty, ein);
+    NIMVLETS_CHECK(e.empty && e.starterAffordanceVisible);
+    NIMVLETS_CHECK(e.focusOrder.back() == "starter:enter");
+
+    // ES.
+    const auto model = BuildShopModel(MakeShopCatalog(), 1000, {});
+    ShopLayoutInput es;
+    es.language = Language::kEs;
+    es.starterAffordanceVisible = true;
+    NIMVLETS_CHECK(BuildShopLayout(model, es).starterAffordanceText == "Opciones iniciales\xE2\x80\xA6");
+    return true;
+}
+
 }  // namespace
 
 void RegisterShopLayoutTests(testing::TestRunner& runner) {
@@ -543,6 +611,8 @@ void RegisterShopLayoutTests(testing::TestRunner& runner) {
     runner.Add("ShopLayout/LanguageSwitchKeepsSelection", TestLanguageSwitchKeepsSelection);
     runner.Add("ShopLayout/EmptyShop", TestEmptyShop);
     runner.Add("ShopLayout/SelectedResize", TestSelectedResize);
+    runner.Add("ShopLayout/NoStarterAffordanceByDefault", TestNoStarterAffordanceByDefault);
+    runner.Add("ShopLayout/StarterAffordanceWhenRequested", TestStarterAffordanceWhenRequested);
 }
 
 }  // namespace nimvlets::tests

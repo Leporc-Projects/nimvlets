@@ -9,6 +9,7 @@
 #include "catalog/PetCatalog.h"
 #include "catalog/PetIdentity.h"
 #include "catalog/ShopModel.h"
+#include "catalog/StarterShopModel.h"
 #include "content/AnimationDefinition.h"
 #include "core/Localization.h"
 #include "core/Preferences.h"
@@ -17,6 +18,7 @@
 #include "productui/SectionNav.h"
 #include "productui/SettingsView.h"
 #include "productui/ShopView.h"
+#include "productui/StarterShopView.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -30,8 +32,10 @@ struct ProductWindowEvent {
     bool closeRequested = false;  // el owner cerró la ventana (X) -> src/app hace Close(), NO quit
     bool hasActivate = false;
     ActivateRequest activate;
-    bool hasPurchase = false;     // el owner confirmó una compra en el Shop (Block 07)
+    bool hasPurchase = false;     // el owner confirmó una compra en el Shop público (Block 07)
     PurchaseRequest purchase;
+    bool hasStarterPurchase = false;  // el owner confirmó una compra en el Starter Shop oculto (Block 10)
+    PurchaseRequest starterPurchase;  // lleva la IDENTIDAD EXACTA {petId, variantId}
     bool hasPreferenceChange = false;  // el owner cambió una preferencia en Settings (Block 08)
     SettingsChange preferenceChange;
     bool hasOnboardingSelection = false;  // el owner confirmó un starter en el onboarding (Block 09A)
@@ -72,12 +76,15 @@ class ProductWindow {
 
     std::uint32_t WindowId() const;
 
-    // Snapshot de los modelos de AMBAS secciones + balance. Se llama al
-    // abrir y cada vez que cambian el pet activo, la propiedad, o el
-    // balance (un click, una compra). No cambia la sección visible.
+    // Snapshot de los modelos de las secciones + el Starter Shop oculto +
+    // balance. Se llama al abrir y cada vez que cambian el pet activo, la
+    // propiedad, o el balance (un click, una compra). No cambia la
+    // sección visible. Si `starterShop` queda vacío la afordancia
+    // "Starter choices…" del Shop público desaparece (brief §10/§19).
     void SetModels(
         const catalog::CollectionModel& collection,
         const catalog::ShopModel& shop,
+        const catalog::StarterShopModel& starterShop,
         std::uint64_t clickBalance);
 
     // Idioma de TODO el texto de las tres secciones. Cambiarlo redibuja
@@ -107,6 +114,19 @@ class ProductWindow {
     // dwell de sesión (brief §10/§12). Revela el candidato secreto sin
     // ruido. No-op si no está en modo onboarding.
     void RevealOnboardingSecret();
+
+    // --- Submodo SHOP OCULTO DE STARTERS (Block 10) ------------------
+    //
+    // Un submodo CONTEXTUAL que la sección Shop posee — NO una cuarta
+    // pestaña (brief §10/§11). La cabecera compartida sigue marcando
+    // "Shop"; el input se rutea a StarterShopView en vez de a ShopView
+    // mientras está activo. Se entra desde la afordancia quieta "Starter
+    // choices…" del Shop público; se sale con "← Shop" / Esc / al tocar
+    // otra pestaña de nav. Cambiar de sección o reabrir la ventana lo
+    // limpia.
+    bool IsStarterShopSubmode() const {
+        return section_ == ProductSection::kShop && starterShopSubmode_;
+    }
 
     ProductSection Section() const { return section_; }
 
@@ -164,6 +184,28 @@ class ProductWindow {
     void SetShopTileKeyboardFocusForQA(const std::string& petId) {
         shopView_.SetTileKeyboardFocusForQA(petId);
     }
+
+    // Solo-DEV (QA / capturas): entra al submodo del Starter Shop oculto,
+    // elige una oferta (por identidad EXACTA), abre la confirmación, y
+    // pone el hover / foco de teclado sobre una tarjeta de oferta.
+    void EnterStarterShopSubmodeForQA() {
+        if (section_ != ProductSection::kShop || onboarding_) {
+            return;
+        }
+        starterShopSubmode_ = true;
+        starterShopView_.OnEnterSubmode();
+        pendingExpose_ = true;
+    }
+    void SelectStarterOfferForQA(const std::string& petId, const std::string& variantId) {
+        starterShopView_.SelectOfferForQA(petId, variantId);
+    }
+    void SetStarterConfirmingForQA(bool confirming) { starterShopView_.SetConfirmingForQA(confirming); }
+    void SetStarterHoverForQA(const std::string& petId, const std::string& variantId) {
+        starterShopView_.SetHoverForQA(petId, variantId);
+    }
+    void SetStarterKeyboardFocusForQA(const std::string& focusId) {
+        starterShopView_.SetKeyboardFocusForQA(focusId);
+    }
     void SetSettingsKeyboardFocusForQA(const std::string& rowFocusId) {
         settingsView_.SetKeyboardFocusForQA(rowFocusId);
     }
@@ -190,9 +232,13 @@ class ProductWindow {
     std::unique_ptr<PetPreviewCache> previews_;
     CollectionView view_;
     ShopView shopView_;
+    StarterShopView starterShopView_;
     SettingsView settingsView_;
     OnboardingView onboardingView_;
     ProductSection section_ = ProductSection::kCollection;
+    // Submodo del Starter Shop oculto (Block 10) — solo relevante mientras
+    // `section_ == kShop && !onboarding_`. Ver IsStarterShopSubmode().
+    bool starterShopSubmode_ = false;
     // Gate de primer arranque activo — reemplaza a `section_` para todo
     // efecto de input / dibujo mientras está true (brief §19).
     bool onboarding_ = false;

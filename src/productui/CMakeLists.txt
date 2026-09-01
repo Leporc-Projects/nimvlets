@@ -32,6 +32,8 @@ add_library(nimvlets_productui_core STATIC
   CollectionLayout.cpp
   ShopLayout.h
   ShopLayout.cpp
+  StarterShopLayout.h
+  StarterShopLayout.cpp
   SettingsLayout.h
   SettingsLayout.cpp
   OnboardingLayout.h
@@ -51,10 +53,14 @@ add_library(nimvlets_productui STATIC
   PetPreviewCache.cpp
   SectionHeaderView.h
   SectionHeaderView.cpp
+  ShopPaint.h
+  ShopPaint.cpp
   CollectionView.h
   CollectionView.cpp
   ShopView.h
   ShopView.cpp
+  StarterShopView.h
+  StarterShopView.cpp
   SettingsView.h
   SettingsView.cpp
   OnboardingView.h

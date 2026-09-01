@@ -32,6 +32,10 @@ struct ShopViewResult {
     PurchaseRequest purchase;
     bool switchSection = false;  // tocó una pestaña de navegación
     ProductSection targetSection = ProductSection::kCollection;
+    // El owner tocó la afordancia quieta "Starter choices…" (Block 10):
+    // entrar al submodo del Starter Shop oculto (que la propia sección
+    // Shop posee — NO una cuarta pestaña de nav).
+    bool enterStarterSubmode = false;
 };
 
 // La sección SHOP del Product UI. Misma arquitectura que CollectionView:
@@ -60,6 +64,13 @@ class ShopView {
  public:
     void SetModel(catalog::ShopModel model, std::uint64_t clickBalance);
     void SetLanguage(core::Language language);
+
+    // Block 10: ¿mostrar la afordancia quieta "Starter choices…" cerca
+    // del pie? src/app la pone en true SOLO cuando el modelo del Starter
+    // Shop oculto tiene >= 1 oferta (lifecycle kCompleted + una variante
+    // de Frin no poseída, o un starter normal priced). Con 0 ofertas la
+    // afordancia NO existe (brief §10).
+    void SetStarterAffordanceVisible(bool visible);
 
     const catalog::ShopModel& Model() const { return model_; }
 
@@ -123,6 +134,7 @@ class ShopView {
 
     std::string hoverId_;
     bool keyboardFocus_ = false;
+    bool starterAffordanceVisible_ = false;
     bool dirty_ = true;
 };
 
