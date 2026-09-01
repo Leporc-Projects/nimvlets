@@ -5095,3 +5095,102 @@ públicamente comprables; NO se agregan productos falsos). Deuda diferida
 sin tocar: rediseño del Shop (dirección "browse primero"), la posición
 visual de Nidir al subir tras un click, y la política always-on-top del
 pet sobre el Product UI.
+
+---
+
+### DEC-135 — Shop BROWSE-FIRST: la sección abre en una estantería de personajes; el hero-first de entrada de DEC-127 queda superseded
+**Status:** DECIDIDO · Block 09C. **Supersede** el ESTADO DE ENTRADA
+hero-first de DEC-127 (el Shop abría con el primer pet ya expandido como
+hero). El resto de DEC-127 sigue vigente: el Shop es una sección
+separada, sin plantilla de tienda, reusa el acento por pet / hero stage
+/ previews `.nvprev`, y su contenido es dato del catálogo. NO toca la
+transacción de compra (DEC-126/DEC-128), las autorizaciones (DEC-123),
+`catalog::ShopModel`, ni la exclusión de Frin. Es un rediseño de
+**Product UI puro**.
+
+**Contexto.** El owner probó el Shop de Block 07 y rechazó su jerarquía
+visual: al entrar, el hero seleccionado (el primer pet) dominaba de
+inmediato y la sección se sentía "como la Collection con controles de
+compra pegados". El owner quiere que el Shop se sienta primero como "un
+lugar chico donde miro personajes que podría conseguir", y que un
+personaje se vuelva hero grande **solo después de elegirlo**. Referencia
+de interacción (no de arte/marca): BROWSE → HOVER revela info liviana →
+SELECT → HERO + detalle + compra.
+
+**Decisión.**
+
+- **Estado de presentación explícito y mínimo.** `productui::ShopLayout`
+  gana `enum ShopPresentation { kBrowse, kSelected }`; `ShopView`
+  distingue TRES cosas que antes se confundían: `hoverId_` (tarjeta bajo
+  el mouse/foco — revela, no selecciona, no compra), `selectedPetId_`
+  (`""` ⇒ BROWSE sin hero; un `petId` ⇒ ese personaje es el hero) y
+  `confirming_` (sub-estado de SELECTED — la confirmación inline de
+  Block 07, sin cambios). `hovered != selected != confirming`. No se
+  agregó un modelo de estados abstracto: es la representación más chica
+  que encaja.
+- **BROWSE (entrada normal).** `BuildShopLayout` con `selectedPetId ==
+  ""` produce una rejilla centrada de `ShopTile` (arte grande + nombre),
+  columnas por cantidad (1..4 en una fila; 5/6 → 2 filas de ≤3; 7/8 →
+  2 filas de 4), diseñada para el roster V1 futuro sin hardcodear
+  Bunny/Nidir ni asumir dos entradas. El alto de la línea revelada se
+  reserva SIEMPRE, así el hover no reordena. Encabezado quieto
+  `kShopBrowseHeading` ("Nimvlets you can meet" / "…que puedes
+  conocer"). Shop vacío (catálogo DEV) → mensaje quieto localizado
+  `kShopEmpty`, sin mencionar el catálogo sintético.
+- **HOVER / foco de teclado.** Revela bajo el nombre: `kOwned` → "In
+  your collection" (acento); `kAffordable` → el precio (`kTextMuted`);
+  `kInsufficientBalance` → el precio (`kTextFaint`) — distinción
+  asequible/insuficiente "quiet", sin rojo, sin "no te alcanza". Sin
+  tooltips OS, sin animación continua; `OnMouseMove` marca `dirty_` solo
+  cuando el objetivo de hover cambia. El foco de teclado sobre una
+  tarjeta da la MISMA información.
+- **SELECT → HERO.** Un clic / Enter en una tarjeta SELECCIONA (nunca
+  compra, nunca muta wallet/propiedad — `SelectHero` solo asigna
+  `selectedPetId_`). El personaje se promueve a hero grande
+  (`kHeroArt` 216 pt, ~3,6× una tarjeta del rail) con especie /
+  descripción / precio / acción, y la estantería completa baja a un
+  **rail** compacto bajo un divisor, sobre `kGalleryShelf`, con la
+  tarjeta abierta marcada por un subrayado de acento. El rail lista
+  TODOS los pets del Shop (no colapsa a una sola tarjeta con el catálogo
+  real de 2). El foco se queda en esa misma tarjeta — la selección
+  **nunca** salta el foco a la confirmación (brief §12). Un
+  `selectedPetId` ausente del Shop (Frin, id desconocido, save editado)
+  cae a BROWSE — nunca un hero fantasma.
+- **Compra — Block 07 intacto.** Desde el hero: `Get <name>` → confirmación
+  inline (`purchase:cancel` / `purchase:confirm`, foco arranca en
+  Cancel) → `Confirmar` emite un `PurchaseRequest` con
+  `entitlementTarget`. `SpikeApp::HandlePurchaseRequest` sin cambios:
+  `EvaluatePurchase` → mutación atómica balance+propiedad → flush
+  inmediato → refresco de Shop y Collection. Una tarjeta NUNCA gasta
+  clics; un clic perdido nunca compra. `kInsufficientBalance` y
+  `kOwned` sin CTA.
+- **Sin selección persistida.** Cerrar/reabrir el Product UI, o volver a
+  entrar a la sección (`ShopView::OnEnterSection`), devuelve el Shop a
+  BROWSE. AppState no cambia (sin bump de schema).
+- **QA.** `NIMVLETS_DEV_SHOP_PET=<petId>` se reinterpreta como "abrir el
+  Shop con ese personaje SELECCIONADO" (hero); sin la variable, BROWSE
+  normal. Nuevo `NIMVLETS_DEV_SHOP_FOCUS=<petId>` (foco de teclado sobre
+  una tarjeta). `NIMVLETS_DEV_SHOP_HOVER` / `_CONFIRM` preservados.
+
+**Verificado.** `tests/ShopLayoutTest.cpp` reescrito (8 → 23 tests):
+BROWSE por defecto sin hero; rejilla 1/2/3/4/6/8 sin solapes, dentro del
+contenido, orden de foco determinista = orden de catálogo; compone sin
+scroll a 800×560 para el catálogo real y 1..4; resize (mín 600×460,
+760×520, 1100×700); hover/foco revela el texto correcto por estado
+(EN/ES); hover NO selecciona; selección promueve el hero y NO muta;
+elegir otro reemplaza; selección privada/desconocida → BROWSE;
+asequible/insuficiente/poseído del hero (Block 07); confirmación inline
+(EN/ES, hit-test, orden Cancel<Confirm, "get" fuera); `confirming`
+ignorado salvo SELECTED+asequible; Shop vacío localizado; rail de 8 sin
+solapes a varios tamaños. `ShopModelTest` y `PurchasePolicyTest` de
+Block 07 sin cambios y verdes. 442 tests C++ (era 427), 162 Python.
+Debug + Release + universal2 (lipo: x86_64 arm64),
+`nimvlets_macos_text_check` PASS, `nimvlets_macos_clickthrough_check`
+PASS (sin cambios de plataforma). Smokes en vivo: BROWSE EN/ES, hover
+revela "300 clicks", foco de teclado revela lo mismo, Nidir seleccionado
+(asequible / insuficiente / confirmación / poseído), compra
+`NIMVLETS_DEV_BUY=nidir` (balance 400→100, persiste al reabrir, la
+Collection marca Nidir como poseído), `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6,
+8 ciclos open/close limpios, idle del Shop 0,0 % CPU. Congelado sin
+tocar: Nidir (arte/animación/escala/geometría/runtime), la deuda
+`lie_to_sit` de Frin, Collection, Settings, onboarding.

@@ -5,13 +5,19 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 07 — Shop + Wallet Economy** (el click
-counter se vuelve un wallet real: una segunda sección del Product UI,
-el **Shop**, alcanzable por una navegación de texto `Collection · Shop`;
-comprar consume clicks y otorga propiedad permanente, con confirmación
-inline para no gastar por accidente; la propiedad pasa a ser
-**autorizaciones capaces de variantes** — un `petId` y opcionalmente
-una variante concreta; descripciones editoriales un poco más largas;
+Este repositorio está en **Block 09C — Shop Browse-First** (el Shop
+abre en una estantería de personajes: la rejilla del arte es el
+contenido primario; hover/foco revela precio o propiedad; recién al
+seleccionar un personaje aparece el hero grande con la acción de compra
+— la transacción de compra de Block 07 queda intacta; ver
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §16 y DEC-135), sobre
+**Block 07 — Shop + Wallet Economy** (el click counter se vuelve un
+wallet real: una segunda sección del Product UI, el **Shop**, alcanzable
+por una navegación de texto `Collection · Shop`; comprar consume clicks
+y otorga propiedad permanente, con confirmación inline para no gastar
+por accidente; la propiedad pasa a ser **autorizaciones capaces de
+variantes** — un `petId` y opcionalmente una variante concreta;
+descripciones editoriales un poco más largas;
 ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §16–§19), sobre
 **Block 06.2 — Collection Identity + Instant Previews + Retina Text**
 (hero stage con acento por pet, botón de acción tintado, previews
@@ -177,14 +183,20 @@ selector tipográfico de variante (Frin) y un botón de acción con el
 tinte del pet; los demás en una gallery discreta sobre un segundo
 plano. Switch de pet en vivo.
 
-El **Shop** (Block 07) lista los Nimvlets **públicamente comprables**
-con su precio en clics y su estado (poseído / asequible / saldo
-insuficiente). "Get <pet>" abre una confirmación inline
+El **Shop** (Block 07 + 09C — **browse-first**) abre en una **estantería
+de personajes**: una rejilla del arte de cada Nimvlet públicamente
+comprable, no un hero gigante. El pointer o el foco de teclado sobre una
+tarjeta **revela** info liviana (precio, o "In your collection") — sin
+seleccionar ni comprar. Recién al **seleccionar** un personaje (clic /
+Enter) se promueve a un hero grande con especie, descripción, precio y
+"Get <pet>", y la estantería baja a un rail compacto que sigue
+permitiendo elegir otro. "Get <pet>" abre una confirmación inline
 ("¿Gastar N clics…?" · Cancelar / Confirmar) — un solo click perdido
-nunca gasta. Al confirmar, el balance baja, la propiedad es permanente
-y aparece al instante en las dos secciones; el pet recién comprado se
+nunca gasta. Al confirmar, el balance baja, la propiedad es permanente y
+aparece al instante en las dos secciones; el pet recién comprado se
 puede activar sin reiniciar. **Frin no aparece en el Shop normal.**
-Precios provisionales de QA: Bunny 120, Nidir 300.
+Cerrar/reabrir el Product UI devuelve el Shop a la estantería. Precios
+provisionales de QA: Bunny 120, Nidir 300.
 
 El **click balance** (visible SOLO acá) está en la cabecera compartida,
 arriba a la derecha. El menú de la barra NO cambia — Show/Hide, Lock
@@ -233,10 +245,15 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 
-# --- Shop (Block 07) / Settings (Block 08) ---------------------------
+# --- Shop (Block 07 + 09C browse-first) / Settings (Block 08) --------
 # NIMVLETS_DEV_SECTION=shop|settings|collection -> sección visible al abrir.
-# NIMVLETS_DEV_SHOP_PET=<petId>         -> hero del Shop.
-# NIMVLETS_DEV_SHOP_CONFIRM=1           -> abre la confirmación inline.
+# NIMVLETS_DEV_SHOP_PET=<petId>         -> abre el Shop con ESE personaje
+#   SELECCIONADO (hero + detalle). Sin la variable: modo BROWSE normal.
+# NIMVLETS_DEV_SHOP_HOVER=<petId>       -> hover sobre una tarjeta (rejilla
+#   de browse, o rail si hay selección): revela precio / propiedad.
+# NIMVLETS_DEV_SHOP_FOCUS=<petId>       -> foco de teclado sobre una tarjeta.
+# NIMVLETS_DEV_SHOP_CONFIRM=1           -> abre la confirmación inline
+#   (necesita NIMVLETS_DEV_SHOP_PET: solo existe con un personaje elegido).
 # NIMVLETS_DEV_PREFS=small,70,lock,es   -> aplica preferencias por la MISMA
 #   ruta canónica que el menú rápido (SpikeApp::Apply*). Tokens:
 #   small|medium|large, 100|85|70|55, lock|unlock, en|es. Sirve para
@@ -255,7 +272,14 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
 #   NIMVLETS_DEV_CLICK_TEST_COUNT=<n> para tener saldo y con
 #   NIMVLETS_DEV_APPDATA_DIR para no tocar el estado real.
 
-# Shop en estado "asequible" (saldo 500, Nidir 300):
+# Shop en modo BROWSE (la entrada normal), con una tarjeta bajo el hover:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
+  NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_SHOP_HOVER=nidir \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/shop_browse.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Shop con Nidir SELECCIONADO en estado "asequible" (saldo 500, Nidir 300):
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
   NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
   NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_SHOP_PET=nidir \

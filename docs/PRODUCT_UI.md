@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07)
+# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -20,6 +20,22 @@ activable sin reiniciar. La propiedad deja de ser "un conjunto de
 normal.** Las descripciones de los tres pets con arte real se alargaron
 a un par de frases (§6.4-editorial). Lo demás de Block 06/06.1/06.2
 queda **congelado** (brief §2).
+
+**Actualización Block 09C (Shop BROWSE-FIRST — DEC-135).** El owner
+rechazó la jerarquía visual de entrada de Block 07: al abrir el Shop, el
+hero seleccionado dominaba de inmediato y la sección se sentía "como la
+Collection con controles de compra". Block 09C rediseña SOLO la
+presentación (la transacción de compra de Block 07, la exclusión de
+Frin, el modelo `catalog::ShopModel` y las previews `.nvprev` quedan
+intactos): el Shop abre en modo **BROWSE** — una estantería de
+personajes que se puede conocer, con el arte de cada uno como contenido
+primario. El pointer/foco sobre una tarjeta **revela** info liviana
+(precio, o "In your collection") sin seleccionar ni comprar. **Recién
+al seleccionar** un personaje ese personaje se promueve a un **hero**
+grande con especie / descripción / precio / acción de compra, y la
+estantería baja a un **rail** compacto que sigue permitiendo elegir
+otro. `hovered != selected != confirming`. Ver §16 (reescrito) y §16.2.
+El estado de entrada hero-first de DEC-127 queda **superseded**.
 
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
@@ -620,32 +636,59 @@ Contrato de idioma de producto — ver DEC-115/DEC-116.
 Nada de lo anterior está implementado ni insinuado en el código de
 Block 06 / 06.1 / 06.2 / 07.
 
-## 16. El Shop (Block 07)
+## 16. El Shop — BROWSE-FIRST (Block 07 + 09C)
 
 El Shop es una **sección separada** del Product UI — no reemplaza a la
 Collection ni la conoce. Se siente como "conocer a otro Nimvlet", no
-una plantilla de tienda (brief §8): **sin** sidebar, card wall,
-dashboard, carrito, búsqueda, filtros, categorías, banners ni
-countdowns. Reusa la composición hero + gallery de la Collection, el
-acento de identidad por pet, el hero stage, la tipografía del sistema y
-las previews `.nvprev` livianas (§6.4 — el Shop **no abre ningún
-`.nvpack`** para navegar).
+una plantilla de tienda (brief 07 §8 / 09C §3): **sin** sidebar, card
+wall, dashboard, carrito, búsqueda, filtros, categorías, banners ni
+countdowns. Reusa el acento de identidad por pet, el hero stage, la
+tipografía del sistema y las previews `.nvprev` livianas (§6.4 — el
+Shop **no abre ningún `.nvpack`** para navegar).
+
+**Block 09C** cambió la jerarquía de entrada. Antes (Block 07) el Shop
+abría con el primer pet ya expandido como hero gigante — se sentía
+"como la Collection con controles de compra". Ahora el Shop abre en
+modo **BROWSE**: una estantería de personajes. `productui::ShopLayout`
+tiene dos presentaciones (`ShopPresentation`), y `ShopView` distingue
+**tres** cosas distintas — nunca una sola variable:
+
+| | qué es | qué NO hace |
+|---|---|---|
+| `hoverId_` | la tarjeta bajo el mouse / foco de teclado | no selecciona, no compra |
+| `selectedPetId_` | `""` ⇒ modo BROWSE; un `petId` ⇒ ese personaje es el hero | no compra, no muta wallet/propiedad |
+| `confirming_` | sub-estado de SELECTED: la confirmación inline | solo `Confirmar` emite la compra |
+
+Ninguna selección se persiste: cerrar/reabrir el Product UI, o volver a
+entrar a la sección, devuelve el Shop a BROWSE (`ShopView::OnEnterSection`).
 
 ```
+── BROWSE (entrada normal) ─────────────────────────────────────
 Nimvlets                                          312 clicks   <- cabecera COMPARTIDA
-Collection  ·  Shop                                             <- pestañas de texto (§17)
+Collection  ·  Shop  ·  Settings                                <- pestañas de texto (§17)
 
+                 Nimvlets you can meet                         <- encabezado quieto (kTextMuted)
+
+        ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │  [ arte  │   │  [ arte  │   │  [ arte  │              <- rejilla que envuelve;
+        │  grande] │   │  grande] │   │  grande] │                 1..8 personajes, sin
+        └──────────┘   └──────────┘   └──────────┘                 scroll horizontal
+           Bunny          Nidir          Artu
+        (300 clicks)                                            <- SOLO al hacer hover / foco:
+                                                                   precio, o "In your collection"
+
+── SELECTED (tras clic / Enter en una tarjeta) ─────────────────
  ╭─ hero stage teñido con el acento del pet ─╮
- │   [ ARTE GRANDE ]   Nidir                  │   <- HERO: el Nimvlet del Shop
- │   del Nimvlet       ──                     │      seleccionado
- │                     Black dragon           │      (nombre / regla de acento /
- │                     Quiet wings, bright…    │       especie / descripción /
- │                     300 clicks             │       precio / acción-o-estado)
+ │   [ ARTE GRANDE ]   Nidir                  │   <- el personaje elegido, ahora protagonista
+ │   del Nimvlet       ──                     │      (nombre / regla de acento / especie /
+ │                     Black dragon           │       descripción / precio / acción-o-estado)
+ │                     Quiet wings, bright…    │
+ │                     300 clicks             │
  ╰─────────────────────[ Get Nidir ]──────────╯
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  <- divisor = borde del 2º plano
-                    [art]                        <- GALLERY: los demás pets del Shop
-                    Bunny                           (un click promueve a hero)
-                    In your collection
+        [·] Bunny      [·] Nidir̲               <- RAIL: la estantería completa, compacta;
+                                                   la tarjeta abierta lleva un subrayado de
+                                                   acento; un clic elige otro personaje
 ```
 
 ### 16.1 Contenido del Shop — DATO, no ramas
@@ -671,31 +714,71 @@ Bunny + Frin y Nidir está locked, así que el Shop ejercita `kOwned`
 (Bunny), `kAffordable`/`kInsufficientBalance` (Nidir según el balance)
 y la ausencia total (Frin) con solo el contenido real que ya existe.
 
-### 16.2 Estados del hero del Shop
+### 16.2 Modo BROWSE, hover/foco, y modo SELECTED
 
-La línea de estado, el botón y la confirmación son **mutuamente
-excluyentes**:
+**BROWSE** (`ShopPresentation::kBrowse` — la entrada normal). La rejilla
+de personajes es TODO el contenido; no hay hero. `BuildShopLayout`
+elige columnas por cantidad (1..4 en una fila; 5/6 → 2 filas de ≤3;
+7/8 → 2 filas de 4), centra cada fila, y reserva SIEMPRE el alto de la
+línea revelada para que el hover no reordene nada. Cada tarjeta es
+`[ arte grande ] + nombre`; nada más en reposo (brief §5). Un encabezado
+quieto (`kShopBrowseHeading`) enmarca la estantería. Con el catálogo
+DEV vacío, un mensaje quieto y localizado (`kShopEmpty`) — nunca se
+menciona el catálogo sintético (brief §14).
 
-| Estado | Muestra |
+**Hover / foco de teclado** sobre una tarjeta revela info liviana bajo
+el nombre (brief §6) — **sin seleccionar ni comprar**:
+
+| estado del ítem | línea revelada | color |
+|---|---|---|
+| `kOwned` | `In your collection` (localizado) | acento del pet |
+| `kAffordable` | el precio (`300 clicks` / `300 clics`) | `kTextMuted` |
+| `kInsufficientBalance` | el precio | `kTextFaint` (distinción "quiet" asequible/insuficiente — sin rojo, sin "no te alcanza") |
+
+**SELECTED** (`ShopPresentation::kSelected`) — un clic o Enter/Espacio en
+una tarjeta **SELECCIONA** ese personaje (nunca compra). Se promueve a
+hero grande (arte `kHeroArt` 216 pt, ~3,6× una tarjeta del rail) con
+especie, descripción editorial, precio y acción; la estantería completa
+baja a un **rail** compacto bajo un divisor, sobre el segundo plano
+`kGalleryShelf`, con la tarjeta abierta marcada por un subrayado de
+acento. El foco se queda en esa misma tarjeta (ahora en el rail) — la
+selección **nunca** salta el foco a la confirmación de compra (brief
+§12). En el hero, la línea de estado, el botón y la confirmación son
+**mutuamente excluyentes** (idénticos a Block 07):
+
+| Estado del hero | Muestra |
 |---|---|
 | `kAffordable`, sin confirmar | precio + botón `Get <name>` (relleno/tinta del acento del pet — nunca casi-negro) |
 | `kAffordable`, confirmando | precio + `¿Gastar N clics para añadir <name> a tu colección?` + `Cancelar` · `Confirmar` |
-| `kInsufficientBalance` | precio + línea contenida `Need N more clicks` (tono atenuado), **sin botón**, sin ninguna insinuación de "gana clics así" |
-| `kOwned` | `● In your collection` (punto en el acento), **sin precio, sin botón** |
+| `kInsufficientBalance` | precio + línea contenida `Need N more clicks` (tono atenuado), **sin botón** |
+| `kOwned` | `● In your collection` (punto en el acento), **sin precio, sin botón, sin CTA de compra** |
 
 `<name>` es el nombre propio, **nunca traducido** ("Get Nidir" /
-"Obtener Nidir").
+"Obtener Nidir"). Un `selectedPetId` que no está en el Shop (Frin, o un
+id desconocido / un save editado) cae a BROWSE — nunca un hero fantasma.
+
+**Teclado.** Orden de tabulación BROWSE: `nav:collection` → `nav:shop` →
+`nav:settings` → una tarjeta por pet en orden de catálogo. SELECTED:
+las pestañas → los controles del hero (`get`, o `purchase:cancel` /
+`purchase:confirm` al confirmar) → las tarjetas del rail. Enter/Espacio
+sobre una tarjeta selecciona; sobre `get` abre la confirmación (foco →
+`purchase:cancel`); `Esc` cancela la confirmación si hay una abierta, y
+si no, cierra la ventana (semántica de Block 07 preservada).
 
 ### 16.3 `.nvprev` / performance
 
 El Shop reusa `PetPreviewCache::LoadBundle` de Block 06.2 — el mismo
-bundle liviano cargado una vez al abrir el Product UI sirve a las dos
-secciones; cambiar de sección o de hero del Shop es un lookup en un
-mapa sobre texturas ya residentes, sin I/O, sin abrir packs, dentro del
-redibujo event-driven normal. `ProductWindow::RenderIfNeeded()` sigue
-siendo un no-op salvo `dirty_`/`EXPOSED`; el cálculo de `waitMs` del
-event loop del pet NO se toca (sin término de deadline para la ventana
-de producto). Idle del Shop abierto ≈ 0 % CPU, igual que la Collection.
+bundle liviano cargado una vez al abrir el Product UI sirve a las tres
+secciones. La rejilla de BROWSE, el hero y el rail de SELECTED hacen
+todos el mismo lookup `previews.Get(petId, "")` sobre la MISMA textura
+residente — no se duplica ninguna textura entre browse y hero (brief
+§15). Cambiar de modo, de hero o de idioma es un lookup en un mapa, sin
+I/O, sin abrir packs. `ShopView::OnMouseMove` marca `dirty_` **solo**
+cuando el objetivo de hover cambia de verdad — mover el mouse dentro de
+una tarjeta no redibuja. `ProductWindow::RenderIfNeeded()` sigue siendo
+un no-op salvo `dirty_`/`EXPOSED`; el cálculo de `waitMs` del event
+loop del pet NO se toca. Idle del Shop abierto ≈ 0 % CPU, igual que la
+Collection (medido: ~3 % en el primer frame, 0,0 % en reposo).
 
 ### 16.4 Fondo escénico del hero — nota arquitectónica, NO implementada
 
@@ -723,10 +806,13 @@ dos secciones. Reemplaza al viejo título/subtítulo de sección de Block
   runtime del pet no se toca** — no se recrea, no se recarga ningún
   pack (brief §17).
 - El foco se conserva razonablemente al cambiar de idioma (ids
-  semánticos).
+  semánticos). Cambiar de idioma con el Shop en SELECTED **no pierde el
+  personaje seleccionado** (Block 09C).
 - Al **reabrir** el Product UI se vuelve a Collection — no se recuerda
   la última sección (sin una razón de bajo costo para hacerlo, brief
-  §17). No se sobre-construye routing.
+  §17). No se sobre-construye routing. **Entrar a la sección Shop**
+  (`ShopView::OnEnterSection`) siempre arranca en BROWSE: ninguna
+  selección de Shop se recuerda entre visitas (Block 09C, brief §13).
 - El **menú rápido de la barra NO cambia** (brief §22): el Shop se
   alcanza solo desde la navegación del Product UI, no hay un item
   "Shop…" en el `NSStatusItem`.
