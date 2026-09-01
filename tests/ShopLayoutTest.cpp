@@ -127,6 +127,7 @@ ShopLayout Layout(std::uint64_t balance, const Ents& owned, const std::string& s
     in.viewportW = w;
     in.viewportH = h;
     in.language = lang;
+    in.clickBalance = balance;  // el balance canónico también va a la cabecera
     in.selectedPetId = selected;
     in.hoverPetId = hover;
     in.confirming = confirming;
@@ -155,6 +156,10 @@ bool TestHeaderShopTabActive() {
     NIMVLETS_CHECK(Has(es.focusOrder, "nav:collection"));
     NIMVLETS_CHECK(Has(es.focusOrder, "nav:shop"));
     NIMVLETS_CHECK(Has(es.focusOrder, "nav:settings"));
+    // El balance canónico llega a la cabecera del Shop igual que a las
+    // otras secciones (corrección de QA del owner, Block 10).
+    NIMVLETS_CHECK(Layout(500, {}).header.clicksText == "500 clicks");
+    NIMVLETS_CHECK(Layout(500, {}, "", false, Language::kEs).header.clicksText == "500 clics");
     return true;
 }
 
@@ -517,71 +522,111 @@ bool TestSelectedResize() {
     return true;
 }
 
-// ==================== G. AFORDANCIA "Starter choices…" (Block 10) ====
+// ============ G. HOTSPOT INVISIBLE del Shop oculto (Block 10, ============
+//                corrección de QA del owner: DEC-137 pasada 2)
 
-// Sin `starterAffordanceVisible` (el default) NO hay afordancia: ni
-// texto, ni "starter:enter" en el focus order, ni hit-test — el Shop
-// público se comporta EXACTAMENTE como antes (brief §9/§10).
-bool TestNoStarterAffordanceByDefault() {
+// Sin `starterHotspotArmed` (el default) el hotspot NO tiene efecto en
+// ningún punto, y el Shop público se comporta EXACTAMENTE como antes:
+// mismo focus order, mismo hit-test, sin ningún elemento nuevo.
+bool TestStarterHotspotDisarmedByDefault() {
     const ShopLayout browse = Layout(1000, {});
-    NIMVLETS_CHECK(!browse.starterAffordanceVisible);
+    NIMVLETS_CHECK(!browse.starterHotspotArmed);
+    NIMVLETS_CHECK(browse.focusOrder.size() == 5);  // 3 nav + 2 tiles — sin cambios
     NIMVLETS_CHECK(!Has(browse.focusOrder, "starter:enter"));
-    NIMVLETS_CHECK(browse.focusOrder.size() == 5);  // 3 nav + 2 tiles
+    // La esquina inf-der: nada accionable, y el hotspot NO responde.
+    NIMVLETS_CHECK(browse.HitTest(799.0f, 559.0f).empty());
+    NIMVLETS_CHECK(!browse.HitStarterHotspot(799.0f, 559.0f));
 
     const ShopLayout selected = Layout(1000, {NoVar("bunny")}, "nidir");
-    NIMVLETS_CHECK(!selected.starterAffordanceVisible);
-    NIMVLETS_CHECK(!Has(selected.focusOrder, "starter:enter"));
+    NIMVLETS_CHECK(!selected.starterHotspotArmed);
+    NIMVLETS_CHECK(!selected.HitStarterHotspot(799.0f, 559.0f));
 
     ShopModel empty;
     ShopLayoutInput ein;
-    NIMVLETS_CHECK(!BuildShopLayout(empty, ein).starterAffordanceVisible);
+    NIMVLETS_CHECK(!BuildShopLayout(empty, ein).starterHotspotArmed);
     return true;
 }
 
-// Con `starterAffordanceVisible = true` aparece UNA línea al final del
-// focus order, hittest-able, en browse / selected / vacío. No reordena
-// las tarjetas ni causa scroll a 800x560 (brief §10).
-bool TestStarterAffordanceWhenRequested() {
-    auto withAffordance = [](std::uint64_t balance, const Ents& owned, const std::string& sel) {
+// Con `starterHotspotArmed = true`: hay un rect invisible anclado a la
+// esquina INFERIOR DERECHA, dentro del viewport; un punto claramente
+// dentro cae, un punto adyacente fuera NO; NUNCA aparece en focusOrder
+// ni lo devuelve HitTest; el hit-test normal de tarjetas no cambia.
+bool TestStarterHotspotWhenArmed() {
+    auto armed = [](std::uint64_t balance, const Ents& owned, const std::string& sel, float w = 800.0f,
+                    float h = 560.0f) {
         const auto model = BuildShopModel(MakeShopCatalog(), balance, owned);
         ShopLayoutInput in;
+        in.viewportW = w;
+        in.viewportH = h;
         in.selectedPetId = sel;
-        in.starterAffordanceVisible = true;
+        in.starterHotspotArmed = true;
         return BuildShopLayout(model, in);
     };
 
-    const ShopLayout browse = withAffordance(1000, {}, "");
-    NIMVLETS_CHECK(browse.starterAffordanceVisible);
-    NIMVLETS_CHECK(browse.starterAffordanceText == "Starter choices\xE2\x80\xA6");  // "Starter choices…"
-    NIMVLETS_CHECK(browse.focusOrder.back() == "starter:enter");
-    NIMVLETS_CHECK(browse.focusOrder.size() == 6);  // 3 nav + 2 tiles + starter:enter
-    NIMVLETS_CHECK(browse.HitTest(browse.starterAffordanceAnchor.CenterX(),
-                                  browse.starterAffordanceAnchor.CenterY()) == "starter:enter");
-    NIMVLETS_CHECK(browse.contentHeight <= 560.0f + 0.01f);  // no scroll
-    // Las 2 tarjetas siguen ahí, sin moverse por la afordancia.
-    NIMVLETS_CHECK(browse.tiles.size() == 2);
+    const ShopLayout l = armed(1000, {}, "");
+    NIMVLETS_CHECK(l.starterHotspotArmed);
+    // Dentro del viewport, pegado a la esquina inf-der.
+    NIMVLETS_CHECK(l.starterHotspotRect.Right() <= 800.0f + 0.01f);
+    NIMVLETS_CHECK(l.starterHotspotRect.Bottom() <= 560.0f + 0.01f);
+    NIMVLETS_CHECK(l.starterHotspotRect.x >= 800.0f - 64.0f);   // banda estrecha en la derecha
+    NIMVLETS_CHECK(l.starterHotspotRect.y >= 560.0f - 64.0f);   // banda estrecha abajo
+    NIMVLETS_CHECK(l.starterHotspotRect.w >= 32.0f && l.starterHotspotRect.w <= 64.0f);
 
-    const ShopLayout selected = withAffordance(500, {NoVar("bunny")}, "nidir");
-    NIMVLETS_CHECK(selected.starterAffordanceVisible);
-    NIMVLETS_CHECK(Has(selected.focusOrder, "starter:enter"));
-    NIMVLETS_CHECK(selected.HitTest(selected.starterAffordanceAnchor.CenterX(),
-                                    selected.starterAffordanceAnchor.CenterY()) == "starter:enter");
+    // Punto claramente DENTRO -> hit; el mismo punto NO es un focusId.
+    const float inX = l.starterHotspotRect.CenterX();
+    const float inY = l.starterHotspotRect.CenterY();
+    NIMVLETS_CHECK(l.HitStarterHotspot(inX, inY));
+    NIMVLETS_CHECK(l.HitTest(inX, inY).empty());
 
-    // Shop vacío (catálogo DEV) + ofertas de starter -> la afordancia
-    // igual aparece (brief §10 "even in empty state").
+    // Punto adyacente, justo FUERA de la banda (a la izquierda / arriba).
+    NIMVLETS_CHECK(!l.HitStarterHotspot(l.starterHotspotRect.x - 4.0f, inY));
+    NIMVLETS_CHECK(!l.HitStarterHotspot(inX, l.starterHotspotRect.y - 4.0f));
+
+    // NUNCA en el anillo de foco.
+    NIMVLETS_CHECK(l.focusOrder.size() == 5);
+    NIMVLETS_CHECK(!Has(l.focusOrder, "starter:enter"));
+    NIMVLETS_CHECK(!Has(l.focusOrder, "starter:hotspot"));
+
+    // El hit-test normal de una tarjeta de browse no cambia.
+    const ShopTile* nidir = l.FindTile("nidir");
+    NIMVLETS_CHECK(nidir != nullptr);
+    NIMVLETS_CHECK(l.HitTest(nidir->cell.CenterX(), nidir->cell.CenterY()) == "shopitem:nidir");
+
+    // SELECTED: el hotspot sigue armado y el rail sigue hit-testeable.
+    const ShopLayout sel = armed(500, {NoVar("bunny")}, "nidir");
+    NIMVLETS_CHECK(sel.starterHotspotArmed);
+    NIMVLETS_CHECK(sel.HitStarterHotspot(sel.starterHotspotRect.CenterX(),
+                                         sel.starterHotspotRect.CenterY()));
+
+    // Shop PÚBLICO vacío (catálogo DEV) + hotspot armado -> el hotspot
+    // sigue funcionando aunque no haya productos públicos (brief §9).
     ShopModel empty;
     ShopLayoutInput ein;
-    ein.starterAffordanceVisible = true;
+    ein.starterHotspotArmed = true;
     const ShopLayout e = BuildShopLayout(empty, ein);
-    NIMVLETS_CHECK(e.empty && e.starterAffordanceVisible);
-    NIMVLETS_CHECK(e.focusOrder.back() == "starter:enter");
+    NIMVLETS_CHECK(e.empty && e.starterHotspotArmed);
+    NIMVLETS_CHECK(e.HitStarterHotspot(e.starterHotspotRect.CenterX(), e.starterHotspotRect.CenterY()));
+    return true;
+}
 
-    // ES.
-    const auto model = BuildShopModel(MakeShopCatalog(), 1000, {});
-    ShopLayoutInput es;
-    es.language = Language::kEs;
-    es.starterAffordanceVisible = true;
-    NIMVLETS_CHECK(BuildShopLayout(model, es).starterAffordanceText == "Opciones iniciales\xE2\x80\xA6");
+// El resize reubica el hotspot a la nueva esquina inf-der; sigue dentro
+// del viewport en el mínimo y en una ventana más ancha.
+bool TestStarterHotspotFollowsResize() {
+    for (auto wh : {std::pair<float, float>{600.0f, 460.0f}, std::pair<float, float>{800.0f, 560.0f},
+                    std::pair<float, float>{1200.0f, 760.0f}}) {
+        const auto model = BuildShopModel(MakeShopCatalog(), 1000, {});
+        ShopLayoutInput in;
+        in.viewportW = wh.first;
+        in.viewportH = wh.second;
+        in.starterHotspotArmed = true;
+        const ShopLayout l = BuildShopLayout(model, in);
+        NIMVLETS_CHECK(l.starterHotspotRect.Right() <= wh.first + 0.01f);
+        NIMVLETS_CHECK(l.starterHotspotRect.Bottom() <= wh.second + 0.01f);
+        // Anclado a ESA esquina (no a la de 800x560).
+        NIMVLETS_CHECK(l.starterHotspotRect.x >= wh.first - 64.0f);
+        NIMVLETS_CHECK(l.starterHotspotRect.y >= wh.second - 64.0f);
+        NIMVLETS_CHECK(l.HitStarterHotspot(wh.first - 2.0f, wh.second - 2.0f));
+    }
     return true;
 }
 
@@ -611,8 +656,9 @@ void RegisterShopLayoutTests(testing::TestRunner& runner) {
     runner.Add("ShopLayout/LanguageSwitchKeepsSelection", TestLanguageSwitchKeepsSelection);
     runner.Add("ShopLayout/EmptyShop", TestEmptyShop);
     runner.Add("ShopLayout/SelectedResize", TestSelectedResize);
-    runner.Add("ShopLayout/NoStarterAffordanceByDefault", TestNoStarterAffordanceByDefault);
-    runner.Add("ShopLayout/StarterAffordanceWhenRequested", TestStarterAffordanceWhenRequested);
+    runner.Add("ShopLayout/StarterHotspotDisarmedByDefault", TestStarterHotspotDisarmedByDefault);
+    runner.Add("ShopLayout/StarterHotspotWhenArmed", TestStarterHotspotWhenArmed);
+    runner.Add("ShopLayout/StarterHotspotFollowsResize", TestStarterHotspotFollowsResize);
 }
 
 }  // namespace nimvlets::tests

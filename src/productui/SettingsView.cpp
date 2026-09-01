@@ -71,6 +71,7 @@ SettingsLayout SettingsView::BuildLayout(float w, float h) const {
     in.viewportH = h;
     in.scrollY = ClampSettingsScroll(scrollY_, lastContentHeight_, h);
     in.prefs = prefs_;
+    in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     return BuildSettingsLayout(in);
 }
 
@@ -283,9 +284,14 @@ SettingsViewResult SettingsView::OnViewportChanged() {
     return r;
 }
 
-void SettingsView::Render(UiPainter& painter, TextCache& text, float viewportW, float viewportH) {
+void SettingsView::Render(
+    UiPainter& painter, TextCache& text, float viewportW, float viewportH, std::uint64_t clickBalance) {
     viewportW_ = viewportW;
     viewportH_ = viewportH;
+    // Balance CANÓNICO de ProductWindow (corrección de QA del owner,
+    // Block 10): antes Settings pasaba `0` hard-codeado y su cabecera
+    // mostraba "0 clicks" mientras Collection / Shop mostraban el real.
+    clickBalance_ = clickBalance;
 
     const SettingsLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -293,8 +299,7 @@ void SettingsView::Render(UiPainter& painter, TextCache& text, float viewportW, 
     const std::string focusedId = keyboardFocus_ ? focus_.FocusedId() : std::string();
 
     painter.Clear(theme::kBackground);
-    DrawSectionHeader(painter, text, layout.header, /*clickBalance=*/0, prefs_.language, hoverId_,
-                      focusedId);
+    DrawSectionHeader(painter, text, layout.header, hoverId_, focusedId);
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 

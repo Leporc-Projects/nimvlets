@@ -44,7 +44,10 @@ struct CollectionViewResult {
 // loop continuo (brief §20).
 class CollectionView {
  public:
-    void SetModel(catalog::CollectionModel model, std::uint64_t clickBalance);
+    // El balance de clics NO viaja con el modelo (corrección de QA del
+    // owner, Block 10): ProductWindow lo pasa a Render() en cada frame
+    // como valor CANÓNICO único — ver docs/PRODUCT_UI.md §17.
+    void SetModel(catalog::CollectionModel model);
 
     // Idioma de TODO el texto. Redibuja de inmediato; el id del widget
     // con foco es semántico, así que el foco se conserva (brief §21/§28).
@@ -84,7 +87,9 @@ class CollectionView {
         dirty_ = true;
     }
 
-    void Render(UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH);
+    void Render(
+        UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW,
+        float viewportH, std::uint64_t clickBalance);
 
  private:
     CollectionLayout BuildLayout(float w, float h) const;
@@ -94,6 +99,9 @@ class CollectionView {
     CollectionViewResult ActivateWidget(const std::string& focusId);
 
     catalog::CollectionModel model_;
+    // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
+    // ProductWindow) para que BuildLayout() — que también corre en el
+    // camino de input — lo pase a la cabecera compartida.
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
 

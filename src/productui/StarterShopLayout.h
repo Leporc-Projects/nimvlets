@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -78,6 +79,9 @@ struct StarterShopLayoutInput {
     float viewportH = 560.0f;
     float scrollY = 0.0f;
     core::Language language = core::Language::kEn;
+    // Balance de clics CANÓNICO (de ProductWindow) para la cabecera
+    // compartida — ver SectionHeaderLayout::clicksText.
+    std::uint64_t clickBalance = 0;
 
     // "" => modo BROWSE. Un focusId de oferta
     // ("starteritem:<petId>/<variantId>") que sigue en el modelo => modo

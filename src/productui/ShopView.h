@@ -32,9 +32,11 @@ struct ShopViewResult {
     PurchaseRequest purchase;
     bool switchSection = false;  // tocó una pestaña de navegación
     ProductSection targetSection = ProductSection::kCollection;
-    // El owner tocó la afordancia quieta "Starter choices…" (Block 10):
-    // entrar al submodo del Starter Shop oculto (que la propia sección
-    // Shop posee — NO una cuarta pestaña de nav).
+    // El owner hizo click en el HOTSPOT INVISIBLE de la esquina inf-der
+    // (Block 10, corrección de QA del owner): entrar al submodo del
+    // Starter Shop oculto (que la propia sección Shop posee — NO una
+    // cuarta pestaña, NO un elemento visible). Solo se dispara si el
+    // hotspot está armado (>= 1 oferta legítima).
     bool enterStarterSubmode = false;
 };
 
@@ -62,15 +64,20 @@ struct ShopViewResult {
 // a entrar a la sección, devuelve el Shop a modo BROWSE (brief §13).
 class ShopView {
  public:
-    void SetModel(catalog::ShopModel model, std::uint64_t clickBalance);
+    // El balance de clics NO viaja con el modelo (corrección de QA del
+    // owner, Block 10): ProductWindow lo pasa a Render() como valor
+    // CANÓNICO único — ver docs/PRODUCT_UI.md §17.
+    void SetModel(catalog::ShopModel model);
     void SetLanguage(core::Language language);
 
-    // Block 10: ¿mostrar la afordancia quieta "Starter choices…" cerca
-    // del pie? src/app la pone en true SOLO cuando el modelo del Starter
-    // Shop oculto tiene >= 1 oferta (lifecycle kCompleted + una variante
-    // de Frin no poseída, o un starter normal priced). Con 0 ofertas la
-    // afordancia NO existe (brief §10).
-    void SetStarterAffordanceVisible(bool visible);
+    // Block 10 (corrección de QA del owner): ¿ARMAR el HOTSPOT INVISIBLE
+    // de la esquina inf-der que abre el Shop oculto de starters? src/app
+    // lo pone en true SOLO cuando el StarterShopModel oculto tiene >= 1
+    // oferta legítima (lifecycle kCompleted + secreto con hermana, o un
+    // starter normal priced). No dibuja NADA; con 0 ofertas un click en
+    // la esquina es no-op total. Reemplaza a la afordancia VISIBLE
+    // "Starter choices…" que el owner rechazó.
+    void SetStarterHotspotArmed(bool armed);
 
     const catalog::ShopModel& Model() const { return model_; }
 
@@ -110,7 +117,9 @@ class ShopView {
         dirty_ = true;
     }
 
-    void Render(UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH);
+    void Render(
+        UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW,
+        float viewportH, std::uint64_t clickBalance);
 
  private:
     ShopLayout BuildLayout(float w, float h) const;
@@ -120,6 +129,8 @@ class ShopView {
     void SelectHero(const std::string& petId);
 
     catalog::ShopModel model_;
+    // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
+    // ProductWindow) para que BuildLayout() lo pase a la cabecera.
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
 
@@ -134,7 +145,9 @@ class ShopView {
 
     std::string hoverId_;
     bool keyboardFocus_ = false;
-    bool starterAffordanceVisible_ = false;
+    // ¿el hotspot INVISIBLE de la esquina inf-der está armado? (>= 1
+    // oferta legítima del Starter Shop oculto). No dibuja nada; sin foco.
+    bool starterHotspotArmed_ = false;
     bool dirty_ = true;
 };
 

@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "productui/Format.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
 
@@ -72,9 +71,8 @@ void FillStagePrimitive(UiPainter& painter, const UiRect& r, bool angular, UiCol
 
 }  // namespace
 
-void CollectionView::SetModel(catalog::CollectionModel model, std::uint64_t clickBalance) {
+void CollectionView::SetModel(catalog::CollectionModel model) {
     model_ = std::move(model);
-    clickBalance_ = clickBalance;
 
     if (!selectedPetId_.empty() && model_.Find(selectedPetId_) == nullptr) {
         selectedPetId_.clear();
@@ -99,6 +97,7 @@ CollectionLayout CollectionView::BuildLayout(float w, float h) const {
     in.viewportH = h;
     in.scrollY = ClampScroll(scrollY_, lastContentHeight_, h);
     in.language = language_;
+    in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     in.selectedPetId = selectedPetId_;
     in.selectedVariantId = selectedVariantId_;
     in.hoverPetId = HoverPetId();
@@ -248,9 +247,11 @@ CollectionViewResult CollectionView::OnViewportChanged() {
 }
 
 void CollectionView::Render(
-    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH) {
+    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH,
+    std::uint64_t clickBalance) {
     viewportW_ = viewportW;
     viewportH_ = viewportH;
+    clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow — la única fuente
 
     const CollectionLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -260,8 +261,8 @@ void CollectionView::Render(
     painter.Clear(theme::kBackground);
 
     // --- Cabecera compartida (título + balance + pestañas), sin recorte
-    //     de scroll ---
-    DrawSectionHeader(painter, text, layout.header, clickBalance_, language_, hoverId_, focusedId);
+    //     de scroll. El balance ya viene formateado en layout.header.clicksText.
+    DrawSectionHeader(painter, text, layout.header, hoverId_, focusedId);
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 

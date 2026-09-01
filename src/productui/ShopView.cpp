@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "productui/Format.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/ShopPaint.h"
 #include "productui/UiTheme.h"
@@ -31,9 +30,8 @@ std::string PetIdFromShopFocusId(const std::string& focusId) {
 
 }  // namespace
 
-void ShopView::SetModel(catalog::ShopModel model, std::uint64_t clickBalance) {
+void ShopView::SetModel(catalog::ShopModel model) {
     model_ = std::move(model);
-    clickBalance_ = clickBalance;
 
     if (!selectedPetId_.empty() && model_.Find(selectedPetId_) == nullptr) {
         selectedPetId_.clear();
@@ -61,15 +59,14 @@ void ShopView::SetLanguage(core::Language language) {
     dirty_ = true;
 }
 
-void ShopView::SetStarterAffordanceVisible(bool visible) {
-    if (visible == starterAffordanceVisible_) {
+void ShopView::SetStarterHotspotArmed(bool armed) {
+    if (armed == starterHotspotArmed_) {
         return;
     }
-    starterAffordanceVisible_ = visible;
-    // La afordancia entra / sale del anillo de foco ("starter:enter"),
-    // así que hay que re-sincronizar la FocusList.
-    SyncFocusList(BuildLayout(viewportW_, viewportH_));
-    dirty_ = true;
+    // El hotspot es INVISIBLE y NO está en el anillo de foco — no hace
+    // falta re-sincronizar la FocusList ni redibujar (no cambia nada
+    // visible). Solo se guarda el flag para el próximo HitTest de click.
+    starterHotspotArmed_ = armed;
 }
 
 void ShopView::OnEnterSection() {
@@ -93,10 +90,11 @@ ShopLayout ShopView::BuildLayout(float w, float h) const {
     in.viewportH = h;
     in.scrollY = ClampShopScroll(scrollY_, lastContentHeight_, h);
     in.language = language_;
+    in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     in.selectedPetId = selectedPetId_;
     in.hoverPetId = HoverPetId();
     in.confirming = confirming_;
-    in.starterAffordanceVisible = starterAffordanceVisible_;
+    in.starterHotspotArmed = starterHotspotArmed_;
     return BuildShopLayout(model_, in);
 }
 
@@ -107,28 +105,6 @@ void ShopView::SyncFocusList(const ShopLayout& layout) {
 std::string ShopView::HoverPetId() const {
     return StartsWith(hoverId_, "shopitem:") ? hoverId_.substr(9) : std::string();
 }
-
-namespace {
-
-// Afordancia quieta "Starter choices…" cerca del pie del Shop público
-// (Block 10, brief §10). UNA línea de texto en el tono más tenue, sin
-// caja, sin flecha, sin badge — solo un subrayado corto de foco de
-// teclado. No se dibuja si el layout no la trae (0 ofertas de starter).
-void DrawStarterAffordance(
-    UiPainter& painter, TextCache& text, const ShopLayout& layout, bool focused) {
-    if (!layout.starterAffordanceVisible) {
-        return;
-    }
-    const UiRect& a = layout.starterAffordanceAnchor;
-    DrawText(painter, text, layout.starterAffordanceText, type::kGalleryStatus, TextWeight::kRegular,
-             theme::kTextFaint, a.CenterX(), a.y + 11.0f, HAlign::kCenter, static_cast<int>(a.w));
-    if (focused) {
-        const float uw = 108.0f;
-        painter.FillRect(UiRect{a.CenterX() - uw * 0.5f, a.y + 15.0f, uw, 1.0f}, theme::kTextFaint);
-    }
-}
-
-}  // namespace
 
 void ShopView::SelectHero(const std::string& petId) {
     // Un click / Enter en una tarjeta SELECCIONA (browse -> selected), o
@@ -167,14 +143,6 @@ ShopViewResult ShopView::ActivateWidget(const std::string& focusId) {
         // (ahora en el rail) — la selección nunca salta el foco a la
         // confirmación de compra (brief §12).
         SelectHero(PetIdFromShopFocusId(focusId));
-        r.dirty = true;
-        return r;
-    }
-    if (focusId == "starter:enter") {
-        // Afordancia quieta "Starter choices…": src/app entra al submodo
-        // del Starter Shop oculto (Block 10, brief §11). El Shop público
-        // no cambia de estado acá.
-        r.enterStarterSubmode = true;
         r.dirty = true;
         return r;
     }
@@ -229,6 +197,17 @@ ShopViewResult ShopView::OnMouseDown(float x, float y) {
     const ShopLayout layout = BuildLayout(viewportW_, viewportH_);
     const std::string hit = layout.HitTest(x, y);
     if (hit.empty()) {
+        // Zona muerta: SOLO acá (nunca sobre un control visible) se
+        // considera el hotspot INVISIBLE de la esquina inf-der del Shop
+        // oculto de starters (Block 10, corrección de QA del owner). Sin
+        // ofertas legítimas (`starterHotspotArmed_` false) es no-op total.
+        if (layout.HitStarterHotspot(x, y)) {
+            ShopViewResult r;
+            r.enterStarterSubmode = true;
+            r.dirty = true;
+            dirty_ = true;
+            return r;
+        }
         dirty_ = true;
         return ShopViewResult{};
     }
@@ -306,9 +285,11 @@ ShopViewResult ShopView::OnViewportChanged() {
 }
 
 void ShopView::Render(
-    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH) {
+    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH,
+    std::uint64_t clickBalance) {
     viewportW_ = viewportW;
     viewportH_ = viewportH;
+    clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow
 
     const ShopLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -316,7 +297,7 @@ void ShopView::Render(
     const std::string focusedId = keyboardFocus_ ? focus_.FocusedId() : std::string();
 
     painter.Clear(theme::kBackground);
-    DrawSectionHeader(painter, text, layout.header, clickBalance_, language_, hoverId_, focusedId);
+    DrawSectionHeader(painter, text, layout.header, hoverId_, focusedId);
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
@@ -325,7 +306,6 @@ void ShopView::Render(
         DrawText(painter, text, layout.emptyText, type::kSectionTitle, TextWeight::kRegular,
                  theme::kTextFaint, layout.emptyAnchor.CenterX(), layout.emptyAnchor.y + 16.0f,
                  HAlign::kCenter, static_cast<int>(layout.emptyAnchor.w));
-        DrawStarterAffordance(painter, text, layout, focusedId == "starter:enter");
         painter.PopClip();
         return;
     }
@@ -345,7 +325,6 @@ void ShopView::Render(
             DrawShopTile(painter, text, previews, t, type::kGalleryName, kPedestalAlpha, hovered,
                          focused, /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
         }
-        DrawStarterAffordance(painter, text, layout, focusedId == "starter:enter");
         painter.PopClip();
         return;
     }
@@ -364,7 +343,6 @@ void ShopView::Render(
                      focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
     }
 
-    DrawStarterAffordance(painter, text, layout, focusedId == "starter:enter");
     painter.PopClip();
 }
 

@@ -58,8 +58,8 @@ bool TestNavTargetSectionRejectsNonNavIds() {
 // resuelve de vuelta a esa misma sección. Así una pestaña nueva en
 // SectionNav nunca queda "inerte" para las vistas.
 bool TestNavRoundTripThroughHeaderLayout() {
-    const SectionHeaderLayout header =
-        BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, ProductSection::kCollection, Language::kEn);
+    const SectionHeaderLayout header = BuildSectionHeaderLayout(
+        800.0f, 40.0f, 0.0f, ProductSection::kCollection, Language::kEn, /*clickBalance=*/0);
     NIMVLETS_CHECK(header.tabs.size() == 3);
     for (const SectionTab& tab : header.tabs) {
         NIMVLETS_CHECK(!tab.focusId.empty());
@@ -78,6 +78,34 @@ bool TestNavFocusIdForKnownSections() {
     return true;
 }
 
+// El balance de clics se FORMATEA en la cabecera pura, a partir del
+// valor canónico que pasa el caller — así NINGUNA sección puede elegir
+// su propio número. (Corrección de QA del owner, Block 10: Settings
+// mostraba "0 clicks" hard-codeado en su Render mientras Collection /
+// Shop mostraban el balance real.) `DrawSectionHeader` ahora solo dibuja
+// este string, sin re-formatear ni recibir un balance suelto.
+bool TestHeaderFormatsCanonicalBalance() {
+    for (const ProductSection section :
+         {ProductSection::kCollection, ProductSection::kShop, ProductSection::kSettings}) {
+        NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, section, Language::kEn, 0)
+                           .clicksText == "0 clicks");
+        NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, section, Language::kEn, 500)
+                           .clicksText == "500 clicks");
+        NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, section, Language::kEn, 1)
+                           .clicksText == "1 click");  // singular
+        NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, section, Language::kEs, 350)
+                           .clicksText == "350 clics");
+        NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, section, Language::kEs, 1)
+                           .clicksText == "1 clic");
+    }
+    // Agrupación de dígitos: "1 248 clicks" (mismo formateo que el resto
+    // del Product UI).
+    NIMVLETS_CHECK(BuildSectionHeaderLayout(800.0f, 40.0f, 0.0f, ProductSection::kSettings,
+                                            Language::kEn, 1248)
+                       .clicksText == "1 248 clicks");
+    return true;
+}
+
 }  // namespace
 
 void RegisterSectionNavTests(testing::TestRunner& runner) {
@@ -85,6 +113,7 @@ void RegisterSectionNavTests(testing::TestRunner& runner) {
     runner.Add("SectionNav/NavTargetSectionRejectsNonNavIds", TestNavTargetSectionRejectsNonNavIds);
     runner.Add("SectionNav/NavRoundTripThroughHeaderLayout", TestNavRoundTripThroughHeaderLayout);
     runner.Add("SectionNav/NavFocusIdForKnownSections", TestNavFocusIdForKnownSections);
+    runner.Add("SectionNav/HeaderFormatsCanonicalBalance", TestHeaderFormatsCanonicalBalance);
 }
 
 }  // namespace nimvlets::tests

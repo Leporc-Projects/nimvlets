@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,11 @@ struct SettingsLayoutInput {
     float viewportH = 560.0f;
     float scrollY = 0.0f;
     core::Preferences prefs;  // idioma incluido (prefs.language)
+    // Balance de clics CANÓNICO (de ProductWindow) para la cabecera
+    // compartida — ver SectionHeaderLayout::clicksText. Settings NO tiene
+    // wallet propio: consume este mismo valor que Collection / Shop
+    // (corrección de QA del owner, Block 10).
+    std::uint64_t clickBalance = 0;
 };
 
 // Construye el layout de Settings. Puro y determinista. Todo el texto

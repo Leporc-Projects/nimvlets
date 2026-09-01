@@ -178,7 +178,8 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
     const float contentW = std::max(240.0f, in.viewportW - 2.0f * kMargin);
     const float contentX = kMargin;
 
-    out.header = BuildSectionHeaderLayout(in.viewportW, kMargin, sy, ProductSection::kSettings, lang);
+    out.header = BuildSectionHeaderLayout(
+        in.viewportW, kMargin, sy, ProductSection::kSettings, lang, in.clickBalance);
     for (const SectionTab& tab : out.header.tabs) {
         out.focusOrder.push_back(tab.focusId);
     }

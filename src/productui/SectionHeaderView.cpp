@@ -1,6 +1,5 @@
 #include "productui/SectionHeaderView.h"
 
-#include "productui/Format.h"
 #include "productui/UiTheme.h"
 
 namespace nimvlets::productui {
@@ -11,16 +10,17 @@ void DrawSectionHeader(
     UiPainter& painter,
     TextCache& text,
     const SectionHeaderLayout& header,
-    std::uint64_t clickBalance,
-    core::Language language,
     const std::string& hoverFocusId,
     const std::string& keyboardFocusId) {
     // Título de marca (izquierda) + balance discreto (derecha) — misma
-    // línea, mismo tamaño/color que Block 06.
+    // línea, mismo tamaño/color que Block 06. `header.clicksText` ya
+    // viene formateado del layout puro a partir del balance CANÓNICO de
+    // ProductWindow (corrección de QA del owner — ver el .h): acá NO se
+    // vuelve a formatear ni a elegir un valor.
     const float titleBaseline = header.titleAnchor.y + 18.0f;
     DrawText(painter, text, "Nimvlets", type::kTitle, TextWeight::kSemibold, theme::kText,
              header.titleAnchor.x, titleBaseline, HAlign::kLeft);
-    DrawText(painter, text, FormatClickCount(clickBalance, language), type::kClicks, TextWeight::kRegular,
+    DrawText(painter, text, header.clicksText, type::kClicks, TextWeight::kRegular,
              theme::kTextMuted, header.clicksAnchorRight.x, titleBaseline, HAlign::kRight);
 
     // Pestañas "Collection · Shop": texto simple, la activa en el tono

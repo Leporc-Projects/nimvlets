@@ -105,13 +105,14 @@ enum class StringKey {
     kOnboardingWhichVariant,     // "Which Frin?" / "¿Qué Frin?"
 
     // Shop oculto de starters (Block 10). Submodo contextual de la
-    // sección Shop — NO una cuarta pestaña de navegación. Los nombres
+    // sección Shop — NO una cuarta pestaña de navegación. El acceso desde
+    // el Shop público es un HOTSPOT INVISIBLE (corrección de QA del
+    // owner: no hay copy visible que revele la feature). Los nombres
     // propios (Frin) nunca se traducen; "Male"/"Female" reusan kMale/
     // kFemale. Ver docs/ONBOARDING.md §15 y DEC-137.
-    kStarterChoicesAffordance,  // "Starter choices…" / "Opciones iniciales…" — afordancia quieta en el Shop
-    kStarterChoicesHeading,     // "Starter choices" / "Opciones iniciales" — encabezado dentro del submodo
-    kStarterShopBack,           // "← Shop" / "← Tienda" — volver al Shop público
-    kStarterShopEmpty,          // "No more starter choices." / "No quedan opciones iniciales."
+    kStarterChoicesHeading,  // "Starter choices" / "Opciones iniciales" — encabezado DENTRO del submodo
+    kStarterShopBack,        // "← Shop" / "← Tienda" — volver al Shop público
+    kStarterShopEmpty,       // "No more starter choices." / "No quedan opciones iniciales."
 
     kCount,  // centinela — no es una clave real
 };

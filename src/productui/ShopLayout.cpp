@@ -77,9 +77,11 @@ constexpr float kRailNameH = 14.0f;
 constexpr float kRailPadBottom = 10.0f;
 constexpr float kRailRowGap = 14.0f;
 
-// --- Afordancia "Starter choices…" (Block 10) -----------------------
-constexpr float kStarterAffordanceGap = 22.0f;   // contenido -> afordancia
-constexpr float kStarterAffordanceH = 16.0f;
+// --- Hotspot INVISIBLE del Shop oculto de starters (Block 10) --------
+// Región cuadrada anclada a la esquina INFERIOR DERECHA del viewport del
+// Shop (coords de viewport, sin scroll — es un elemento de "chrome
+// secreto", no contenido que scrollea). No se dibuja. Ver ShopLayout.h.
+constexpr float kStarterHotspotSize = 48.0f;
 
 constexpr float kHoverLift = 2.0f;
 constexpr float kApproxCharW = 8.0f;
@@ -118,28 +120,19 @@ ShopTile MakeTile(const ShopItem& item, Language lang, bool selected) {
     return t;
 }
 
-// Coloca la afordancia quieta "Starter choices…" cerca del pie del
-// contenido del Shop público (Block 10, brief §10). `belowY` es el
-// bottom del contenido en el mismo espacio (scrolleado) que la rejilla /
-// el rail. La afordancia se empuja hacia el pie de la ventana si hay
-// espacio, así se lee como un pie y no como un elemento más de la
-// estantería. Bumpea `contentHeight` si hace falta.
-void AppendStarterAffordance(
-    ShopLayout& out, const ShopLayoutInput& in, float contentW, float belowY) {
-    if (!in.starterAffordanceVisible) {
+// Ancla el hotspot INVISIBLE a la esquina inf-der del viewport (Block
+// 10, corrección de QA del owner). NO dibuja, NO toca `focusOrder`, NO
+// toca `contentHeight`. Solo existe si `in.starterHotspotArmed` (>= 1
+// oferta legítima del Starter Shop oculto). Recalculado en cada
+// BuildShopLayout, así el resize lo reubica.
+void ArmStarterHotspot(ShopLayout& out, const ShopLayoutInput& in) {
+    if (!in.starterHotspotArmed) {
         return;
     }
-    out.starterAffordanceVisible = true;
-    out.starterAffordanceText = Localized(StringKey::kStarterChoicesAffordance, in.language);
-    float y = belowY + kStarterAffordanceGap;
-    const float pinned = in.viewportH - kMargin - kStarterAffordanceH;
-    if (pinned > y) {
-        y = pinned;
-    }
-    out.starterAffordanceAnchor = UiRect{kMargin, y, contentW, kStarterAffordanceH};
-    out.contentHeight =
-        std::max(out.contentHeight, y + kStarterAffordanceH + kMargin + in.scrollY);
-    out.focusOrder.push_back("starter:enter");
+    out.starterHotspotArmed = true;
+    out.starterHotspotRect = UiRect{
+        in.viewportW - kStarterHotspotSize, in.viewportH - kStarterHotspotSize,
+        kStarterHotspotSize, kStarterHotspotSize};
 }
 
 }  // namespace
@@ -383,9 +376,6 @@ std::string ShopLayout::HitTest(float x, float y) const {
                 return t.focusId;
             }
         }
-        if (starterAffordanceVisible && starterAffordanceAnchor.Contains(x, y)) {
-            return "starter:enter";
-        }
         return "";
     }
     for (const ShopTile& t : tiles) {
@@ -393,9 +383,8 @@ std::string ShopLayout::HitTest(float x, float y) const {
             return t.focusId;
         }
     }
-    if (starterAffordanceVisible && starterAffordanceAnchor.Contains(x, y)) {
-        return "starter:enter";
-    }
+    // NB: el hotspot invisible del Starter Shop NO se resuelve acá — es
+    // una consulta aparte (HitStarterHotspot), sin focusId.
     return "";
 }
 
@@ -409,10 +398,14 @@ ShopLayout BuildShopLayout(const ShopModel& model, const ShopLayoutInput& in) {
 
     ShopLayout out;
     out.viewport = UiRect{0.0f, 0.0f, in.viewportW, in.viewportH};
-    out.header = BuildSectionHeaderLayout(in.viewportW, kMargin, sy, ProductSection::kShop, lang);
+    out.header = BuildSectionHeaderLayout(
+        in.viewportW, kMargin, sy, ProductSection::kShop, lang, in.clickBalance);
     for (const SectionTab& tab : out.header.tabs) {
         out.focusOrder.push_back(tab.focusId);
     }
+    // El hotspot invisible se ancla igual en las 3 presentaciones
+    // (browse / selected / vacío) — es chrome de esquina, no contenido.
+    ArmStarterHotspot(out, in);
 
     const float contentW = std::max(160.0f, in.viewportW - 2.0f * kMargin);
     const float bodyTop = out.header.bodyTop;
@@ -424,7 +417,6 @@ ShopLayout BuildShopLayout(const ShopModel& model, const ShopLayoutInput& in) {
         out.emptyText = Localized(StringKey::kShopEmpty, lang);
         out.emptyAnchor = UiRect{kMargin, bodyTop + (in.viewportH - bodyTop) * 0.36f, contentW, 24.0f};
         out.contentHeight = std::max(in.viewportH, bodyTop + sy + kMargin);
-        AppendStarterAffordance(out, in, contentW, out.emptyAnchor.Bottom());
         return out;
     }
 
@@ -459,7 +451,6 @@ ShopLayout BuildShopLayout(const ShopModel& model, const ShopLayoutInput& in) {
             out.focusOrder.push_back(t.focusId);
         }
         out.contentHeight = std::max(in.viewportH, gridBottom + kMargin + sy);
-        AppendStarterAffordance(out, in, contentW, gridBottom);
         return out;
     }
 
@@ -495,7 +486,6 @@ ShopLayout BuildShopLayout(const ShopModel& model, const ShopLayoutInput& in) {
     }
 
     out.contentHeight = std::max(in.viewportH, railBottom + kMargin + sy);
-    AppendStarterAffordance(out, in, contentW, railBottom);
     out.shelfBackground = UiRect{0.0f, out.dividerRect.y, in.viewportW,
                                  (out.contentHeight - out.dividerRect.y) + in.viewportH};
     return out;

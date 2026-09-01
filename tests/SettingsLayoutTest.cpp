@@ -5,6 +5,7 @@
 #include "platform/QuickMenuModel.h"
 #include "productui/SettingsLayout.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,15 @@ SettingsLayout Layout(const Preferences& prefs, float w = 800.0f, float h = 560.
     in.prefs = prefs;
     in.viewportW = w;
     in.viewportH = h;
+    return BuildSettingsLayout(in);
+}
+
+SettingsLayout LayoutWithBalance(std::uint64_t balance, Language lang = Language::kEn) {
+    Preferences p;
+    p.language = lang;
+    SettingsLayoutInput in;
+    in.prefs = p;
+    in.clickBalance = balance;
     return BuildSettingsLayout(in);
 }
 
@@ -101,6 +111,26 @@ bool TestHeaderHasThreeTabsSettingsActive() {
     // Hit-test de la pestaña activa.
     const auto& tab = en.header.tabs[2];
     NIMVLETS_CHECK(en.HitTest(tab.hitRect.CenterX(), tab.hitRect.CenterY()) == "nav:settings");
+    return true;
+}
+
+// REGRESIÓN de la falla exacta de QA del owner (Block 10): Settings
+// mostraba "0 clicks" mientras Collection / Shop mostraban 500. Ahora el
+// balance CANÓNICO llega a `BuildSettingsLayout` por `in.clickBalance` y
+// se formatea en `header.clicksText` — la MISMA ruta que las otras
+// secciones. `SettingsView::Render` ya no elige un valor propio.
+bool TestSettingsHeaderShowsCanonicalWallet() {
+    NIMVLETS_CHECK(LayoutWithBalance(0).header.clicksText == "0 clicks");
+    NIMVLETS_CHECK(LayoutWithBalance(500).header.clicksText == "500 clicks");
+    NIMVLETS_CHECK(LayoutWithBalance(350).header.clicksText == "350 clicks");
+    NIMVLETS_CHECK(LayoutWithBalance(1).header.clicksText == "1 click");
+    NIMVLETS_CHECK(LayoutWithBalance(1248).header.clicksText == "1 248 clicks");
+    NIMVLETS_CHECK(LayoutWithBalance(500, Language::kEs).header.clicksText == "500 clics");
+    // El default de `SettingsLayoutInput::clickBalance` es 0 — un caller
+    // que se OLVIDE de pasar el balance muestra "0 clicks" (el bug); por
+    // eso ProductWindow es la autoridad única y DrawFrame() SIEMPRE lo
+    // pasa a Render (ver SectionNavTest / ProductWindow).
+    NIMVLETS_CHECK(Layout(Preferences{}).header.clicksText == "0 clicks");
     return true;
 }
 
@@ -336,6 +366,7 @@ bool TestSettingsAndQuickMenuAgreeOnSelection() {
 
 void RegisterSettingsLayoutTests(testing::TestRunner& runner) {
     runner.Add("SettingsLayout/HeaderHasThreeTabsSettingsActive", TestHeaderHasThreeTabsSettingsActive);
+    runner.Add("SettingsLayout/SettingsHeaderShowsCanonicalWallet", TestSettingsHeaderShowsCanonicalWallet);
     runner.Add("SettingsLayout/FocusOrderIsNavThenRows", TestFocusOrderIsNavThenRows);
     runner.Add("SettingsLayout/SelectedSegmentReflectsPreferences", TestSelectedSegmentReflectsPreferences);
     runner.Add("SettingsLayout/LabelsLocalized", TestLabelsLocalized);

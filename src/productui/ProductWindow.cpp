@@ -151,15 +151,23 @@ void ProductWindow::SetModels(
     const catalog::ShopModel& shop,
     const catalog::StarterShopModel& starterShop,
     std::uint64_t clickBalance) {
-    view_.SetModel(collection, clickBalance);
-    shopView_.SetModel(shop, clickBalance);
-    shopView_.SetStarterAffordanceVisible(!starterShop.Empty());
-    starterShopView_.SetModel(starterShop, clickBalance);
+    // ProductWindow es la ÚNICA autoridad del balance de clics MOSTRADO
+    // (corrección de QA del owner, Block 10): DrawFrame() lo pasa a
+    // Render() de la sección visible; ninguna sección elige su propio
+    // valor. Antes Settings mostraba "0 clicks" porque nunca recibía el
+    // balance.
+    clickBalance_ = clickBalance;
+    view_.SetModel(collection);
+    shopView_.SetModel(shop);
+    starterShopView_.SetModel(starterShop);
+    // Arma / desarma el HOTSPOT INVISIBLE de la esquina inf-der del Shop
+    // público (el owner rechazó la afordancia visible "Starter choices…").
+    // Solo con >= 1 oferta legítima del Starter Shop oculto.
+    shopView_.SetStarterHotspotArmed(!starterShop.Empty());
     // Si el submodo está abierto y el Starter Shop se quedó sin ofertas
     // (se compró la última), NO se lo cierra: queda con su estado vacío
     // quieto + "← Shop" (brief §19). El propio layout lo dibuja como
-    // kEmpty. Cuando el owner vuelva al Shop público, la afordancia ya no
-    // existe (arriba).
+    // kEmpty. Al volver al Shop público el hotspot ya no está armado.
 }
 
 void ProductWindow::SetLanguage(core::Language language) {
@@ -227,6 +235,26 @@ void ProductWindow::ShowSectionForQA(ProductSection section) {
     pendingExpose_ = true;
 }
 
+bool ProductWindow::ClickStarterHotspotForQA() {
+    if (window_ == nullptr || onboarding_ || section_ != ProductSection::kShop ||
+        starterShopSubmode_) {
+        return false;
+    }
+    int logicalW = kDefaultW;
+    int logicalH = kDefaultH;
+    SDL_GetWindowSize(window_, &logicalW, &logicalH);
+    SDL_Event ev{};
+    ev.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    ev.button.windowID = SDL_GetWindowID(window_);
+    ev.button.button = SDL_BUTTON_LEFT;
+    ev.button.down = true;
+    ev.button.clicks = 1;
+    ev.button.x = static_cast<float>(logicalW) - 4.0f;   // dentro de la esquina inf-der
+    ev.button.y = static_cast<float>(logicalH) - 4.0f;
+    HandleEvent(ev);  // MISMO camino que un click real del owner
+    return starterShopSubmode_;
+}
+
 ProductSection ProductWindow::ClickNavTabForQA(ProductSection target) {
     if (window_ == nullptr || onboarding_) {
         return section_;
@@ -235,8 +263,8 @@ ProductSection ProductWindow::ClickNavTabForQA(ProductSection target) {
     int logicalH = kDefaultH;
     SDL_GetWindowSize(window_, &logicalW, &logicalH);
     // 40 pt = el kMargin compartido por Collection / Shop / Settings.
-    const SectionHeaderLayout header =
-        BuildSectionHeaderLayout(static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_);
+    const SectionHeaderLayout header = BuildSectionHeaderLayout(
+        static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_, clickBalance_);
     const SectionTab* tab = nullptr;
     for (const SectionTab& t : header.tabs) {
         if (t.section == target) {
@@ -525,6 +553,9 @@ void ProductWindow::DrawFrame() {
     UiPainter painter(renderer_, scale_);
     const float w = static_cast<float>(logicalW);
     const float h = static_cast<float>(logicalH);
+    // El balance CANÓNICO que ProductWindow posee — TODAS las secciones
+    // lo reciben acá (corrección de QA del owner, Block 10). Onboarding
+    // no dibuja cabecera de balance.
     if (onboarding_) {
         // El onboarding usa el arte `.nvprev` de los candidatos (mismo
         // bundle liviano que la Collection) — NUNCA abre un `.nvpack`
@@ -532,17 +563,17 @@ void ProductWindow::DrawFrame() {
         onboardingView_.Render(painter, *text_, *previews_, w, h);
         onboardingView_.ClearDirty();
     } else if (section_ == ProductSection::kShop && starterShopSubmode_) {
-        starterShopView_.Render(painter, *text_, *previews_, w, h);
+        starterShopView_.Render(painter, *text_, *previews_, w, h, clickBalance_);
         starterShopView_.ClearDirty();
     } else if (section_ == ProductSection::kShop) {
-        shopView_.Render(painter, *text_, *previews_, w, h);
+        shopView_.Render(painter, *text_, *previews_, w, h, clickBalance_);
         shopView_.ClearDirty();
     } else if (section_ == ProductSection::kSettings) {
         // Settings no usa previews (no carga ningún `.nvpack` — brief §23).
-        settingsView_.Render(painter, *text_, w, h);
+        settingsView_.Render(painter, *text_, w, h, clickBalance_);
         settingsView_.ClearDirty();
     } else {
-        view_.Render(painter, *text_, *previews_, w, h);
+        view_.Render(painter, *text_, *previews_, w, h, clickBalance_);
         view_.ClearDirty();
     }
 }

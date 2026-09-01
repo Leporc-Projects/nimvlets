@@ -145,7 +145,8 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     out.viewport = UiRect{0.0f, 0.0f, in.viewportW, in.viewportH};
     const float contentW = std::max(160.0f, in.viewportW - 2.0f * kMargin);
 
-    out.header = BuildSectionHeaderLayout(in.viewportW, kMargin, sy, ProductSection::kCollection, lang);
+    out.header = BuildSectionHeaderLayout(
+        in.viewportW, kMargin, sy, ProductSection::kCollection, lang, in.clickBalance);
     for (const SectionTab& tab : out.header.tabs) {
         out.focusOrder.push_back(tab.focusId);
     }

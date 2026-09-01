@@ -2236,12 +2236,25 @@ int SpikeApp::Run() {
         }
         // --- Block 10: hooks de QA del SHOP OCULTO DE STARTERS ------
         // NIMVLETS_DEV_STARTER_SHOP=1 — entra al submodo del Starter Shop
-        // (necesita NIMVLETS_DEV_SECTION=shop). Sin la variable, el Shop
-        // público normal (con la afordancia "Starter choices…" si hay
-        // ofertas).
+        // DIRECTAMENTE (necesita NIMVLETS_DEV_SECTION=shop). Sin la
+        // variable, el Shop público normal (el acceso de producción es un
+        // HOTSPOT INVISIBLE en la esquina inf-der — corrección de QA del
+        // owner).
         if (const char* ss = std::getenv("NIMVLETS_DEV_STARTER_SHOP");
             ss != nullptr && ss[0] != '\0' && ss[0] != '0') {
             productWindow_.EnterStarterShopSubmodeForQA();
+        }
+        // NIMVLETS_DEV_STARTER_HOTSPOT=1 — sintetiza un click REAL en la
+        // esquina inf-der del Shop público (el MISMO camino que un click
+        // del owner). Prueba el hotspot INVISIBLE de verdad: se abre sii
+        // hay ofertas legítimas (lifecycle kCompleted + regla del
+        // secreto). Necesita NIMVLETS_DEV_SECTION=shop.
+        if (const char* sht = std::getenv("NIMVLETS_DEV_STARTER_HOTSPOT");
+            sht != nullptr && sht[0] != '\0' && sht[0] != '0') {
+            const bool opened = productWindow_.ClickStarterHotspotForQA();
+            SDL_Log("nimvlets: DEV — NIMVLETS_DEV_STARTER_HOTSPOT: invisible corner click %s",
+                    opened ? "OPENED the hidden Starter Shop"
+                           : "was a NO-OP (hotspot not armed — no eligible offers)");
         }
         // NIMVLETS_DEV_STARTER_OFFER=<petId>[/<variant>] — selecciona esa
         // oferta EXACTA como hero dentro del submodo.

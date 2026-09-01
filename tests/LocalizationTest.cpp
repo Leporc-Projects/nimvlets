@@ -163,12 +163,10 @@ bool TestOnboardingStrings() {
 }
 
 // Shop oculto de starters (Block 10). "Shop" SÍ se traduce ("Tienda");
-// los nombres propios (Frin) no. La afordancia lleva "…" (elipsis).
+// los nombres propios (Frin) no. El acceso desde el Shop público es un
+// HOTSPOT INVISIBLE (corrección de QA del owner) — NO hay una clave de
+// "afordancia visible": estas 3 son SOLO texto DENTRO del submodo.
 bool TestStarterShopStrings() {
-    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesAffordance, Language::kEn),
-                      "Starter choices\xE2\x80\xA6"));
-    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesAffordance, Language::kEs),
-                      "Opciones iniciales\xE2\x80\xA6"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesHeading, Language::kEn), "Starter choices"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesHeading, Language::kEs), "Opciones iniciales"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterShopBack, Language::kEn), "\xE2\x86\x90 Shop"));

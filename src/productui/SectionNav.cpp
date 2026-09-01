@@ -1,6 +1,7 @@
 #include "productui/SectionNav.h"
 
 #include "core/Localization.h"
+#include "productui/Format.h"
 
 namespace nimvlets::productui {
 
@@ -66,12 +67,16 @@ bool NavTargetSection(const std::string& focusId, ProductSection& outSection) {
 }
 
 SectionHeaderLayout BuildSectionHeaderLayout(
-    float viewportW, float marginX, float scrollY, ProductSection active, Language lang) {
+    float viewportW, float marginX, float scrollY, ProductSection active, Language lang,
+    std::uint64_t clickBalance) {
     SectionHeaderLayout out;
     const float contentW = viewportW - 2.0f * marginX;
 
     out.titleAnchor = UiRect{marginX, kTitleTop - scrollY, contentW, kTitleH};
     out.clicksAnchorRight = UiRect{viewportW - marginX, kTitleTop - scrollY, 0.0f, kTitleH};
+    // Formateado UNA vez, acá, a partir del balance canónico — todas las
+    // secciones dibujan este mismo string.
+    out.clicksText = FormatClickCount(clickBalance, lang);
 
     const float tabY = kTabsTop - scrollY;
     float x = marginX;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -125,6 +126,9 @@ struct CollectionLayoutInput {
     float viewportH = 560.0f;
     float scrollY = 0.0f;
     core::Language language = core::Language::kEn;
+    // Balance de clics CANÓNICO (de ProductWindow) para la cabecera
+    // compartida — ver SectionHeaderLayout::clicksText.
+    std::uint64_t clickBalance = 0;
 
     // "" => el hero es el pet ACTIVO del modelo.
     std::string selectedPetId;

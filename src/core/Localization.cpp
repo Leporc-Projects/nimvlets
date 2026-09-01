@@ -64,7 +64,6 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     /* kOnboardingConfirmChoosePrefix */ {"Choose ", "Elegir a "},
     /* kOnboardingWhichVariant */       {"Which Frin?", "¿Qué Frin?"},
 
-    /* kStarterChoicesAffordance */     {"Starter choices…", "Opciones iniciales…"},
     /* kStarterChoicesHeading */        {"Starter choices", "Opciones iniciales"},
     /* kStarterShopBack */              {"\xE2\x86\x90 Shop", "\xE2\x86\x90 Tienda"},
     /* kStarterShopEmpty */             {"No more starter choices.", "No quedan opciones iniciales."},

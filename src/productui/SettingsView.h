@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "core/Localization.h"
 #include "core/Preferences.h"
 #include "productui/FocusList.h"
@@ -85,7 +87,12 @@ class SettingsView {
         dirty_ = true;
     }
 
-    void Render(UiPainter& painter, TextCache& text, float viewportW, float viewportH);
+    // `clickBalance` es el balance CANÓNICO de ProductWindow — Settings
+    // NO tiene wallet propio (corrección de QA del owner, Block 10). Se
+    // dibuja en la MISMA cabecera compartida que Collection / Shop.
+    void Render(
+        UiPainter& painter, TextCache& text, float viewportW, float viewportH,
+        std::uint64_t clickBalance);
 
  private:
     SettingsLayout BuildLayout(float w, float h) const;
@@ -95,6 +102,10 @@ class SettingsView {
     SettingsChange ChangeForStep(core::PreferenceField field, int dir, bool wrap) const;
 
     core::Preferences prefs_;
+    // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
+    // ProductWindow) para que BuildLayout() lo pase a la cabecera
+    // compartida — igual que Collection / Shop.
+    std::uint64_t clickBalance_ = 0;
 
     FocusList focus_;
 

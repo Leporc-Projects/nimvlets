@@ -42,7 +42,10 @@ struct StarterShopViewResult {
 // un paso atrás (confirm -> selected -> browse -> Shop público).
 class StarterShopView {
  public:
-    void SetModel(catalog::StarterShopModel model, std::uint64_t clickBalance);
+    // El balance de clics NO viaja con el modelo (corrección de QA del
+    // owner, Block 10): ProductWindow lo pasa a Render() como valor
+    // CANÓNICO único — ver docs/PRODUCT_UI.md §17.
+    void SetModel(catalog::StarterShopModel model);
     void SetLanguage(core::Language language);
 
     const catalog::StarterShopModel& Model() const { return model_; }
@@ -83,7 +86,7 @@ class StarterShopView {
 
     void Render(
         UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW,
-        float viewportH);
+        float viewportH, std::uint64_t clickBalance);
 
  private:
     StarterShopLayout BuildLayout(float w, float h) const;
@@ -92,6 +95,8 @@ class StarterShopView {
     void SelectHero(const std::string& focusId);
 
     catalog::StarterShopModel model_;
+    // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
+    // ProductWindow) para que BuildLayout() lo pase a la cabecera.
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
 

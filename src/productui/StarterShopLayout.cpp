@@ -140,7 +140,8 @@ StarterShopLayout BuildStarterShopLayout(
 
     StarterShopLayout out;
     out.viewport = UiRect{0.0f, 0.0f, in.viewportW, in.viewportH};
-    out.header = BuildSectionHeaderLayout(in.viewportW, kMargin, sy, ProductSection::kShop, lang);
+    out.header = BuildSectionHeaderLayout(
+        in.viewportW, kMargin, sy, ProductSection::kShop, lang, in.clickBalance);
     for (const SectionTab& tab : out.header.tabs) {
         out.focusOrder.push_back(tab.focusId);
     }

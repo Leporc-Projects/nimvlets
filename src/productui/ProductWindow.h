@@ -185,9 +185,10 @@ class ProductWindow {
         shopView_.SetTileKeyboardFocusForQA(petId);
     }
 
-    // Solo-DEV (QA / capturas): entra al submodo del Starter Shop oculto,
-    // elige una oferta (por identidad EXACTA), abre la confirmación, y
-    // pone el hover / foco de teclado sobre una tarjeta de oferta.
+    // Solo-DEV (QA / capturas): entra al submodo del Starter Shop oculto
+    // DIRECTAMENTE (no cuenta como descubribilidad de producción — brief
+    // §10). Elige una oferta (por identidad EXACTA), abre la confirmación,
+    // y pone el hover / foco de teclado sobre una tarjeta de oferta.
     void EnterStarterShopSubmodeForQA() {
         if (section_ != ProductSection::kShop || onboarding_) {
             return;
@@ -196,6 +197,14 @@ class ProductWindow {
         starterShopView_.OnEnterSubmode();
         pendingExpose_ = true;
     }
+    // Solo-DEV (QA): sintetiza un click primario REAL en la esquina INF-DER
+    // del Shop público y lo procesa por el MISMO camino que un click del
+    // owner (HandleEvent -> ShopView::OnMouseDown -> HitStarterHotspot ->
+    // enterStarterSubmode). Devuelve true si el submodo se abrió — sirve
+    // para probar que el HOTSPOT INVISIBLE funciona sin un click humano y
+    // que respeta el gate de elegibilidad (armado sii hay ofertas). No
+    // hace nada si ya está en el submodo / onboarding / otra sección.
+    bool ClickStarterHotspotForQA();
     void SelectStarterOfferForQA(const std::string& petId, const std::string& variantId) {
         starterShopView_.SelectOfferForQA(petId, variantId);
     }
@@ -247,9 +256,16 @@ class ProductWindow {
     bool pendingExpose_ = true;
 
     // Idioma actual del texto de la UI — lo registra SetLanguage (que ya
-    // lo reenvía a cada vista). Solo lo consume ClickNavTabForQA para
-    // reconstruir el layout de la cabecera compartida.
+    // lo reenvía a cada vista). Lo consumen ClickNavTabForQA y DrawFrame.
     core::Language language_ = core::Language::kEn;
+
+    // **Balance de clics MOSTRADO — autoridad ÚNICA** (corrección de QA
+    // del owner, Block 10). Lo fija SetModels; DrawFrame() lo pasa a
+    // Render() de la sección visible (Collection / Shop / Starter Shop /
+    // Settings). Ninguna sección tiene un wallet propio: antes Settings
+    // dibujaba "0 clicks" hard-codeado mientras las otras mostraban el
+    // valor real. Ver docs/PRODUCT_UI.md §17.
+    std::uint64_t clickBalance_ = 0;
 };
 
 }  // namespace nimvlets::productui

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -63,14 +64,22 @@ struct SectionTab {
 struct SectionHeaderLayout {
     UiRect titleAnchor;         // "Nimvlets" (izquierda) — marca, NO traducida
     UiRect clicksAnchorRight;   // borde DERECHO del "312 clicks" / "312 clics"
+    // El balance de clics YA FORMATEADO ("312 clicks" / "312 clics") a
+    // partir del balance CANÓNICO que ProductWindow posee. Las CUATRO
+    // secciones dibujan este string tal cual — ninguna elige su propio
+    // valor (corrección de QA del owner, Block 10: Settings mostraba
+    // "0 clicks" hard-codeado).
+    std::string clicksText;
     std::vector<SectionTab> tabs;  // siempre [Collection, Shop, Settings] en ese orden
     float bodyTop = 0.0f;       // y (lógica, con scroll ya aplicado) donde empieza el cuerpo
 };
 
 // Construye la cabecera. `scrollY` se resta de todas las y (la vista la
 // dibuja fuera de su clip de scroll, igual que la Collection de Block
-// 06). Puro y determinista.
+// 06). `clickBalance` es el balance CANÓNICO (de ProductWindow) — se
+// formatea acá a `clicksText`. Puro y determinista.
 SectionHeaderLayout BuildSectionHeaderLayout(
-    float viewportW, float marginX, float scrollY, ProductSection active, core::Language lang);
+    float viewportW, float marginX, float scrollY, ProductSection active, core::Language lang,
+    std::uint64_t clickBalance);
 
 }  // namespace nimvlets::productui

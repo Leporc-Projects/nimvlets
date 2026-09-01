@@ -24,9 +24,8 @@ bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefi
 
 }  // namespace
 
-void StarterShopView::SetModel(catalog::StarterShopModel model, std::uint64_t clickBalance) {
+void StarterShopView::SetModel(catalog::StarterShopModel model) {
     model_ = std::move(model);
-    clickBalance_ = clickBalance;
 
     // Si la oferta seleccionada ya no existe (típicamente porque se
     // compró), vuelve a BROWSE.
@@ -74,6 +73,7 @@ StarterShopLayout StarterShopView::BuildLayout(float w, float h) const {
     in.viewportH = h;
     in.scrollY = ClampShopScroll(scrollY_, lastContentHeight_, h);
     in.language = language_;
+    in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     in.selectedFocusId = selectedFocusId_;
     in.hoverFocusId = hoverId_;
     in.confirming = confirming_;
@@ -283,9 +283,11 @@ void DrawBackAffordance(
 }  // namespace
 
 void StarterShopView::Render(
-    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH) {
+    UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH,
+    std::uint64_t clickBalance) {
     viewportW_ = viewportW;
     viewportH_ = viewportH;
+    clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow
 
     const StarterShopLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -293,7 +295,7 @@ void StarterShopView::Render(
     const std::string focusedId = keyboardFocus_ ? focus_.FocusedId() : std::string();
 
     painter.Clear(theme::kBackground);
-    DrawSectionHeader(painter, text, layout.header, clickBalance_, language_, hoverId_, focusedId);
+    DrawSectionHeader(painter, text, layout.header, hoverId_, focusedId);
 
     painter.PushClip(
         UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
