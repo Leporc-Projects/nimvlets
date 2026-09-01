@@ -436,15 +436,15 @@ bool TestCurrentV4BareWholeFrinIsNotExpanded() {
     NIMVLETS_CHECK(!OwnsIdentity(loaded, PetIdentity{"frin", "female"}));
 
     // Y no manufactura una activación: contra el catálogo dev, Frin no
-    // tiene NINGUNA variante poseída -> no activable.
+    // tiene NINGUNA variante poseída -> no activable. Block 09C / DEC-136:
+    // un Frin sin ninguna variante poseída ni siquiera aparece en el
+    // modelo de la Collection (prueba aún más fuerte de "no se fabrica
+    // propiedad").
     const PetCatalog catalog = MakeDevCatalog();
     const CollectionModel model = BuildCollectionModel(catalog, loaded, PetIdentity{"bunny", ""});
     NIMVLETS_CHECK(!CanActivate(model, "frin", "male"));
     NIMVLETS_CHECK(!CanActivate(model, "frin", "female"));
-    const auto* frin = model.Find("frin");
-    NIMVLETS_CHECK(frin != nullptr);
-    NIMVLETS_CHECK(!frin->VariantOwned("male"));
-    NIMVLETS_CHECK(!frin->VariantOwned("female"));
+    NIMVLETS_CHECK(model.Find("frin") == nullptr);
     return true;
 }
 

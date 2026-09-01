@@ -71,6 +71,15 @@ CollectionModel FrinMaleOnlyModel(const std::string& activePetId) {
     return BuildCollectionModel(MakeDevCatalog(), owned, PetIdentity{activePetId, ""});
 }
 
+// El owner posee TODO el roster (Bunny + Nidir + las dos variantes de
+// Frin) — para ejercer una gallery con varias entradas POSEÍDAS (Block
+// 09C: los no poseídos ya no aparecen — DEC-136).
+CollectionModel FullyOwnedModel(const std::string& activePetId, const std::string& activeVariant = "") {
+    const Ents owned = {PetEntitlement{"bunny", ""}, PetEntitlement{"nidir", ""},
+                        PetEntitlement{"frin", "male"}, PetEntitlement{"frin", "female"}};
+    return BuildCollectionModel(MakeDevCatalog(), owned, PetIdentity{activePetId, activeVariant});
+}
+
 bool Has(const std::vector<std::string>& v, const std::string& s) {
     for (const auto& x : v) {
         if (x == s) {
@@ -90,9 +99,9 @@ bool TestStatusTextLocalized() {
 }
 
 // Sin selección explícita, el hero es el pet ACTIVO; la gallery son los
-// otros dos, en orden de catálogo.
+// otros pets POSEÍDOS, en orden de catálogo.
 bool TestHeroDefaultsToActivePetGalleryHasTheRest() {
-    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    const CollectionLayout layout = BuildCollectionLayout(FullyOwnedModel("bunny"), CollectionLayoutInput{});
     NIMVLETS_CHECK(layout.hero.petId == "bunny");
     NIMVLETS_CHECK(layout.hero.status == OwnershipStatus::kActive);
     NIMVLETS_CHECK(layout.gallery.size() == 2);
@@ -108,12 +117,48 @@ bool TestHeroDefaultsToActivePetGalleryHasTheRest() {
 bool TestSelectedPetBecomesHero() {
     CollectionLayoutInput in;
     in.selectedPetId = "frin";
-    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), in);
+    const CollectionLayout layout = BuildCollectionLayout(FullyOwnedModel("bunny"), in);
     NIMVLETS_CHECK(layout.hero.petId == "frin");
     NIMVLETS_CHECK(layout.gallery.size() == 2);
     NIMVLETS_CHECK(layout.FindGalleryItem("bunny") != nullptr);
     NIMVLETS_CHECK(layout.FindGalleryItem("nidir") != nullptr);
     NIMVLETS_CHECK(layout.FindGalleryItem("frin") == nullptr);
+    return true;
+}
+
+// Block 09C / DEC-136: la gallery NO muestra Nimvlets no poseídos.
+// DevModel posee Bunny + Frin (Nidir no).
+bool TestGalleryExcludesUnownedPets() {
+    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(layout.gallery.size() == 1);
+    NIMVLETS_CHECK(layout.gallery[0].petId == "frin");
+    NIMVLETS_CHECK(layout.FindGalleryItem("nidir") == nullptr);
+    NIMVLETS_CHECK(!Has(layout.focusOrder, "item:nidir"));
+    NIMVLETS_CHECK(layout.FindGalleryItem("bunny") == nullptr);  // el hero nunca en la gallery
+    return true;
+}
+
+// brief §4.A: el owner posee UN solo Nimvlet (el activo) -> gallery
+// vacía, sin divisor ni segundo plano, con una línea quieta hacia el
+// Shop (localizada). Cabe en 800x560.
+bool TestSingleOwnedPetEmptyGalleryLine() {
+    const Ents onlyBunny = {PetEntitlement{"bunny", ""}};
+    const CollectionModel model =
+        BuildCollectionModel(MakeDevCatalog(), onlyBunny, PetIdentity{"bunny", ""});
+    NIMVLETS_CHECK(model.items.size() == 1);
+
+    const CollectionLayout en = BuildCollectionLayout(model, CollectionLayoutInput{});
+    NIMVLETS_CHECK(en.hero.petId == "bunny");
+    NIMVLETS_CHECK(en.gallery.empty());
+    NIMVLETS_CHECK(en.dividerRect.w == 0.0f && en.dividerRect.h == 0.0f);
+    NIMVLETS_CHECK(en.galleryShelf.w == 0.0f && en.galleryShelf.h == 0.0f);
+    NIMVLETS_CHECK(en.emptyGalleryText == "Meet more Nimvlets in the Shop.");
+    NIMVLETS_CHECK(en.contentHeight <= 560.0f + 1.0f);
+
+    CollectionLayoutInput esIn;
+    esIn.language = Language::kEs;
+    NIMVLETS_CHECK(BuildCollectionLayout(model, esIn).emptyGalleryText ==
+                   "Conoce más Nimvlets en la Tienda.");
     return true;
 }
 
@@ -142,7 +187,7 @@ bool TestHeroActivePetDisablesUse() {
 bool TestHeroOwnedInactiveEnablesUse() {
     CollectionLayoutInput in;
     in.selectedPetId = "frin";
-    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), in);
+    const CollectionLayout layout = BuildCollectionLayout(FullyOwnedModel("bunny"), in);
 
     NIMVLETS_CHECK(layout.hero.actionEnabled);
     NIMVLETS_CHECK(layout.hero.actionLabel == "Use Frin");  // nombre propio NO traducido
@@ -184,20 +229,17 @@ bool TestActiveFrinReenablesUseWhenVariantWouldChange() {
     return true;
 }
 
-// Hero = pet locked -> sin acción, etiqueta humana localizada, "use"
-// NO en el focus order (brief §12: no purchase behaviour).
-bool TestHeroLockedHasNoAction() {
+// Block 09C / DEC-136: un pet NO poseído no está en el modelo, así que
+// seleccionarlo (un save o un flag DEV viejo) cae al pet activo — nunca
+// hay un hero "locked" / "Not in your collection" en la Collection.
+bool TestUnownedSelectionFallsBackToActivePet() {
     CollectionLayoutInput in;
-    in.selectedPetId = "nidir";
-    in.language = Language::kEs;
+    in.selectedPetId = "nidir";  // no poseído en DevModel (posee Bunny + Frin)
     const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), in);
-    NIMVLETS_CHECK(layout.hero.petId == "nidir");
-    NIMVLETS_CHECK(!layout.hero.actionEnabled);
-    NIMVLETS_CHECK(layout.hero.actionLabel == "No está en tu colección");
-    NIMVLETS_CHECK(!Has(layout.focusOrder, "use"));
-    // Un locked SÍ tiene arte ahora (brief §12) -> la vista lo carga;
-    // el layout solo marca el estado.
-    NIMVLETS_CHECK(layout.hero.status == OwnershipStatus::kLocked);
+    NIMVLETS_CHECK(layout.hero.petId == "bunny");  // cae al activo
+    NIMVLETS_CHECK(layout.hero.status == OwnershipStatus::kActive);
+    NIMVLETS_CHECK(layout.hero.status != OwnershipStatus::kLocked);
+    NIMVLETS_CHECK(layout.FindGalleryItem("nidir") == nullptr);  // tampoco en la gallery
     return true;
 }
 
@@ -213,16 +255,16 @@ bool TestHeroAndGalleryCarryPetAccent() {
     return true;
 }
 
-// El texto del hero se localiza (species + status), los nombres propios
-// no.
+// El texto del hero se localiza (species + acción), los nombres propios
+// no. Nidir POSEÍDO (FullyOwnedModel) mostrado como hero inactivo.
 bool TestHeroTextLocalized() {
     CollectionLayoutInput es;
     es.selectedPetId = "nidir";
     es.language = Language::kEs;
-    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), es);
+    const CollectionLayout layout = BuildCollectionLayout(FullyOwnedModel("bunny"), es);
     NIMVLETS_CHECK(layout.hero.displayName == "Nidir");            // nombre propio
     NIMVLETS_CHECK(layout.hero.speciesText == "Dragón negro");     // especie provisional, localizada
-    NIMVLETS_CHECK(layout.hero.statusText == "No está en tu colección");
+    NIMVLETS_CHECK(layout.hero.actionLabel == "Usar Nidir");       // "Usar " localizado + nombre propio
     return true;
 }
 
@@ -240,13 +282,6 @@ bool TestNoDuplicateUseStatusAndButton() {
     const auto active = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
     NIMVLETS_CHECK(!active.hero.actionEnabled);
     NIMVLETS_CHECK(active.hero.showStatusLine);
-
-    // Locked: línea de estado, sin botón.
-    CollectionLayoutInput locked;
-    locked.selectedPetId = "nidir";
-    const auto lk = BuildCollectionLayout(DevModel("bunny"), locked);
-    NIMVLETS_CHECK(!lk.hero.actionEnabled);
-    NIMVLETS_CHECK(lk.hero.showStatusLine);
 
     // Frin activo con otra variante elegida: botón (cambiaría variante),
     // sin línea de estado.
@@ -315,7 +350,7 @@ bool TestGalleryShelfIsSecondPlane() {
 // Cada pedestal de la gallery lleva un tinte de identidad del pet, no el
 // mismo cuadro neutro para todos (brief §20).
 bool TestGalleryPedestalCarriesPetTint() {
-    const auto layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    const auto layout = BuildCollectionLayout(FullyOwnedModel("bunny"), CollectionLayoutInput{});
     const auto* frin = layout.FindGalleryItem("frin");
     const auto* nidir = layout.FindGalleryItem("nidir");
     NIMVLETS_CHECK(frin != nullptr && nidir != nullptr);
@@ -346,11 +381,11 @@ bool TestHitTestFindsGalleryItemAndHeroWidgets() {
 // dibuja 2pt más arriba. Instantáneo, sin timer (brief §11).
 bool TestHoverLiftShiftsGalleryItemUp() {
     CollectionLayoutInput plain;
-    const CollectionLayout a = BuildCollectionLayout(DevModel("bunny"), plain);
+    const CollectionLayout a = BuildCollectionLayout(FullyOwnedModel("bunny"), plain);
 
     CollectionLayoutInput hovered = plain;
     hovered.hoverPetId = "frin";
-    const CollectionLayout b = BuildCollectionLayout(DevModel("bunny"), hovered);
+    const CollectionLayout b = BuildCollectionLayout(FullyOwnedModel("bunny"), hovered);
 
     const auto* frinA = a.FindGalleryItem("frin");
     const auto* frinB = b.FindGalleryItem("frin");
@@ -443,7 +478,7 @@ bool TestOwnedVariantOfPartiallyOwnedFrinEnablesUse() {
 // La descripción del hero reserva alto para varias líneas (word-wrap lo
 // hace la vista) — el bloque de texto crece con la copy más larga.
 bool TestDescriptionReservesMultipleLines() {
-    const CollectionLayout layout = BuildCollectionLayout(DevModel("nidir"), CollectionLayoutInput{});
+    const CollectionLayout layout = BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
     NIMVLETS_CHECK(!layout.hero.descriptionText.empty());
     NIMVLETS_CHECK(layout.hero.descriptionAnchor.h >= 34.0f);  // >= 2 líneas
     NIMVLETS_CHECK(layout.hero.descriptionAnchor.w > 100.0f);
@@ -456,12 +491,14 @@ void RegisterCollectionLayoutTests(testing::TestRunner& runner) {
     runner.Add("CollectionLayout/StatusTextLocalized", TestStatusTextLocalized);
     runner.Add("CollectionLayout/HeroDefaultsToActivePetGalleryHasTheRest", TestHeroDefaultsToActivePetGalleryHasTheRest);
     runner.Add("CollectionLayout/SelectedPetBecomesHero", TestSelectedPetBecomesHero);
+    runner.Add("CollectionLayout/GalleryExcludesUnownedPets", TestGalleryExcludesUnownedPets);
+    runner.Add("CollectionLayout/SingleOwnedPetEmptyGalleryLine", TestSingleOwnedPetEmptyGalleryLine);
     runner.Add("CollectionLayout/UnknownSelectionFallsBackToActive", TestUnknownSelectionFallsBackToActive);
     runner.Add("CollectionLayout/HeroActivePetDisablesUse", TestHeroActivePetDisablesUse);
     runner.Add("CollectionLayout/HeroOwnedInactiveEnablesUse", TestHeroOwnedInactiveEnablesUse);
     runner.Add("CollectionLayout/ActiveFrinReenablesUseWhenVariantWouldChange",
                TestActiveFrinReenablesUseWhenVariantWouldChange);
-    runner.Add("CollectionLayout/HeroLockedHasNoAction", TestHeroLockedHasNoAction);
+    runner.Add("CollectionLayout/UnownedSelectionFallsBackToActivePet", TestUnownedSelectionFallsBackToActivePet);
     runner.Add("CollectionLayout/HeroAndGalleryCarryPetAccent", TestHeroAndGalleryCarryPetAccent);
     runner.Add("CollectionLayout/HeroTextLocalized", TestHeroTextLocalized);
     runner.Add("CollectionLayout/NoDuplicateUseStatusAndButton", TestNoDuplicateUseStatusAndButton);

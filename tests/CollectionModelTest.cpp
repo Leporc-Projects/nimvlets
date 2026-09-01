@@ -117,18 +117,52 @@ PetEntitlement Var(const std::string& p, const std::string& v) { return PetEntit
 Ents FrinBoth() { return {Var("frin", "female"), Var("frin", "male")}; }
 Ents MigratedOwner() { return {NoVar("bunny"), Var("frin", "female"), Var("frin", "male")}; }
 
-bool TestThreeOwnershipStatesDeriveCorrectly() {
+// Block 09C / DEC-136: el modelo es SOLO lo poseído. Con el owner
+// migrado (Bunny + las dos variantes de Frin) y Nidir sin poseer, el
+// modelo tiene DOS ítems — Nidir NO aparece (antes salía como kLocked
+// con "Not in your collection").
+bool TestOwnedOnlyModelExcludesUnownedPets() {
     const PetCatalog catalog = MakeDevCatalog();
     const CollectionModel model = BuildCollectionModel(catalog, MigratedOwner(), PetIdentity{"bunny", ""});
 
-    NIMVLETS_CHECK(model.items.size() == 3);
+    NIMVLETS_CHECK(model.items.size() == 2);
     NIMVLETS_CHECK(model.items[0].petId == "bunny");
-    NIMVLETS_CHECK(model.items[1].petId == "nidir");
-    NIMVLETS_CHECK(model.items[2].petId == "frin");
+    NIMVLETS_CHECK(model.items[1].petId == "frin");
+    NIMVLETS_CHECK(model.Find("nidir") == nullptr);  // no poseído -> fuera del álbum
 
     NIMVLETS_CHECK(model.items[0].status == OwnershipStatus::kActive);         // owned + active
-    NIMVLETS_CHECK(model.items[2].status == OwnershipStatus::kOwnedInactive);  // owned + inactive
-    NIMVLETS_CHECK(model.items[1].status == OwnershipStatus::kLocked);         // not owned
+    NIMVLETS_CHECK(model.items[1].status == OwnershipStatus::kOwnedInactive);  // owned + inactive
+    return true;
+}
+
+// Tras "comprar" Nidir (agregarlo a las autorizaciones), aparece en la
+// Collection — antes no (brief §7).
+bool TestNewlyOwnedPetAppears() {
+    const PetCatalog catalog = MakeDevCatalog();
+    const Ents before = MigratedOwner();
+    NIMVLETS_CHECK(BuildCollectionModel(catalog, before, PetIdentity{"bunny", ""}).Find("nidir") == nullptr);
+
+    Ents after = before;
+    after.push_back(NoVar("nidir"));
+    const CollectionModel model = BuildCollectionModel(catalog, after, PetIdentity{"bunny", ""});
+    const auto* nidir = model.Find("nidir");
+    NIMVLETS_CHECK(nidir != nullptr);
+    NIMVLETS_CHECK(nidir->status == OwnershipStatus::kOwnedInactive);
+    NIMVLETS_CHECK(model.items.size() == 3);
+    return true;
+}
+
+// brief §4.A: el owner posee un solo Nimvlet (el activo) -> el modelo
+// tiene exactamente ese ítem.
+bool TestSingleOwnedPetYieldsOneItem() {
+    const PetCatalog catalog = MakeDevCatalog();
+    const CollectionModel model =
+        BuildCollectionModel(catalog, {NoVar("bunny")}, PetIdentity{"bunny", ""});
+    NIMVLETS_CHECK(model.items.size() == 1);
+    NIMVLETS_CHECK(model.items[0].petId == "bunny");
+    NIMVLETS_CHECK(model.items[0].status == OwnershipStatus::kActive);
+    NIMVLETS_CHECK(model.Find("nidir") == nullptr);
+    NIMVLETS_CHECK(model.Find("frin") == nullptr);
     return true;
 }
 
@@ -167,16 +201,16 @@ bool TestFrinOneVariantOwned() {
     return true;
 }
 
-// Frin: ninguna variante poseída -> kLocked, las dos `owned == false`.
-// Un {frin, ""} suelto NO cuenta como poseer ninguna variante.
-bool TestFrinNoVariantsOwned() {
+// Frin sin NINGUNA variante poseída -> NO aparece en la Collection
+// (Block 09C / DEC-136). Un {frin, ""} suelto tampoco cuenta como
+// poseer una variante.
+bool TestFrinWithNoOwnedVariantExcluded() {
     const PetCatalog catalog = MakeDevCatalog();
     for (const Ents& owned : {Ents{NoVar("bunny")}, Ents{NoVar("bunny"), NoVar("frin")}}) {
         const CollectionModel model = BuildCollectionModel(catalog, owned, PetIdentity{"bunny", ""});
-        const auto* frin = model.Find("frin");
-        NIMVLETS_CHECK(frin->status == OwnershipStatus::kLocked);
-        NIMVLETS_CHECK(!frin->VariantOwned("male"));
-        NIMVLETS_CHECK(!frin->VariantOwned("female"));
+        NIMVLETS_CHECK(model.Find("frin") == nullptr);
+        NIMVLETS_CHECK(model.Find("nidir") == nullptr);
+        NIMVLETS_CHECK(model.items.size() == 1);  // solo Bunny (activo)
     }
     return true;
 }
@@ -227,7 +261,7 @@ bool TestCanActivateGatesLockedAndUnownedVariant() {
     const CollectionModel model = BuildCollectionModel(
         catalog, {NoVar("bunny"), Var("frin", "male")}, PetIdentity{"bunny", ""});
 
-    NIMVLETS_CHECK(!CanActivate(model, "nidir"));            // locked
+    NIMVLETS_CHECK(!CanActivate(model, "nidir"));            // no poseído -> fuera del modelo
     NIMVLETS_CHECK(CanActivate(model, "bunny"));             // active
     NIMVLETS_CHECK(CanActivate(model, "frin", "male"));      // variante poseída
     NIMVLETS_CHECK(!CanActivate(model, "frin", "female"));   // variante NO poseída
@@ -384,10 +418,12 @@ bool TestResolveOwnedActiveDegenerateNothingOwned() {
 }  // namespace
 
 void RegisterCollectionModelTests(testing::TestRunner& runner) {
-    runner.Add("CollectionModel/ThreeOwnershipStatesDeriveCorrectly", TestThreeOwnershipStatesDeriveCorrectly);
+    runner.Add("CollectionModel/OwnedOnlyModelExcludesUnownedPets", TestOwnedOnlyModelExcludesUnownedPets);
+    runner.Add("CollectionModel/NewlyOwnedPetAppears", TestNewlyOwnedPetAppears);
+    runner.Add("CollectionModel/SingleOwnedPetYieldsOneItem", TestSingleOwnedPetYieldsOneItem);
     runner.Add("CollectionModel/FrinCollapsesToOneItemWithTwoVariants", TestFrinCollapsesToOneItemWithTwoVariants);
     runner.Add("CollectionModel/FrinOneVariantOwned", TestFrinOneVariantOwned);
-    runner.Add("CollectionModel/FrinNoVariantsOwned", TestFrinNoVariantsOwned);
+    runner.Add("CollectionModel/FrinWithNoOwnedVariantExcluded", TestFrinWithNoOwnedVariantExcluded);
     runner.Add("CollectionModel/FrinBothVariantsOwned", TestFrinBothVariantsOwned);
     runner.Add("CollectionModel/SelectedVariantFollowsActiveIdentity", TestSelectedVariantFollowsActiveIdentity);
     runner.Add("CollectionModel/UnknownActiveVariantFallsBackToFirst", TestUnknownActiveVariantFallsBackToFirst);
