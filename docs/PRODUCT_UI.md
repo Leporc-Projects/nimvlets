@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C)
+# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C / 10)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -1055,3 +1055,155 @@ fullscreen, modo de clics global opt-in). **Nada de eso se implementa ni
 se insinúa acá** — sin placeholders deshabilitados, sin registry
 especulativo. Un `PreferenceField` nuevo + su fila + su `Apply*` es todo
 lo que haría falta.
+
+## 21. El SHOP OCULTO DE STARTERS — submodo contextual del Shop (Block 10)
+
+Fuentes: `catalog::StarterShopModel` / `catalog::StarterPurchasePolicy`
+(puro), `productui::StarterShopLayout` (puro) +
+`productui::StarterShopView` (SDL), `productui::ShopPaint` (pintado
+compartido), `productui::ShopLayout` (helpers de geometría expuestos).
+Decisión: **DEC-137**. Ver `docs/ONBOARDING.md` §15/§16 para la política
+y el harness DEV.
+
+### 21.1 Qué es
+
+Un usuario que **completó el onboarding** (lifecycle `kCompleted`
+EXACTO — NO `kLegacyComplete`, NO `kPending`) y eligió UNA variante de
+Frin puede comprar la OTRA con clics. Genéricamente: un starter no
+poseído (`starterRole != kNone` + `priceClicks > 0`) puede ofrecerse.
+La **regla de no-divulgación** (DEC-137, brief §3): una oferta de un
+starter SECRETO (Frin) solo es elegible si el owner ya posee alguna
+variante hermana del mismo petId lógico — así Frin NUNCA se le revela a
+quien nunca lo descubrió. No hay ni se persiste un flag de "revelado".
+
+### 21.2 Acceso — NO una cuarta pestaña (brief §10/§11)
+
+`SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`.
+Cuando `BuildStarterShopModel` tiene ≥ 1 oferta, el Shop **público**
+dibuja UNA línea quieta cerca del pie:
+
+- EN: `Starter choices…`  ·  ES: `Opciones iniciales…`
+
+(`ShopLayout::starterAffordanceVisible`, `focusId "starter:enter"`, al
+FINAL del focus order, en `kTextFaint`). **Sin** banner, badge, toast,
+popup, notificación ni "secret unlocked". Con 0 ofertas la afordancia
+NO existe. `ShopView::SetStarterAffordanceVisible(bool)` la controla;
+`src/app` la pone en `!starterShopModel.Empty()`.
+
+Activar la afordancia entra a un **submodo que la sección Shop POSEE**
+(`ProductWindow::starterShopSubmode_`, solo relevante con `section_ ==
+kShop && !onboarding_`):
+
+- la cabecera compartida sigue marcando **Shop**;
+- el input se rutea a `StarterShopView` en vez de `ShopView`;
+- un back affordance quieto arriba a la izquierda: `← Shop` / `← Tienda`
+  (`focusId "starter:back"`).
+
+Cambiar de sección (tocar `Collection`/`Settings`, o `Shop` desde el
+submodo) o reabrir el Product UI **limpia el submodo** — se vuelve al
+Shop público en BROWSE.
+
+### 21.3 Jerarquía visual — reusa el Shop browse-first
+
+```
+── Starter Shop BROWSE ─────────────────────────────────────────
+Nimvlets                                          350 clicks   <- cabecera COMPARTIDA
+Collection  ·  Shop  ·  Settings                                <- "Shop" activo (submodo)
+← Shop                                                          <- back affordance quieto
+
+                 Starter choices                               <- encabezado quieto
+
+        ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │  [ arte  │   │  [ arte  │   │  [ arte  │   │  [ arte  │
+        └──────────┘   └──────────┘   └──────────┘   └──────────┘
+         Frin · Male     Artu (dev)     Rato (dev)    Rin Rin (dev)
+        (150 clicks)                                            <- SOLO al hover / foco
+
+── Starter Shop SELECTED (tras clic / Enter) ───────────────────
+ ╭─ hero stage teñido con el acento del pet ─╮
+ │   [ ARTE GRANDE ]   Frin · Male            │   <- nombre compuesto: "Frin" (no se traduce)
+ │   (frin/male.nvprev) ──                    │       + " · " + Male/Macho (kMale/kFemale)
+ │                     White wolf             │
+ │                     Watchful, calm…        │
+ │                     150 clicks             │
+ ╰─────────────────────[ Get Frin · Male ]────╯
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  <- divisor = borde del 2º plano
+        [·] Frin · Male̲   [·] Artu (dev)  …        <- RAIL: todas las ofertas, compacto
+```
+
+Reusa, sin una segunda copia (brief §12):
+
+- **geometría** — `ComputeBrowseGrid` / `LayoutBrowseGrid` /
+  `LayoutShopRail` / `LayoutShopHero`, extraídos a helpers públicos en
+  `ShopLayout.h`;
+- **pintado** — `DrawShopTile` / `DrawShopHero` / `FillShopStagePrimitive`,
+  extraídos a `productui/ShopPaint.{h,cpp}` y usados por igual por
+  `ShopView` y `StarterShopView`.
+
+Diferencia clave: `StarterShopLayout` opera en **IDENTIDADES EXACTAS**.
+`focusId` de una oferta = `"starteritem:<petId>/<variantId>"` — dos
+"frin" (male / female) conviven como ofertas distintas, cosa que el
+`ShopModel` público (keyed por petId lógico) no podría. El hero y las
+tarjetas resuelven la `.nvprev` por `(petId, variantId)` EXACTOS.
+
+### 21.4 Compra
+
+`Get <name>` → confirmación inline (`purchase:cancel` /
+`purchase:confirm`, el foco arranca en Cancel) → `Confirmar` emite un
+`PurchaseRequest` con la identidad EXACTA. `src/app`
+(`HandleStarterPurchaseRequest`) evalúa `catalog::EvaluateStarterPurchase`
+(canal DISTINTO — re-checa lifecycle == kCompleted, rol de starter,
+precio, regla del secreto, propiedad, saldo — el modelo/UI NO es un
+límite de seguridad) y, si es `kSuccess`, aplica `ApplyPurchasedState`
+(el MISMO camino atómico balance+propiedad+flush que el Shop público —
+DEC-126). **VARIANTE EXACTA:** comprar Frin otorga solo `{frin,"male"}`
+o `{frin,"female"}`, nunca ambas, nunca `{frin,""}`.
+
+**NO auto-activa (brief §17):** el pet del escritorio NO cambia. Balance
+y Collection se refrescan al instante; la nueva variante es usable desde
+el flujo "Use <name>" de la Collection sin reiniciar. La Collection
+sigue siendo owned-only (DEC-136): tras comprar la 2ª variante de Frin,
+la fila de Frin muestra `Male · Female` ambas poseídas y activables.
+
+### 21.5 Teclado / Esc (brief §20)
+
+| Estado del submodo | Esc |
+|---|---|
+| browse | vuelve al Shop público (BROWSE) |
+| seleccionado (sin confirmar) | vuelve a browse |
+| confirmando | cancela la confirmación (NUNCA sale del submodo) |
+
+`Esc` en el submodo **NUNCA cierra la ventana** — siempre da un paso
+atrás. Tab/Shift+Tab + flechas recorren el anillo (`starter:back` →
+ofertas; en seleccionado: `starter:back` → `get` → tarjetas del rail).
+Enter/Espacio selecciona una oferta / abre la confirmación / confirma.
+Chrome de foco solo tras input de teclado (misma disciplina que el
+resto del Product UI).
+
+### 21.6 Estado vacío (brief §19)
+
+Comprar la última oferta deja el submodo abierto con una línea quieta —
+EN `No more starter choices.` / ES `No quedan opciones iniciales.` — +
+`← Shop`. Sin confetti / toast / logro. Al volver al Shop público la
+afordancia ya no existe.
+
+### 21.7 AppState / performance / privacidad
+
+- **Sin bump de schema** (AppState sigue en v5). El Starter Shop deriva
+  todo de `onboardingLifecycle` + `ownedEntitlements` + `clickBalance`
+  que ya se persisten. Una compra reusa el flush inmediato del Shop
+  (DEC-126).
+- **Event-driven:** `StarterShopView` redibuja solo ante un cambio real
+  (`Dirty()`), sin loop, sin timer, sin thread. El submodo abierto y en
+  reposo = efectivamente ocioso. Usa las `.nvprev` livianas ya
+  residentes (`PetPreviewCache` de Block 06.2) — NUNCA abre un
+  `.nvpack`.
+- **Sin permisos nuevos, sin red, sin selección persistida** entre
+  visitas al submodo.
+
+### 21.8 Producción — intacta
+
+El catálogo de producción NO se toca (`starterRole: kNone` + precio 0 en
+sus 4 entradas) → el Starter Shop está **inerte en producción**. Se
+ejercita solo por el harness sintético-DEV (`NIMVLETS_DEV_ONBOARDING`).
+Ver `docs/ONBOARDING.md` §16 y `README.md`.

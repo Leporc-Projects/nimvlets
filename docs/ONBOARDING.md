@@ -6,8 +6,10 @@ la política pura de selección de starter, el secreto de los 44 segundos,
 la transacción de completitud, el gate de contenido de producción, y el
 harness solo-DEV. **El onboarding de producción NO está habilitado al
 terminar Block 09A** — falta el contenido de Artu/Rato/Rin Rin (ver §9).
-Block 09B lo liga a contenido real y lo activa; Block 10 agrega el shop
-oculto para comprar la variante de Frin no elegida.
+Block 09B lo liga a contenido real y lo activa. **Block 10 agrega el
+SHOP OCULTO DE STARTERS** — comprar con clics la variante de Frin NO
+elegida en el onboarding (y, genéricamente, starters normales no
+poseídos) — ver §15 y DEC-137.
 
 Fuentes: `src/persistence/AppState.h` (v5), `src/catalog/OnboardingPolicy.{h,cpp}`,
 `src/catalog/PetCatalog.h` (StarterRole), `src/productui/OnboardingLayout.{h,cpp}`
@@ -424,8 +426,163 @@ onboarding abierta y en reposo es efectivamente ociosa.
 Nada más de persistencia, grants, timing ni política de entitlements
 necesita rediseñarse — esa es la razón de ser de Block 09A.
 
-### Block 10 — shop oculto de starters
+## 15. Block 10 — el SHOP OCULTO DE STARTERS
 
-Comprar la **variante de Frin no elegida** en el onboarding (y,
-eventualmente, otros starters). Reusa los primitivos de entitlement y la
-transacción atómica del Shop; NO se implementa ni se insinúa acá.
+Fuentes: `src/catalog/StarterShopModel.{h,cpp}` (elegibilidad + modelo
+puro), `src/catalog/StarterPurchasePolicy.{h,cpp}` (política de compra
+pura, canal DISTINTO), `src/productui/StarterShopLayout.{h,cpp}` +
+`StarterShopView.{h,cpp}` (el submodo), `src/productui/ShopPaint.{h,cpp}`
+(pintado compartido con el Shop público), `src/app/SpikeApp.cpp`
+(`BuildCurrentStarterShopModel` / `HandleStarterPurchaseRequest` /
+`ApplyPurchasedState` / `OnboardingLifecycleCompleted`). Decisión:
+**DEC-137**.
+
+### 15.1 Qué es
+
+Un usuario que completó el onboarding y eligió UNA variante de Frin
+puede comprar la OTRA con clics. La arquitectura soporta además
+starters NORMALES no poseídos (por ejemplo, tras elegir un starter
+normal, comprar otro). Reusa los `PetEntitlement` (coincidencia
+EXACTA), la aplicación atómica de estado del Shop (DEC-126) y las
+previews `.nvprev` — NO rediseña nada de eso.
+
+### 15.2 Interpretación de datos del catálogo — SIN campo de schema nuevo
+
+- `priceClicks` = el precio de compra de ESA identidad EXACTA.
+- `publiclyPurchasable` = si esa identidad aparece / se compra en el
+  Shop **público**. Frin sigue en `false` en las dos variantes → NUNCA
+  en el Shop público.
+- `starterRole` = si la identidad pertenece a la política de starter.
+
+El Starter Shop oculto usa `lifecycle == kCompleted` + `starterRole !=
+kNone` + `priceClicks > 0` + propiedad + reglas del secreto — SIN volver
+`publiclyPurchasable` true. Una entrada NO pública con precio es válida
+(el loader C++ solo rechaza `publiclyPurchasable && priceClicks == 0`).
+
+### 15.3 Elegibilidad de una oferta (`catalog::IsStarterShopEligible`)
+
+Una identidad EXACTA es oferta del Starter Shop oculto sii TODAS:
+
+1. `lifecycleCompleted` — el lifecycle persistido es EXACTAMENTE
+   `kCompleted`. **NO `kLegacyComplete`** (dev/legacy/sembrado por
+   catálogo) **ni `kPending`** — evita exponer retroactivamente una
+   economía de starters nueva a quien no pasó por el contrato real de
+   elección (brief §5). `src/catalog` recibe un `bool` ya resuelto por
+   `src/app` (`SpikeApp::OnboardingLifecycleCompleted()`), así no
+   depende de `src/persistence`.
+2. hay una entrada de catálogo con esa identidad EXACTA y su
+   `starterRole != kNone`.
+3. `priceClicks > 0` en esa entrada.
+4. la identidad EXACTA NO está poseída (`Covers` exacto: poseer
+   `{frin,"female"}` NO cubre `{frin,"male"}`).
+5. **starter SECRETO — regla de NO-DIVULGACIÓN (brief §3, crítica):**
+   además, el owner ya posee al menos una autorización EXACTA del MISMO
+   petId lógico (`OwnsAnyVariantOfPet`). Así `owns {frin,female}` puede
+   ver `{frin,male}`, pero `owns {artu,""}` NUNCA descubre Frin.
+   **Genérico por rol + petId — NUNCA `if (petId == "frin")`.** NO se
+   persiste ni se inventa ningún flag de "Frin fue revelado a los 44 s".
+6. starter NORMAL: eligible genéricamente (1..4 + 7).
+7. la identidad es estructuralmente válida.
+
+`BuildStarterShopModel` itera el catálogo en orden (determinista) y emite
+una `StarterShopOffer` por identidad elegible, con `status`
+(`kAffordable` / `kInsufficientBalance` + `clicksShort`) según el
+balance. Con `lifecycleCompleted == false` devuelve SIEMPRE un modelo
+vacío.
+
+### 15.4 Compra — canal DISTINTO (`catalog::EvaluateStarterPurchase`)
+
+NO se reusa `catalog::EvaluatePurchase` ignorando `publiclyPurchasable`
+(eso volvería comprable cualquier identidad privada — brief §15). La
+política de starter re-verifica INDEPENDIENTEMENTE lifecycle ==
+kCompleted, rol de starter, precio > 0, regla de variante hermana del
+secreto, no-poseída, y saldo. El modelo/UI NO es un límite de
+seguridad. En cualquier fallo el estado resultante == el de entrada,
+canonicalizado; la resta solo corre tras `balance >= precio` → sin
+underflow.
+
+**VARIANTE EXACTA (brief §13):** comprar la oferta de Frin otorga
+EXACTAMENTE `{frin,"male"}` o `{frin,"female"}` — NUNCA `{frin,""}` ni
+ambas. NO se reutiliza `ExpandHistoricalWholePetEntitlements`.
+
+**Aplicación atómica COMPARTIDA:** `SpikeApp::ApplyPurchasedState`
+(factorizado desde `HandlePurchaseRequest`) muta `clickBalance` +
+`ownedEntitlements` en el MISMO `AppState` + flush inmediato (DEC-126).
+El Shop público y el Starter Shop tienen políticas de elegibilidad
+separadas pero el MISMO camino de aplicación. **Sin bump de schema.**
+
+**NO auto-activa (brief §17):** una compra otorga propiedad; el pet del
+escritorio NO cambia. Balance y Collection se refrescan al instante; la
+nueva variante es usable desde el flujo "Use <name>" de la Collection
+sin reiniciar.
+
+### 15.5 Acceso — submodo, NO una cuarta pestaña (ver `docs/PRODUCT_UI.md` §21)
+
+`SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`.
+Cuando hay ≥ 1 oferta, el Shop público dibuja UNA línea quieta "Starter
+choices…" / "Opciones iniciales…" cerca del pie. Activarla entra a un
+submodo que la sección Shop POSEE: la cabecera sigue marcando "Shop", y
+hay un back affordance "← Shop" / "← Tienda". Con 0 ofertas la
+afordancia NO existe. Cambiar de sección o reabrir la ventana limpia el
+submodo. El submodo reusa la geometría (`ComputeBrowseGrid` /
+`LayoutBrowseGrid` / `LayoutShopRail` / `LayoutShopHero`, expuestos en
+`ShopLayout.h`) y el pintado (`ShopPaint`) del Shop browse-first — una
+sola copia; opera en identidades EXACTAS (`focusId
+"starteritem:<petId>/<variantId>"`) y compone `"Frin · Male"` con
+`kMale`/`kFemale`.
+
+### 15.6 Producción — INTACTA
+
+`assets/dev/pet_catalog.nvcat` NO se toca: sus entradas siguen
+`starterRole: kNone` + precio 0, así el Starter Shop está **INERTE en
+producción**. Un usuario real (post-09B) que elija una variante de Frin
+podrá comprar la otra recién cuando un bloque futuro marque las entradas
+de Frin del catálogo de producción con `starter_role: "secret"` + un
+precio — Block 10 cablea el MECANISMO y lo ejercita solo por el harness
+sintético-DEV (ver §16). **No se fijan precios V1 de starters** (brief
+§23).
+
+## 16. Block 10 — harness sintético-DEV del Starter Shop
+
+`assets/dev/onboarding_dev_catalog_manifest.json` gana `price_clicks` de
+QA en las 5 entradas de starter — `publicly_purchasable` sigue en false
+(el Shop público del catálogo sintético sigue vacío):
+
+| entrada | `starter_role` | `price_clicks` (QA, PROVISIONAL) |
+|---|---|---|
+| `frin/male` | secret | 150 |
+| `frin/female` | secret | 150 |
+| `artu_dev` | normal | 80 |
+| `rato_dev` | normal | 100 |
+| `rinrin_dev` | normal | 120 |
+
+Son precios **SÓLO DE QA / PROVISIONALES** para ejercitar el submodo, NO
+el balanceo V1. Los precios públicos Bunny=120 / Nidir=300 NO cambian.
+Regenerar: `python3 tools/compile_pet_catalog.py
+assets/dev/onboarding_dev_catalog_manifest.json
+assets/dev/onboarding_dev_catalog.nvcat`.
+
+Escenarios (todos con `NIMVLETS_DEV_ONBOARDING=1` en CADA arranque — el
+env var elige el catálogo sintético; sin él se carga el de producción,
+que no tiene estas entradas):
+
+- **A.** `NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female` → el Starter Shop
+  ofrece `frin/male` (secreto: hermana poseída) + los 3 dev normales
+  (no poseídos, priced). NUNCA `frin/female` (poseída) ni `{frin,""}`.
+- **B.** `NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/male` → ofrece
+  `frin/female` + los 3 normales.
+- **C.** `NIMVLETS_DEV_ONBOARDING_CHOOSE=artu_dev` → ofrece `rato_dev` +
+  `rinrin_dev`. **Frin NUNCA aparece** (`OwnsAnyVariantOfPet(owned,
+  "frin") == false`).
+- **D.** `NIMVLETS_DEV_STARTER_BUY=frin/male` → balance -= 150,
+  `{frin,"male"}` EXACTO agregado, activo sin cambiar, la oferta
+  desaparece, Collection refresca.
+
+Hooks DEV nuevos: `NIMVLETS_DEV_GRANT_CLICKS=<n>` (suma al wallet sin
+disparar animaciones — corre DESPUÉS de `ONBOARDING_CHOOSE`, que pone el
+balance en 0), `NIMVLETS_DEV_STARTER_BUY=<petId>[/<variant>]` (compra no
+interactiva por el mismo camino que "Confirmar"),
+`NIMVLETS_DEV_STARTER_SHOP=1` (entra al submodo — con
+`NIMVLETS_DEV_SECTION=shop`), `NIMVLETS_DEV_STARTER_OFFER` /
+`_HOVER=<petId>[/<variant>]`, `NIMVLETS_DEV_STARTER_FOCUS=<focusId>`,
+`NIMVLETS_DEV_STARTER_CONFIRM=1`. Ver `README.md`.

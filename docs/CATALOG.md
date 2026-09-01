@@ -520,3 +520,49 @@ El catálogo de producción actual (`assets/dev/pet_catalog.nvcat`):
 `productionOnboardingReady = false`, `devSyntheticOnboarding = false`,
 cero `starterRole` → **el arranque normal es idéntico al de antes de
 Block 09A**. Block 09B lo activa (ver `docs/ONBOARDING.md` §14).
+
+## 14. Shop OCULTO DE STARTERS — interpretación de `priceClicks` (Block 10)
+
+Block 10 agrega el **shop oculto de starters** SIN un campo de schema
+nuevo (`"NVCATLG1"` sigue en v5). La lectura de los tres datos de
+economía/onboarding que ya existen queda EXPLÍCITA (DEC-137):
+
+| datum | significado |
+|---|---|
+| `priceClicks` (`u64`) | el precio de compra de **esta identidad EXACTA** — vale tanto para el Shop público como para el Starter Shop oculto |
+| `publiclyPurchasable` (`u8`) | si esa identidad puede **aparecer / comprarse en el Shop PÚBLICO** (nada más) |
+| `starterRole` (`u8`) | si la identidad pertenece a la **política de starter** (`none`/`normal`/`secret`) |
+
+Con esto, el Starter Shop oculto ofrece una identidad sii `lifecycle ==
+kCompleted` **y** `starterRole != kNone` **y** `priceClicks > 0` **y** no
+está poseída **y** (para `secret`) el owner ya posee alguna variante
+hermana del mismo petId — **sin** volver `publiclyPurchasable` true.
+
+**Combinación NUEVA y válida:** una entrada con `starterRole != kNone` +
+`priceClicks > 0` + `publiclyPurchasable == false`. El loader C++ solo
+rechaza `publiclyPurchasable && priceClicks == 0` (§3) — una entrada NO
+pública con precio nunca fue inválida. `BuildShopModel` y
+`EvaluatePurchase` (Shop público) siguen mirando SOLO
+`publiclyPurchasable`; **Frin sigue ausente del Shop público**.
+
+- **`catalog::StarterShopModel` + `IsStarterShopEligible`** (puro):
+  `BuildStarterShopModel(catalog, lifecycleCompleted, owned, balance)` —
+  `lifecycleCompleted` es un `bool` ya resuelto por `src/app` (`==
+  persistence::OnboardingLifecycle::kCompleted` EXACTO), así
+  `src/catalog` NO depende de `src/persistence`. Una oferta lleva la
+  `PetIdentity` EXACTA, `displayName`, `role`, `priceClicks`, `status`,
+  `clicksShort`, `entitlementTarget`.
+- **`catalog::EvaluateStarterPurchase`** (puro): canal de compra
+  DISTINTO — re-verifica INDEPENDIENTEMENTE lifecycle == kCompleted,
+  rol de starter, precio > 0, regla de variante hermana del secreto,
+  no-poseída, saldo. NO se reusa `EvaluatePurchase` ignorando
+  `publiclyPurchasable`. Otorga la identidad EXACTA — nunca `{petId,""}`
+  para un pet con variantes, nunca ambas.
+
+**El catálogo de producción NO se toca**: sus 4 entradas siguen
+`starterRole: kNone` + precio 0 → el Starter Shop está inerte en
+producción. El harness sintético-DEV
+(`onboarding_dev_catalog_manifest.json`) gana `price_clicks` de QA en
+sus 5 entradas de starter (PROVISIONALES, no balanceo V1 — ver
+`docs/ONBOARDING.md` §16 y DEC-137). Los precios públicos Bunny=120 /
+Nidir=300 no cambian.

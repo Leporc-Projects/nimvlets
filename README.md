@@ -5,7 +5,17 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 09C — Shop Browse-First** (el Shop
+Este repositorio está en **Block 10 — Shop oculto de starters** (un
+submodo CONTEXTUAL de la sección Shop — no una cuarta pestaña: un
+usuario que completó el onboarding y eligió UNA variante de Frin puede
+comprar la OTRA con clics; la regla de no-divulgación mantiene a Frin
+oculto para quien nunca lo descubrió; compra de VARIANTE EXACTA por el
+mismo camino atómico que el Shop público, sin auto-activar el pet; el
+catálogo de producción no se toca — se ejercita por el harness
+sintético-DEV `NIMVLETS_DEV_ONBOARDING`; ver
+[`docs/ONBOARDING.md`](docs/ONBOARDING.md) §15/§16,
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §21 y DEC-137), sobre
+**Block 09C — Shop Browse-First** (el Shop
 abre en una estantería de personajes: la rejilla del arte es el
 contenido primario; hover/foco revela precio o propiedad; recién al
 seleccionar un personaje aparece el hero grande con la acción de compra
@@ -203,6 +213,20 @@ puede activar sin reiniciar. **Frin no aparece en el Shop normal.**
 Cerrar/reabrir el Product UI devuelve el Shop a la estantería. Precios
 provisionales de QA: Bunny 120, Nidir 300.
 
+**Block 10 — Shop oculto de starters.** Para un usuario que completó el
+onboarding (lifecycle `kCompleted` EXACTO), si hay ≥ 1 oferta el Shop
+público dibuja UNA línea quieta "Starter choices…" cerca del pie — NO
+una cuarta pestaña, NO un banner. Activarla entra a un submodo que la
+sección Shop posee (la cabecera sigue marcando "Shop"; un back
+affordance "← Shop"), con la MISMA jerarquía browse → hover → hero →
+Get → Cancelar/Confirmar, pero en IDENTIDADES EXACTAS: un usuario que
+eligió Frin hembra ve una oferta "Frin · Male". La regla de
+no-divulgación mantiene a Frin oculto para quien nunca lo descubrió.
+Comprar otorga la variante EXACTA (nunca ambas), por el mismo camino
+atómico que el Shop público, y NO cambia el pet del escritorio. El
+catálogo de producción no se toca — el Starter Shop se ejercita por el
+harness sintético-DEV.
+
 El **click balance** (visible SOLO acá) está en la cabecera compartida,
 arriba a la derecha. El menú de la barra NO cambia — Show/Hide, Lock
 Position, Size (Small/Medium/Large — Large = 1.15), Opacity
@@ -347,6 +371,53 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
   NIMVLETS_DEV_ONBOARDING_CHOOSE=artu_dev \
   NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=settings \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/post_onboarding_settings.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# --- Shop oculto de starters (Block 10, SOLO-DEV) --------------------
+# El Starter Shop está INERTE en el catálogo de PRODUCCIÓN (sus entradas
+# no tienen starterRole ni precio). Se ejercita SOLO por el harness
+# sintético-DEV: NIMVLETS_DEV_ONBOARDING=1 en CADA arranque (el env var
+# elige el catálogo sintético; sin él se carga el de producción). Sólo
+# aparece si el lifecycle es kCompleted EXACTO (tras un CHOOSE real);
+# un usuario legacy/dev-seed (kLegacyComplete) NUNCA lo ve.
+# NIMVLETS_DEV_GRANT_CLICKS=<n>   -> suma n clics al wallet sin disparar
+#   animaciones. Corre DESPUÉS de NIMVLETS_DEV_ONBOARDING_CHOOSE (que deja
+#   el balance en 0) y ANTES de STARTER_BUY / OPEN_COLLECTION.
+# NIMVLETS_DEV_STARTER_BUY=<petId>[/<variant>]  -> compra no interactiva
+#   por el mismo camino que "Confirmar" (EvaluateStarterPurchase ->
+#   ApplyPurchasedState atómico). Requiere lifecycle kCompleted.
+# NIMVLETS_DEV_STARTER_SHOP=1     -> entra al submodo (necesita
+#   NIMVLETS_DEV_SECTION=shop). Sin la variable, el Shop público con la
+#   afordancia "Starter choices…" si hay ofertas.
+# NIMVLETS_DEV_STARTER_OFFER=<petId>[/<variant>]  -> selecciona esa oferta
+#   EXACTA como hero. NIMVLETS_DEV_STARTER_HOVER=<petId>[/<variant>] ->
+#   hover (revela el precio). NIMVLETS_DEV_STARTER_CONFIRM=1 -> abre la
+#   confirmación. NIMVLETS_DEV_STARTER_FOCUS=<focusId> -> foco de teclado
+#   ("starter:back", "starteritem:frin/male", "get", …).
+
+# El Starter Shop tras elegir Frin hembra (oferta frin/male + 3 dev normales):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ss1 NIMVLETS_DEV_ONBOARDING=1 \
+  NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
+  NIMVLETS_DEV_GRANT_CLICKS=500 NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_STARTER_SHOP=1 \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/starter_shop.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Frin Male seleccionado + confirmación (ES):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ss2 NIMVLETS_DEV_ONBOARDING=1 NIMVLETS_DEV_LANGUAGE=es \
+  NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
+  NIMVLETS_DEV_GRANT_CLICKS=500 NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_STARTER_SHOP=1 \
+  NIMVLETS_DEV_STARTER_OFFER=frin/male NIMVLETS_DEV_STARTER_CONFIRM=1 \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/starter_confirm_es.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# Comprar frin/male, luego ver la Collection con ambas variantes poseídas:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ss3 NIMVLETS_DEV_ONBOARDING=1 \
+  NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
+  NIMVLETS_DEV_GRANT_CLICKS=500 NIMVLETS_DEV_STARTER_BUY=frin/male \
+  NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male NIMVLETS_DEV_SECTION=collection \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection_both.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 ```
 

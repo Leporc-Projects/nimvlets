@@ -5258,3 +5258,198 @@ selector Male/Female; EN/ES; un solo Nimvlet poseído (vía el harness
 DEV de onboarding) muestra la línea quieta sin divisor. Congelado sin
 tocar: Nidir, deuda `lie_to_sit` de Frin, Shop browse-first, Settings,
 onboarding.
+
+---
+
+### DEC-137 — Shop OCULTO DE STARTERS: submodo contextual de la sección Shop, gate lifecycle == kCompleted, no-divulgación del secreto, compra de VARIANTE EXACTA
+**Status:** DECIDIDO · Block 10. **Depende de** DEC-123 (`PetEntitlement`,
+coincidencia exacta), DEC-126 (aplicación atómica de compra), DEC-128
+(objetivo de compra data-driven; `ExpandHistorical…` congelado),
+DEC-131/DEC-132 (`OnboardingLifecycle` / política de starter),
+DEC-135 (Shop browse-first). **NO** habilita el onboarding de
+producción, **NO** agrega contenido de Artu/Rato/Rin Rin, **NO** toca
+el catálogo de producción ni la transacción del Shop público (Frin
+sigue ausente del Shop público), **NO** fija precios V1 de starters.
+
+**Contexto.** Un usuario que eligió UNA variante de Frin en el
+onboarding tiene que poder, eventualmente, comprar la OTRA con clics —
+y la arquitectura debe soportar además starters NORMALES no poseídos —
+SIN exponer Frin a quien nunca lo descubrió, sin una cuarta pestaña de
+navegación, y sin rediseñar entitlements ni la transacción de compra.
+El onboarding de producción sigue deshabilitado (falta el contenido de
+09B), así que el harness sintético-DEV (`onboarding_dev_catalog.nvcat`)
+es el escenario vivo primario.
+
+**Decisión.**
+
+- **Interpretación de datos del catálogo — SIN campo de schema nuevo.**
+  `priceClicks` = el precio de compra de ESA identidad EXACTA;
+  `publiclyPurchasable` = si esa identidad puede aparecer / comprarse en
+  el Shop PÚBLICO; `starterRole` = si la identidad pertenece a la
+  política de starter. El Starter Shop oculto usa `lifecycle ==
+  kCompleted` + `starterRole != kNone` + `priceClicks > 0` + propiedad +
+  reglas del secreto — SIN volver `publiclyPurchasable` true. Se
+  inspeccionaron todos los consumidores: `BuildShopModel` y
+  `EvaluatePurchase` (Shop público) siguen mirando SOLO
+  `publiclyPurchasable`; el loader C++ solo rechaza `publiclyPurchasable
+  && priceClicks == 0` (una entrada NO pública con precio es válida). Es
+  una combinación NUEVA y coherente, no un cambio de semántica.
+
+- **`catalog::StarterShopModel` + `IsStarterShopEligible` (puro, sin
+  SDL).** `BuildStarterShopModel(catalog, lifecycleCompleted, owned,
+  balance)` produce SOLO ofertas legítimas — cada una con la
+  `PetIdentity` EXACTA, `displayName`, `role`, `priceClicks`, `status`
+  (`kAffordable`/`kInsufficientBalance` + `clicksShort`), y
+  `entitlementTarget`. `lifecycleCompleted` es un `bool` ya resuelto por
+  `src/app` (`== persistence::OnboardingLifecycle::kCompleted` EXACTO —
+  ver abajo) para que `src/catalog` NO dependa de `src/persistence`.
+
+- **Algoritmo de elegibilidad (todas las condiciones).**
+  (1) `lifecycleCompleted`; (2) hay una entrada de catálogo con esa
+  identidad EXACTA y `starterRole != kNone`; (3) `priceClicks > 0`;
+  (4) la identidad EXACTA NO está poseída (`Covers` exacto — poseer
+  `{frin, "female"}` NO cubre `{frin, "male"}`); (5) starter SECRETO:
+  además, el owner ya posee ALGUNA autorización del MISMO petId lógico
+  (`OwnsAnyVariantOfPet`); (7) identidad estructuralmente válida. Un
+  starter NORMAL no poseído solo necesita 1..4 + 7. **Genérico por rol +
+  petId — NUNCA `if (petId == "frin")`.**
+
+- **Regla de NO-DIVULGACIÓN del secreto (crítica, brief §3).** Una
+  oferta de un starter SECRETO es elegible SOLO si el owner ya posee al
+  menos una autorización EXACTA del MISMO petId lógico secreto. Así
+  `owns {frin,female}` → puede ver `{frin,male}`; `owns {artu,""}` →
+  Frin NUNCA aparece. **No se persiste ningún flag de "Frin fue
+  revelado a los 44 s" y no se agrega ninguno** — la elegibilidad se
+  deriva de la propiedad, no de un historial inventado.
+
+- **Gate lifecycle == kCompleted EXACTO (brief §5).** NO
+  `OnboardingConsideredComplete` (que es `!= kPending`): un usuario
+  `kLegacyComplete` (migrado / dev / sembrado por catálogo) NUNCA ve el
+  Starter Shop — evita exponer retroactivamente una economía de starters
+  nueva a quien no pasó por el contrato real de elección.
+  `SpikeApp::OnboardingLifecycleCompleted()`.
+
+- **`catalog::EvaluateStarterPurchase` — canal de compra DISTINTO.** NO
+  se reusa `EvaluatePurchase` ignorando `publiclyPurchasable` (eso
+  volvería comprable cualquier identidad privada del catálogo — brief
+  §15). Política pura propia que re-verifica INDEPENDIENTEMENTE lifecycle
+  == kCompleted, rol de starter, precio > 0, regla de variante hermana
+  del secreto, no-poseída, y saldo. El modelo/UI NO es un límite de
+  seguridad. Resultados: `kSuccess` / `kAlreadyOwned` /
+  `kInsufficientBalance` / `kLifecycleNotCompleted` / `kInvalidTarget` /
+  `kNotEligible`. En cualquier fallo el estado resultante == el de
+  entrada, canonicalizado; sin underflow.
+
+- **VARIANTE EXACTA (brief §13).** El objetivo es una `PetIdentity`
+  completa. Comprar la oferta de Frin otorga EXACTAMENTE `{frin,"male"}`
+  o `{frin,"female"}` — NUNCA `{frin,""}` ni ambas. NO se reutiliza
+  nada de la migración histórica de "Frin entero".
+
+- **Aplicación atómica COMPARTIDA (brief §16).** `SpikeApp::
+  ApplyPurchasedState(newBalance, newEntitlements)` — factorizado desde
+  `HandlePurchaseRequest` — muta `clickBalance` + `ownedEntitlements` en
+  el MISMO `AppState`, marca dirty, y flushea de inmediato (un solo
+  `SerializeAppState` + un solo `rename` atómico — DEC-126). El Shop
+  público y el Starter Shop tienen políticas de elegibilidad separadas
+  pero el MISMO camino de aplicación de estado. **Sin bump de schema
+  (AppState sigue en v5).**
+
+- **NO auto-activa (brief §17).** Una compra de starter otorga
+  propiedad; NO reemplaza el pet del escritorio. Tras la compra: balance
+  y Collection se refrescan al instante, la nueva variante es usable
+  desde la Collection (flujo "Use <name>" existente), el pet activo
+  queda igual.
+
+- **UX de acceso — submodo, NO una cuarta pestaña (brief §10/§11).**
+  `SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`.
+  Cuando hay ≥ 1 oferta, el Shop público dibuja UNA línea quieta
+  "Starter choices…" / "Opciones iniciales…" cerca del pie
+  (`ShopLayout::starterAffordanceVisible`, `focusId "starter:enter"`) —
+  sin banner, sin badge, sin toast, sin popup. Con 0 ofertas la
+  afordancia NO existe. Activarla entra a un submodo que la sección
+  Shop POSEE (`ProductWindow::starterShopSubmode_`): la cabecera
+  compartida sigue marcando "Shop", el input se rutea a
+  `StarterShopView` en vez de `ShopView`, y hay un back affordance
+  quieto "← Shop" / "← Tienda" (`focusId "starter:back"`). Cambiar de
+  sección o reabrir la ventana limpia el submodo.
+
+- **Reutilización de layout / pintado (brief §12).** El submodo REUSA la
+  geometría del Shop browse-first — se extrajeron `ComputeBrowseGrid` /
+  `LayoutBrowseGrid` / `LayoutShopRail` / `LayoutShopHero` a helpers
+  públicos en `ShopLayout.h` (una sola copia) — y su pintado — se
+  extrajo `DrawShopTile` / `DrawShopHero` / `FillShopStagePrimitive` a
+  `productui/ShopPaint.{h,cpp}`, usado por `ShopView` y
+  `StarterShopView`. `productui::StarterShopLayout` (puro) opera en
+  IDENTIDADES EXACTAS (`focusId "starteritem:<petId>/<variantId>"`, dos
+  "frin" conviven) y compone el nombre `"Frin · Male"` con las claves
+  `kMale`/`kFemale` (Frin no se traduce). El hero / las tarjetas
+  resuelven la `.nvprev` por `(petId, variantId)` EXACTOS.
+
+- **Teclado / Esc (brief §20).** Submodo browse: Tab/Shift+Tab, flechas,
+  Enter/Espacio selecciona, Esc → Shop público. Seleccionado: "get"
+  separado, Esc → browse. Confirmando: Cancel enfocado primero, Esc
+  cancela la confirmación, Confirm separado, NUNCA se sale del submodo
+  con una confirmación abierta. Esc en el submodo NUNCA cierra la
+  ventana — siempre da un paso atrás.
+
+- **Estado vacío (brief §19).** Comprar la última oferta deja el submodo
+  abierto con una línea quieta "No more starter choices." / "No quedan
+  opciones iniciales." + "← Shop". Sin confetti / toast / logro. Al
+  volver al Shop público la afordancia ya no existe.
+
+- **DEV harness (brief §22/§23).** `assets/dev/onboarding_dev_catalog_manifest.json`
+  gana `price_clicks` de QA en las 5 entradas de starter
+  (`frin/male` = `frin/female` = 150, `artu_dev` = 80, `rato_dev` = 100,
+  `rinrin_dev` = 120) — `publicly_purchasable` sigue en false, así el
+  Shop PÚBLICO del catálogo sintético sigue vacío. Son precios SÓLO DE
+  QA / PROVISIONALES, NO el balanceo V1 de la economía de starters. Los
+  precios públicos Bunny=120 / Nidir=300 NO cambian. El catálogo de
+  producción (`pet_catalog.nvcat`) NO se toca — sus entradas siguen
+  `starterRole: kNone` + precio 0, así el Starter Shop está INERTE en
+  producción hasta que un bloque futuro marque las entradas de Frin.
+  Nuevos hooks: `NIMVLETS_DEV_GRANT_CLICKS`, `NIMVLETS_DEV_STARTER_BUY`,
+  `NIMVLETS_DEV_STARTER_SHOP` / `_OFFER` / `_HOVER` / `_FOCUS` /
+  `_CONFIRM`.
+
+**Verificado.** `tests/StarterShopModelTest.cpp` (14: gate de lifecycle
+pending/legacy/completed, propiedad exacta excluida, normal priced
+elegible, secreto elegible solo con variante hermana, secreto sin
+hermana oculto, el secreto no filtra a un usuario de starter normal,
+precio 0 sin oferta, no-starter nunca ofrecido, identidad de variante
+EXACTA, asequible/insuficiente + clicksShort, orden determinista de
+catálogo, identidad desconocida). `tests/StarterPurchasePolicyTest.cpp`
+(13: variante secreta faltante OK, starter normal OK, secreto sin
+hermana rechazado, lifecycle != completed rechazado, no-starter
+rechazado, precio 0 rechazado, ya poseída rechazada, saldo insuficiente
+rechazado, identidad inválida rechazada, fallo = cero mutación, éxito
+otorga EXACTO a balance 0 sin underflow, dedup canónico + idempotencia,
+modelo y política de acuerdo). `tests/StarterShopLayoutTest.cpp` (12:
+round-trip de focusId, browse con back + ofertas en el focus order,
+etiqueta de variante EXACTA "Frin · Male"/"Frin · Macho", hit-test de
+browse, selección promueve el hero de variante EXACTA + `.nvprev`
+correcta, insuficiente, selección desconocida → browse, confirmación
+EN/ES, confirming ignorado salvo asequible, estado vacío EN/ES,
+resize sin solapes, determinista). `tests/ShopLayoutTest.cpp` (+2:
+sin afordancia por defecto — focus order y hit-test intactos; afordancia
+cuando se pide — al final del focus order, hittest-able, sin scroll,
+EN/ES). `tests/LocalizationTest.cpp` (+1: las 4 claves nuevas EN/ES).
+`ShopModelTest` / `PurchasePolicyTest` / `CollectionModelTest` de Block
+07/09C sin cambios y verdes. 488 tests C++ (era 446), 162 Python.
+Debug + Release + universal2 (lipo: x86_64 arm64),
+`nimvlets_macos_text_check` PASS, `nimvlets_macos_clickthrough_check`
+PASS (sin cambios de plataforma). Smokes en vivo (Retina, appdata
+aislado): usuario legacy → Shop público SIN afordancia; DEV elige
+frin/female → afordancia "Starter choices…", submodo con oferta
+frin/male + 3 dev normales; frin/male seleccionado → hero (lobo blanco,
+"White wolf", "150 clicks", "Get Frin · Male"); confirmación "Spend 150
+clicks to add Frin · Male…"; `NIMVLETS_DEV_STARTER_BUY=frin/male` →
+balance 500→350, ambas variantes EXACTAS persistidas, activo sin
+cambiar, la oferta desaparece; comprar las 4 → "No more starter
+choices."; Collection tras la compra muestra Frin con Male/Female ambas
+poseídas y activables; ES completo ("Tienda", "← Tienda", "Opciones
+iniciales", "Frin · Macho", "Obtener Frin · Macho"); Nidir público a
+300 sigue comprable; `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6. Congelado sin
+tocar: onboarding de producción (deshabilitado), branch
+`block/09b-starter-content-production-onboarding`, Nidir, la deuda
+`lie_to_sit` de Frin, contenido de animación, el catálogo de
+producción.

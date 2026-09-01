@@ -311,6 +311,17 @@ testeable con timestamps fabricados exactamente igual que
   `SerializeAppState` + un solo `rename` atómico persisten los dos
   JUNTOS. El per-click NO cambia: sigue con `MarkDirty` + debounce, no
   se convierte en una escritura a disco por click (brief §13).
+- **El SHOP OCULTO DE STARTERS (Block 10) reusa exactamente ese camino.**
+  `SpikeApp::ApplyPurchasedState(newBalance, newEntitlements)` se
+  factorizó desde `HandlePurchaseRequest`: muta `clickBalance` +
+  `ownedEntitlements` en el mismo `AppState` + `MarkDirty` + flush
+  inmediato. El Shop público y el Starter Shop tienen políticas de
+  ELEGIBILIDAD separadas (`catalog::EvaluatePurchase` vs.
+  `catalog::EvaluateStarterPurchase`) pero el MISMO camino atómico de
+  APLICACIÓN. **Sin bump de schema** — AppState sigue en v5; la compra
+  de starter otorga una autorización de VARIANTE EXACTA (`{frin,"male"}`
+  o `{frin,"female"}`, nunca `{frin,""}`, nunca ambas — DEC-137) y NO
+  cambia el pet activo (`activePetId`/`activeVariantId` intactos).
 
 `PersistenceScheduler::NextFlushDeadlineMs()` se integra en el cálculo
 de deadline de `SDL_WaitEventTimeout` que ya existe en
@@ -326,6 +337,7 @@ también despierta cuando hay un flush pendiente por vencer.
 | Arranque | Resuelve el directorio de app-data (§2); carga el estado existente o defaults; **si el save venía de un schema en disco < el actual, reconcilia la propiedad legacy** con una tabla histórica CONGELADA (`ExpandHistoricalWholePetEntitlements`, sin catálogo — DEC-129) y siembra si hace falta; resuelve el pet activo contra el catálogo Y contra la PROPIEDAD (`catalog::ResolveOwnedActiveIdentity` — un activo no autorizado cae a uno que sí lo está, **sin otorgar nada**, DEC-128); sincroniza `activePetId`/`activeVariantId` con lo que realmente se cargó (marca dirty si cambió); si había una posición de ventana guardada, abre ahí en vez de centrada. |
 | Click | `clickCount_` (diagnóstico solo de sesión) y `appState_.clickBalance` (persistido) se incrementan ambos; se marca el scheduler como dirty. Deliberadamente dos contadores separados — ver `docs/DECISION_LOG.md` DEC-026. |
 | **Compra del Shop (Block 07)** | `EvaluatePurchase` (puro); si es `kSuccess`, `appState_.clickBalance` -= precio y `appState_.ownedEntitlements` += la autorización, en el mismo struct; se marca dirty y se **flushea de inmediato** (un solo write atómico — DEC-126). Sin `kSuccess` no se toca nada. |
+| **Compra del Starter Shop oculto (Block 10)** | `EvaluateStarterPurchase` (puro, canal DISTINTO — re-checa lifecycle == kCompleted + rol de starter + regla del secreto); si es `kSuccess`, el MISMO `SpikeApp::ApplyPurchasedState` que el Shop público (balance -= precio, `ownedEntitlements` += la VARIANTE EXACTA, flush inmediato). El pet activo NO cambia (no auto-activa — DEC-137). Sin bump de schema. |
 | **Preferencia cambiada (Block 08 — menú rápido *o* sección Settings)** | `SpikeApp::Apply{Size,Opacity,Lock,UiLanguage}` (la ÚNICA ruta, DEC-130) escribe UN campo de `appState_` (`sizeChoice` / `opacityPercent` / `lockPosition` / `language`, con la normalización de siempre) y marca el scheduler como dirty. Usa el **debounce normal de ~2s** — NO se flushea de inmediato (una preferencia no es propiedad; perder ~2s de un cambio de tamaño es trivial). **Sin cambio de schema**: los cuatro campos ya existen desde v2/v3. La economía (`clickBalance`, `ownedEntitlements`, `ownershipSeeded`) y el pet activo no se tocan. |
 | Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |
 | Despertar del event loop, deadline de flush alcanzado | `FlushPersistedState()` — no hace nada salvo que esté realmente dirty. |
