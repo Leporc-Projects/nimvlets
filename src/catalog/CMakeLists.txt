@@ -16,6 +16,10 @@ add_library(nimvlets_catalog STATIC
   PurchasePolicy.cpp
   OnboardingPolicy.h
   OnboardingPolicy.cpp
+  StarterShopModel.h
+  StarterShopModel.cpp
+  StarterPurchasePolicy.h
+  StarterPurchasePolicy.cpp
 )
 
 target_include_directories(nimvlets_catalog PUBLIC ${CMAKE_SOURCE_DIR}/src)
