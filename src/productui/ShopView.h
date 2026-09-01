@@ -16,10 +16,10 @@ namespace nimvlets::productui {
 
 // Lo que la vista del Shop le pide a src/app: comprar la IDENTIDAD de
 // catálogo `{petId, variantId}` (tras la confirmación inline). Simétrico
-// a ActivateRequest. En Block 07 `variantId` siempre viene "" (el Shop
-// solo ofrece pets sin variantes), pero el campo existe para que la
-// compra por variante (shop oculto, futuro) no necesite un rediseño —
-// sale de ShopItem::entitlementTarget, no de una suposición sobre petId.
+// a ActivateRequest. Hoy `variantId` siempre viene "" (el Shop solo
+// ofrece pets sin variantes), pero el campo existe para que la compra
+// por variante (shop oculto, futuro) no necesite un rediseño — sale de
+// ShopItem::entitlementTarget, no de una suposición sobre petId.
 struct PurchaseRequest {
     std::string petId;
     std::string variantId;
@@ -34,17 +34,28 @@ struct ShopViewResult {
     ProductSection targetSection = ProductSection::kCollection;
 };
 
-// La sección SHOP del Product UI (Block 07). Misma arquitectura que
-// CollectionView: input (mouse/teclado/rueda) sobre un layout puro
-// (ShopLayout) + un anillo de foco (FocusList) + un flag `dirty_`
-// (event-driven, sin loop). Reusa TextCache / PetPreviewCache /
-// UiPainter y el hero stage + acento por pet de la Collection. Sin
-// ventana ni event loop propios — ProductWindow la maneja.
+// La sección SHOP del Product UI. Misma arquitectura que CollectionView:
+// input (mouse/teclado/rueda) sobre un layout puro (ShopLayout) + un
+// anillo de foco (FocusList) + un flag `dirty_` (event-driven, sin
+// loop). Reusa TextCache / PetPreviewCache / UiPainter y el hero stage +
+// acento por pet de la Collection. Sin ventana ni event loop propios —
+// ProductWindow la maneja.
 //
-// La confirmación de compra es un estado LOCAL de la vista
-// (`confirming_`): un click en "Get <pet>" la abre; un segundo click
-// deliberado en "Confirmar" emite hasPurchase; "Cancelar" o Escape la
-// cierran sin tocar nada (brief §12).
+// Block 09C — BROWSE-FIRST (DEC-135). Tres cosas distintas, nunca una
+// sola variable:
+//   - `hoverId_`      : la tarjeta bajo el mouse — revela info liviana,
+//                       NO selecciona, NO compra (brief §6).
+//   - `selectedPetId_`: "" => modo BROWSE (estantería de personajes, sin
+//                       hero); un petId => modo SELECTED (ese personaje
+//                       es el hero grande + rail compacto). Un click /
+//                       Enter en una tarjeta SELECCIONA — no compra.
+//   - `confirming_`   : sub-estado de SELECTED — la confirmación de
+//                       compra inline. Un click en "Get <pet>" la abre;
+//                       un segundo click deliberado en "Confirmar" emite
+//                       hasPurchase; "Cancelar" o Escape la cierran sin
+//                       tocar nada (brief §8).
+// Ninguna selección se persiste: cerrar/reabrir el Product UI, o volver
+// a entrar a la sección, devuelve el Shop a modo BROWSE (brief §13).
 class ShopView {
  public:
     void SetModel(catalog::ShopModel model, std::uint64_t clickBalance);
@@ -62,12 +73,13 @@ class ShopView {
     bool Dirty() const { return dirty_; }
     void ClearDirty() { dirty_ = false; }
 
-    // Llamado por ProductWindow al ENTRAR a la sección Shop: reinicia el
-    // foco a la primera pestaña y limpia el hover (para que el foco de
-    // teclado arranque en un lugar predecible — brief §17).
+    // Llamado por ProductWindow al ENTRAR a la sección Shop: vuelve a
+    // modo BROWSE, reinicia el foco a la pestaña "Shop" y limpia hover /
+    // confirmación (punto de partida predecible — brief §13/§17).
     void OnEnterSection();
 
     bool Confirming() const { return confirming_; }
+    bool Browsing() const { return selectedPetId_.empty(); }
 
     // Solo-DEV (QA / capturas).
     void SelectHeroForQA(const std::string& petId);
@@ -77,6 +89,13 @@ class ShopView {
     }
     void SetGalleryHoverForQA(const std::string& petId) {
         hoverId_ = petId.empty() ? std::string() : ("shopitem:" + petId);
+        dirty_ = true;
+    }
+    // Solo-DEV: pone el foco de TECLADO sobre una tarjeta (browse o rail)
+    // para la captura de "keyboard-focused candidate" (brief §24).
+    void SetTileKeyboardFocusForQA(const std::string& petId) {
+        keyboardFocus_ = true;
+        focus_.Focus(petId.empty() ? std::string() : ("shopitem:" + petId));
         dirty_ = true;
     }
 
@@ -94,7 +113,7 @@ class ShopView {
     core::Language language_ = core::Language::kEn;
 
     FocusList focus_;
-    std::string selectedPetId_;  // "" => primer pet del Shop
+    std::string selectedPetId_;  // "" => modo BROWSE
     bool confirming_ = false;
 
     float scrollY_ = 0.0f;

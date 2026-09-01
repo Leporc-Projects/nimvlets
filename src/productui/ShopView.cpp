@@ -23,6 +23,7 @@ constexpr unsigned char kStagePrimaryAlpha = 92;
 constexpr unsigned char kStageSecondaryAlpha = 52;
 constexpr unsigned char kOwnedArtAlpha = 235;
 constexpr unsigned char kPedestalAlpha = 52;
+constexpr unsigned char kRailPedestalAlpha = 44;
 
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
@@ -38,6 +39,21 @@ void FillStagePrimitive(UiPainter& painter, const UiRect& r, bool angular, UiCol
     }
 }
 
+// Color de la línea de info liviana revelada bajo una tarjeta de browse:
+// distingue asequible / insuficiente / poseído "quietly" (brief §6) —
+// sin rojo, sin "no te alcanza".
+UiColor RevealColor(ShopItemStatus status, UiColor accentLine) {
+    switch (status) {
+        case ShopItemStatus::kOwned:
+            return accentLine;
+        case ShopItemStatus::kAffordable:
+            return theme::kTextMuted;
+        case ShopItemStatus::kInsufficientBalance:
+            return theme::kTextFaint;
+    }
+    return theme::kTextMuted;
+}
+
 }  // namespace
 
 void ShopView::SetModel(catalog::ShopModel model, std::uint64_t clickBalance) {
@@ -48,11 +64,12 @@ void ShopView::SetModel(catalog::ShopModel model, std::uint64_t clickBalance) {
         selectedPetId_.clear();
     }
     // Una confirmación abierta se cierra si su pet ya NO es asequible
-    // (típicamente porque la compra tuvo éxito y ahora está poseído —
-    // brief §27: "successful confirm clears confirmation").
+    // (típicamente porque la compra tuvo éxito y ahora está poseído), o
+    // si de algún modo ya no hay un personaje seleccionado.
     if (confirming_) {
         const ShopLayout layout = BuildLayout(viewportW_, viewportH_);
-        if (layout.hero.status != ShopItemStatus::kAffordable) {
+        if (layout.presentation != ShopPresentation::kSelected ||
+            layout.hero.status != ShopItemStatus::kAffordable) {
             confirming_ = false;
         }
     }
@@ -70,12 +87,15 @@ void ShopView::SetLanguage(core::Language language) {
 }
 
 void ShopView::OnEnterSection() {
-    // Entrar a la sección arranca con el foco en la pestaña "Shop" y sin
-    // confirmación pendiente ni hover, para un punto de partida
-    // predecible (brief §17).
+    // Entrar a la sección arranca en modo BROWSE (sin selección), con el
+    // foco en la pestaña "Shop" y sin confirmación ni hover — un punto de
+    // partida predecible (brief §13/§17). Ninguna selección del Shop se
+    // recuerda entre visitas.
+    selectedPetId_.clear();
     confirming_ = false;
     hoverId_.clear();
     keyboardFocus_ = false;
+    scrollY_ = 0.0f;
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
     focus_.Focus("nav:shop");
     dirty_ = true;
@@ -102,11 +122,16 @@ std::string ShopView::HoverPetId() const {
 }
 
 void ShopView::SelectHero(const std::string& petId) {
+    // Un click / Enter en una tarjeta SELECCIONA (browse -> selected), o
+    // cambia de personaje seleccionado — NUNCA compra, NUNCA muta el
+    // wallet o la propiedad (brief §7/§8). Lo único que cambia es qué
+    // personaje es el hero.
     if (model_.Find(petId) == nullptr || petId == selectedPetId_) {
         return;
     }
     selectedPetId_ = petId;
     confirming_ = false;  // cambiar de hero descarta cualquier confirmación
+    scrollY_ = 0.0f;
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
     dirty_ = true;
 }
@@ -129,6 +154,9 @@ ShopViewResult ShopView::ActivateWidget(const std::string& focusId) {
         return r;
     }
     if (StartsWith(focusId, "shopitem:")) {
+        // Selecciona el personaje. El foco se queda en esta MISMA tarjeta
+        // (ahora en el rail) — la selección nunca salta el foco a la
+        // confirmación de compra (brief §12).
         SelectHero(PetIdFromShopFocusId(focusId));
         r.dirty = true;
         return r;
@@ -169,6 +197,8 @@ ShopViewResult ShopView::OnMouseMove(float x, float y) {
     ShopViewResult r;
     const ShopLayout layout = BuildLayout(viewportW_, viewportH_);
     const std::string hit = layout.HitTest(x, y);
+    // Redibuja SOLO si el objetivo de hover cambió de verdad (brief §15):
+    // el Shop en reposo es efectivamente event-driven.
     if (hit != hoverId_) {
         hoverId_ = hit;
         dirty_ = true;
@@ -235,7 +265,7 @@ ShopViewResult ShopView::OnKey(int sdlKeycode, bool shiftHeld) {
         case SDLK_ESCAPE:
             if (confirming_) {
                 // Esc cancela la confirmación, no cierra la ventana
-                // (brief §23).
+                // (semántica preservada de Block 07, brief §12).
                 confirming_ = false;
                 SyncFocusList(BuildLayout(viewportW_, viewportH_));
                 focus_.Focus("get");
@@ -258,6 +288,46 @@ ShopViewResult ShopView::OnViewportChanged() {
     return r;
 }
 
+namespace {
+
+// Dibuja una tarjeta de personaje (browse o rail). `revealVisible` pinta
+// la línea de info liviana; en el rail no hay línea aparte (se pasa
+// false) y `selectedMark` subraya la tarjeta abierta.
+void DrawShopTile(
+    UiPainter& painter, TextCache& text, PetPreviewCache& previews, const ShopTile& t,
+    double nameSize, unsigned char pedestalAlpha, bool hovered, bool focused, bool revealVisible,
+    bool selectedMark) {
+    if (hovered) {
+        painter.FillRoundRect(t.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
+    }
+    if (focused) {
+        painter.StrokeRoundRect(t.cell.Inset(2.0f), 12.0f, 2.0f, t.accentLine);
+    }
+    painter.FillRoundRect(t.art.Inset(-5.0f), 12.0f, t.pedestalTint.WithAlpha(pedestalAlpha));
+
+    SDL_Texture* art = previews.Get(t.petId, std::string());
+    painter.DrawTextureContained(art, t.art,
+                                 t.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255);
+
+    DrawText(painter, text, t.displayName, nameSize, TextWeight::kMedium, theme::kText,
+             t.name.CenterX(), t.name.y + static_cast<float>(nameSize), HAlign::kCenter,
+             static_cast<int>(t.cell.w - 6.0f));
+
+    if (selectedMark) {
+        const float ruleW = std::min(28.0f, t.cell.w * 0.34f);
+        painter.FillRect(UiRect{t.name.CenterX() - ruleW * 0.5f, t.name.Bottom() + 3.0f, ruleW, 2.0f},
+                         t.accentLine);
+    }
+
+    if (revealVisible && !t.revealText.empty()) {
+        DrawText(painter, text, t.revealText, type::kGalleryStatus, TextWeight::kRegular,
+                 RevealColor(t.status, t.accentLine), t.revealAnchor.CenterX(),
+                 t.revealAnchor.y + 11.0f, HAlign::kCenter, static_cast<int>(t.cell.w - 6.0f));
+    }
+}
+
+}  // namespace
+
 void ShopView::Render(
     UiPainter& painter, TextCache& text, PetPreviewCache& previews, float viewportW, float viewportH) {
     viewportW_ = viewportW;
@@ -273,14 +343,37 @@ void ShopView::Render(
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
+    // --- Shop vacío ------------------------------------------------
     if (layout.empty) {
+        DrawText(painter, text, layout.emptyText, type::kSectionTitle, TextWeight::kRegular,
+                 theme::kTextFaint, layout.emptyAnchor.CenterX(), layout.emptyAnchor.y + 16.0f,
+                 HAlign::kCenter, static_cast<int>(layout.emptyAnchor.w));
         painter.PopClip();
         return;
     }
 
-    painter.FillRect(layout.galleryShelf, theme::kGalleryShelf);
+    // --- BROWSE: la estantería de personajes es todo el contenido ---
+    if (layout.presentation == ShopPresentation::kBrowse) {
+        DrawText(painter, text, layout.browseHeading, type::kSectionSub, TextWeight::kRegular,
+                 theme::kTextMuted, layout.browseHeadingAnchor.CenterX(),
+                 layout.browseHeadingAnchor.y + 13.0f, HAlign::kCenter,
+                 static_cast<int>(layout.browseHeadingAnchor.w));
 
-    // --- Hero ---
+        for (const ShopTile& t : layout.tiles) {
+            const bool hovered = hoverId_ == t.focusId;
+            const bool focused = focusedId == t.focusId;
+            // El hover / foco revela la info liviana (precio o propiedad);
+            // sin hover, la tarjeta es solo arte + nombre (brief §5/§6).
+            DrawShopTile(painter, text, previews, t, type::kGalleryName, kPedestalAlpha, hovered,
+                         focused, /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
+        }
+        painter.PopClip();
+        return;
+    }
+
+    // --- SELECTED: hero grande + rail compacto de la estantería ----
+    painter.FillRect(layout.shelfBackground, theme::kGalleryShelf);
+
     const ShopHero& h = layout.hero;
     if (!h.petId.empty()) {
         FillStagePrimitive(painter, h.stageSecondary, h.accent.angularShape,
@@ -289,8 +382,7 @@ void ShopView::Render(
                            h.accent.shapeTint.WithAlpha(kStagePrimaryAlpha));
 
         SDL_Texture* art = previews.Get(h.petId, std::string());
-        const unsigned char artAlpha =
-            h.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255;
+        const unsigned char artAlpha = h.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255;
         painter.DrawTextureContained(art, h.art, artAlpha);
 
         DrawText(painter, text, h.displayName, type::kHeroName, TextWeight::kSemibold, theme::kText,
@@ -307,20 +399,16 @@ void ShopView::Render(
                             h.descriptionAnchor.w, 17.0f, 3);
         }
 
-        // Precio (salvo que ya esté en la colección).
         if (h.status != ShopItemStatus::kOwned) {
             DrawText(painter, text, h.priceText, type::kHeroStatus, TextWeight::kMedium, theme::kText,
                      h.priceAnchor.x, h.priceAnchor.y + 12.0f, HAlign::kLeft);
         }
 
         if (h.confirm.visible) {
-            // Confirmación inline: pregunta + Cancelar / Confirmar. No es
-            // un modal gigante — cabe en la columna del hero (brief §12).
             DrawTextWrapped(painter, text, h.confirm.prompt, type::kHeroBody, TextWeight::kRegular,
                             theme::kText, h.confirm.promptAnchor.x, h.confirm.promptAnchor.y + 13.0f,
                             h.confirm.promptAnchor.w, 16.0f, 2);
 
-            // Cancelar: contorno discreto.
             painter.StrokeRoundRect(h.confirm.cancelButton, 8.0f, 1.5f, theme::kHairline);
             if (focusedId == h.confirm.cancelFocusId) {
                 painter.StrokeRoundRect(h.confirm.cancelButton.Inset(-3.0f), 11.0f, 2.0f, theme::kText);
@@ -329,8 +417,6 @@ void ShopView::Render(
                      theme::kTextMuted, h.confirm.cancelButton.CenterX(),
                      h.confirm.cancelButton.CenterY() + 4.5f, HAlign::kCenter);
 
-            // Confirmar: relleno + tinta del acento del pet, igual que el
-            // botón primario de la Collection — nunca casi-negro.
             painter.FillRoundRect(h.confirm.confirmButton, 8.0f, h.accent.softFill);
             painter.StrokeRoundRect(h.confirm.confirmButton, 8.0f, 1.5f, h.accent.line);
             if (focusedId == h.confirm.confirmFocusId) {
@@ -348,9 +434,6 @@ void ShopView::Render(
             DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, h.accent.deepInk,
                      h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter);
         } else if (h.showStatusLine) {
-            // kOwned: "In your collection" (punto de acento). kInsufficient:
-            // "Need N more clicks", en tono atenuado — sin acción, sin
-            // ninguna insinuación de "gana clics así" (brief §15).
             float statusX = h.statusAnchor.x;
             const bool owned = h.status == ShopItemStatus::kOwned;
             if (owned) {
@@ -363,31 +446,13 @@ void ShopView::Render(
         }
     }
 
-    // --- Divisor + gallery ---
     painter.FillRect(layout.dividerRect, theme::kHairline);
 
-    for (const ShopGalleryItem& g : layout.gallery) {
-        const bool hovered = hoverId_ == g.focusId;
-        const bool focused = focusedId == g.focusId;
-        if (hovered) {
-            painter.FillRoundRect(g.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
-        }
-        if (focused) {
-            painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, g.accentLine);
-        }
-        painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f, g.pedestalTint.WithAlpha(kPedestalAlpha));
-
-        SDL_Texture* art = previews.Get(g.petId, std::string());
-        painter.DrawTextureContained(art, g.art,
-                                     g.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255);
-
-        DrawText(painter, text, g.displayName, type::kGalleryName, TextWeight::kMedium, theme::kText,
-                 g.name.CenterX(), g.name.y + 13.0f, HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
-        const UiColor secColor =
-            g.status == ShopItemStatus::kOwned ? g.accentLine : theme::kTextMuted;
-        DrawText(painter, text, g.secondaryText, type::kGalleryStatus, TextWeight::kRegular, secColor,
-                 g.secondary_.CenterX(), g.secondary_.y + 11.0f, HAlign::kCenter,
-                 static_cast<int>(g.cell.w - 6.0f));
+    for (const ShopTile& t : layout.rail) {
+        const bool hovered = hoverId_ == t.focusId;
+        const bool focused = focusedId == t.focusId;
+        DrawShopTile(painter, text, previews, t, type::kGalleryStatus, kRailPedestalAlpha, hovered,
+                     focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
     }
 
     painter.PopClip();

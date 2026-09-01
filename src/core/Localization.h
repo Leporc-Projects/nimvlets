@@ -61,6 +61,12 @@ enum class StringKey {
     kConfirm,              // "Confirm" / "Confirmar"
     kSpendPromptOne,       // "Spend 1 click to add {pet} to your collection?" / "¿Gastar 1 clic para añadir {pet} a tu colección?"
     kSpendPromptMany,      // "Spend {n} clicks to add {pet} to your collection?" / "¿Gastar {n} clics para añadir {pet} a tu colección?"
+    // Shop browse-first (Block 09C). El Shop abre en modo BROWSE: una
+    // estantería de personajes que se puede conocer; solo tras
+    // seleccionar uno aparece el hero grande. Ver docs/PRODUCT_UI.md §16
+    // y DEC-135. "Nimvlets" nunca se traduce.
+    kShopBrowseHeading,    // "Nimvlets you can meet" / "Nimvlets que puedes conocer"
+    kShopEmpty,            // "No Nimvlets to show yet." / "Todavía no hay Nimvlets para mostrar."
 
     // Menú rápido
     kShowNimvlet,      // "Show Nimvlet" / "Mostrar Nimvlet"

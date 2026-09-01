@@ -35,6 +35,8 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
                                "¿Gastar 1 clic para añadir {pet} a tu colección?"},
     /* kSpendPromptMany */     {"Spend {n} clicks to add {pet} to your collection?",
                                "¿Gastar {n} clics para añadir {pet} a tu colección?"},
+    /* kShopBrowseHeading */   {"Nimvlets you can meet", "Nimvlets que puedes conocer"},
+    /* kShopEmpty */           {"No Nimvlets to show yet.", "Todavía no hay Nimvlets para mostrar."},
 
     /* kShowNimvlet */         {"Show Nimvlet", "Mostrar Nimvlet"},
     /* kHideNimvlet */         {"Hide Nimvlet", "Ocultar Nimvlet"},

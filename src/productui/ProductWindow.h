@@ -140,11 +140,11 @@ class ProductWindow {
         view_.SetVariantKeyboardFocusForQA(variantId);
     }
 
-    // Solo-DEV (QA / capturas): sección visible, hero del Shop, y estado
-    // de confirmación de compra del Shop (Block 07). Los valores de
-    // Settings los empuja src/app (preferencias reales, vía
-    // NIMVLETS_DEV_PREFS por la ruta canónica); acá solo el foco de
-    // teclado sobre una fila.
+    // Solo-DEV (QA / capturas): sección visible, personaje seleccionado
+    // del Shop (browse-first: sin selección => modo BROWSE), y estado de
+    // confirmación de compra. Los valores de Settings los empuja src/app
+    // (preferencias reales, vía NIMVLETS_DEV_PREFS por la ruta canónica);
+    // acá solo el foco de teclado sobre una fila.
     void ShowSectionForQA(ProductSection section);
 
     // Solo-DEV (QA / smoke): sintetiza un click de mouse REAL sobre la
@@ -161,6 +161,9 @@ class ProductWindow {
     void SelectShopHeroForQA(const std::string& petId) { shopView_.SelectHeroForQA(petId); }
     void SetShopConfirmingForQA(bool confirming) { shopView_.SetConfirmingForQA(confirming); }
     void SetShopGalleryHoverForQA(const std::string& petId) { shopView_.SetGalleryHoverForQA(petId); }
+    void SetShopTileKeyboardFocusForQA(const std::string& petId) {
+        shopView_.SetTileKeyboardFocusForQA(petId);
+    }
     void SetSettingsKeyboardFocusForQA(const std::string& rowFocusId) {
         settingsView_.SetKeyboardFocusForQA(rowFocusId);
     }

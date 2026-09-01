@@ -2113,17 +2113,26 @@ int SpikeApp::Run() {
                 tok.clear();
             }
         }
-        // NIMVLETS_DEV_SHOP_PET=<petId> — hero del Shop.
+        // NIMVLETS_DEV_SHOP_PET=<petId> — browse-first (DEC-135): abre el
+        // Shop directamente con ESE personaje SELECCIONADO (hero grande +
+        // detalle). Sin la variable, el Shop abre en modo BROWSE normal.
         if (const char* sp = std::getenv("NIMVLETS_DEV_SHOP_PET"); sp != nullptr && sp[0] != '\0') {
             productWindow_.SelectShopHeroForQA(sp);
         }
-        // NIMVLETS_DEV_SHOP_HOVER=<petId> — hover sobre una entrada de la
-        // gallery del Shop.
+        // NIMVLETS_DEV_SHOP_HOVER=<petId> — hover sobre una tarjeta del
+        // Shop (rejilla de browse, o rail si hay un personaje
+        // seleccionado): revela su info liviana (precio / propiedad).
         if (const char* sh = std::getenv("NIMVLETS_DEV_SHOP_HOVER"); sh != nullptr && sh[0] != '\0') {
             productWindow_.SetShopGalleryHoverForQA(sh);
         }
+        // NIMVLETS_DEV_SHOP_FOCUS=<petId> — foco de TECLADO sobre una
+        // tarjeta del Shop (captura de "keyboard-focused candidate").
+        if (const char* sk = std::getenv("NIMVLETS_DEV_SHOP_FOCUS"); sk != nullptr && sk[0] != '\0') {
+            productWindow_.SetShopTileKeyboardFocusForQA(sk);
+        }
         // NIMVLETS_DEV_SHOP_CONFIRM=1 — abre la confirmación de compra
-        // inline del hero del Shop (captura del estado de confirmación).
+        // inline (necesita NIMVLETS_DEV_SHOP_PET: la confirmación solo
+        // existe con un personaje seleccionado y asequible).
         if (const char* sc = std::getenv("NIMVLETS_DEV_SHOP_CONFIRM");
             sc != nullptr && sc[0] != '\0' && sc[0] != '0') {
             productWindow_.SetShopConfirmingForQA(true);
