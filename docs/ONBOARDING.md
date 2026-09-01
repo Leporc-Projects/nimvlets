@@ -516,20 +516,25 @@ escritorio NO cambia. Balance y Collection se refrescan al instante; la
 nueva variante es usable desde el flujo "Use <name>" de la Collection
 sin reiniciar.
 
-### 15.5 Acceso — submodo, NO una cuarta pestaña (ver `docs/PRODUCT_UI.md` §21)
+### 15.5 Acceso — un HOTSPOT INVISIBLE, NO una cuarta pestaña (ver `docs/PRODUCT_UI.md` §21; DEC-138)
 
-`SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`.
-Cuando hay ≥ 1 oferta, el Shop público dibuja UNA línea quieta "Starter
-choices…" / "Opciones iniciales…" cerca del pie. Activarla entra a un
-submodo que la sección Shop POSEE: la cabecera sigue marcando "Shop", y
-hay un back affordance "← Shop" / "← Tienda". Con 0 ofertas la
-afordancia NO existe. Cambiar de sección o reabrir la ventana limpia el
-submodo. El submodo reusa la geometría (`ComputeBrowseGrid` /
-`LayoutBrowseGrid` / `LayoutShopRail` / `LayoutShopHero`, expuestos en
-`ShopLayout.h`) y el pintado (`ShopPaint`) del Shop browse-first — una
-sola copia; opera en identidades EXACTAS (`focusId
-"starteritem:<petId>/<variantId>"`) y compone `"Frin · Male"` con
-`kMale`/`kFemale`.
+`SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`. El
+owner rechazó la línea VISIBLE "Starter choices…" de la primera versión:
+el acceso es un **HOTSPOT INVISIBLE** — un click primario en una región
+de 48×48 pt anclada a la esquina **inferior derecha** del Shop público.
+No se dibuja, sin texto / foco / hover / cursor / Tab. `ProductWindow`
+lo **arma** sii `!starterShopModel.Empty()` (≥ 1 oferta legítima — la
+elegibilidad ya la resolvió el modelo); con 0 ofertas un click en la
+esquina es no-op total. El hotspot NUNCA cambia la elegibilidad: es solo
+una entrada oculta al modelo YA filtrado. Entra a un submodo que la
+sección Shop POSEE: la cabecera sigue marcando "Shop", y hay un back
+affordance "← Shop" / "← Tienda" (ese SÍ aprobado). Cambiar de sección o
+reabrir la ventana limpia el submodo. El submodo reusa la geometría
+(`ComputeBrowseGrid` / `LayoutBrowseGrid` / `LayoutShopRail` /
+`LayoutShopHero`, expuestos en `ShopLayout.h`) y el pintado
+(`ShopPaint`) del Shop browse-first — una sola copia; opera en
+identidades EXACTAS (`focusId "starteritem:<petId>/<variantId>"`) y
+compone `"Frin · Male"` con `kMale`/`kFemale`.
 
 ### 15.6 Producción — INTACTA
 

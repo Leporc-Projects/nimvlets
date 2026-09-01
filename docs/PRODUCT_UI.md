@@ -843,6 +843,27 @@ dos secciones. Reemplaza al viejo título/subtítulo de sección de Block
   alcanza solo desde la navegación del Product UI, no hay un item
   "Shop…" en el `NSStatusItem`.
 
+### 17.1 El balance de clics de la cabecera es CANÓNICO (Block 10, corrección de QA del owner — DEC-138)
+
+El balance mostrado tenía **autoridades por-sección**: `CollectionView`
+y `ShopView` guardaban cada uno una copia (empujada por
+`SetModel(model, clickBalance)`), y **Settings no tenía ninguna** —
+`SettingsView::Render` pasaba `clickBalance = 0` hard-codeado desde
+Block 08. Resultado: con 500 clics reales, Collection y Shop mostraban
+"500 clicks" y Settings "0 clicks".
+
+Ahora **`ProductWindow` posee el único `clickBalance_`** (lo fija
+`SetModels`) y `DrawFrame()` lo pasa a `Render()` de la sección visible
+— las CUATRO. El balance YA NO viaja con el modelo (`*View::SetModel`
+pierde el parámetro; cada `Render(...)` gana un `clickBalance` trailing,
+que el compilador obliga a pasar). El texto se formatea UNA vez en la
+capa PURA: `BuildSectionHeaderLayout(..., clickBalance)` produce
+`SectionHeaderLayout::clicksText` (`FormatClickCount`), y
+`DrawSectionHeader` solo lo dibuja (perdió su parámetro de balance y de
+idioma — todo el texto ya viene localizado en `header`). Mismo espíritu
+que la ruta canónica de preferencias de Block 08 (DEC-130): una fuente
+de verdad, todas las secciones consumen la MISMA. Sin bump de schema.
+
 ## 18. Wallet + transacción de compra
 
 Clicks son la **única** moneda (AGENTS.md §2). Block 07 los vuelve
@@ -1076,21 +1097,46 @@ starter SECRETO (Frin) solo es elegible si el owner ya posee alguna
 variante hermana del mismo petId lógico — así Frin NUNCA se le revela a
 quien nunca lo descubrió. No hay ni se persiste un flag de "revelado".
 
-### 21.2 Acceso — NO una cuarta pestaña (brief §10/§11)
+### 21.2 Acceso — un HOTSPOT INVISIBLE, NO una cuarta pestaña ni una pista visible (brief §10/§11; DEC-137 → corregido por DEC-138)
 
 `SectionNav` sigue siendo EXACTAMENTE `Collection · Shop · Settings`.
-Cuando `BuildStarterShopModel` tiene ≥ 1 oferta, el Shop **público**
-dibuja UNA línea quieta cerca del pie:
 
-- EN: `Starter choices…`  ·  ES: `Opciones iniciales…`
+> **DEC-138 (corrección de QA del owner).** La primera versión de Block
+> 10 mostraba una línea quieta "Starter choices…" / "Opciones iniciales…"
+> cerca del pie del Shop público. El owner la RECHAZÓ: quiere que el
+> Shop oculto sea **de verdad oculto** — sin texto, botón, link,
+> subrayado, badge, hint, tooltip, cursor especial, hover, ni ítem de
+> foco / Tab stop que revele la feature por navegación normal.
 
-(`ShopLayout::starterAffordanceVisible`, `focusId "starter:enter"`, al
-FINAL del focus order, en `kTextFaint`). **Sin** banner, badge, toast,
-popup, notificación ni "secret unlocked". Con 0 ofertas la afordancia
-NO existe. `ShopView::SetStarterAffordanceVisible(bool)` la controla;
-`src/app` la pone en `!starterShopModel.Empty()`.
+El acceso es un **HOTSPOT INVISIBLE**: un click **primario** en una
+región cuadrada de **48×48 pt** anclada a la esquina **INFERIOR
+DERECHA** del Shop público abre el submodo. `ShopLayout` la expone como
+`starterHotspotArmed` + `starterHotspotRect` (coords de VIEWPORT, sin
+scroll — es "chrome secreto", no contenido; `ArmStarterHotspot` la
+recalcula en cada `BuildShopLayout`, así el resize la reubica) +
+`HitStarterHotspot(x, y)` — una consulta **SEPARADA** de `HitTest`, que
+**NUNCA** devuelve nada para el hotspot (sin `focusId`). `ShopView::
+OnMouseDown` solo la consulta cuando `HitTest` devolvió `""` (zona
+muerta — nunca sobre un control visible, así no le roba el click a
+nada). **No se dibuja, sin hover, sin cursor, sin foco, sin Tab, sin
+label de accesibilidad.**
 
-Activar la afordancia entra a un **submodo que la sección Shop POSEE**
+`ProductWindow::SetModels` **arma** el hotspot
+(`ShopView::SetStarterHotspotArmed`) sii `!starterShopModel.Empty()` —
+es decir, hay ≥ 1 oferta legítima (lifecycle == kCompleted + regla del
+secreto ya aplicadas en el modelo). Con 0 ofertas el hotspot **no está
+armado** y un click en la esquina es **no-op total** — un usuario
+`kLegacyComplete` / `kPending`, o uno sin variante hermana del secreto,
+no descubre nada. El hotspot NUNCA cambia la elegibilidad: es solo una
+entrada oculta al `StarterShopModel` YA filtrado.
+
+El gesto de descubrimiento es **mouse-only** a propósito. Una vez
+adentro, el teclado funciona como siempre (§21.5). Los hooks DEV de QA
+(`NIMVLETS_DEV_STARTER_SHOP=1` abre directo; `NIMVLETS_DEV_STARTER_HOTSPOT=1`
+sintetiza el click real de la esquina) no cuentan como descubribilidad
+de producción.
+
+El hotspot entra a un **submodo que la sección Shop POSEE**
 (`ProductWindow::starterShopSubmode_`, solo relevante con `section_ ==
 kShop && !onboarding_`):
 
@@ -1184,8 +1230,8 @@ resto del Product UI).
 
 Comprar la última oferta deja el submodo abierto con una línea quieta —
 EN `No more starter choices.` / ES `No quedan opciones iniciales.` — +
-`← Shop`. Sin confetti / toast / logro. Al volver al Shop público la
-afordancia ya no existe.
+`← Shop`. Sin confetti / toast / logro. Al volver al Shop público el
+hotspot invisible ya no está armado (`starterShopModel.Empty()`).
 
 ### 21.7 AppState / performance / privacidad
 

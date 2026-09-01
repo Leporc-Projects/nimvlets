@@ -214,11 +214,13 @@ Cerrar/reabrir el Product UI devuelve el Shop a la estantería. Precios
 provisionales de QA: Bunny 120, Nidir 300.
 
 **Block 10 — Shop oculto de starters.** Para un usuario que completó el
-onboarding (lifecycle `kCompleted` EXACTO), si hay ≥ 1 oferta el Shop
-público dibuja UNA línea quieta "Starter choices…" cerca del pie — NO
-una cuarta pestaña, NO un banner. Activarla entra a un submodo que la
-sección Shop posee (la cabecera sigue marcando "Shop"; un back
-affordance "← Shop"), con la MISMA jerarquía browse → hover → hero →
+onboarding (lifecycle `kCompleted` EXACTO), si hay ≥ 1 oferta el acceso
+es un **HOTSPOT INVISIBLE** — un click primario en la esquina INFERIOR
+DERECHA del Shop público (48×48 pt, sin texto / foco / hover / cursor;
+easter-egg deliberado; corrección de QA del owner — DEC-138). Sin
+ofertas legítimas el click de la esquina es no-op total. Entra a un
+submodo que la sección Shop posee (la cabecera sigue marcando "Shop"; un
+back affordance "← Shop"), con la MISMA jerarquía browse → hover → hero →
 Get → Cancelar/Confirmar, pero en IDENTIDADES EXACTAS: un usuario que
 eligió Frin hembra ve una oferta "Frin · Male". La regla de
 no-divulgación mantiene a Frin oculto para quien nunca lo descubrió.
@@ -386,21 +388,32 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
 # NIMVLETS_DEV_STARTER_BUY=<petId>[/<variant>]  -> compra no interactiva
 #   por el mismo camino que "Confirmar" (EvaluateStarterPurchase ->
 #   ApplyPurchasedState atómico). Requiere lifecycle kCompleted.
-# NIMVLETS_DEV_STARTER_SHOP=1     -> entra al submodo (necesita
-#   NIMVLETS_DEV_SECTION=shop). Sin la variable, el Shop público con la
-#   afordancia "Starter choices…" si hay ofertas.
+# NIMVLETS_DEV_STARTER_SHOP=1     -> entra al submodo DIRECTAMENTE
+#   (necesita NIMVLETS_DEV_SECTION=shop). En producción el acceso es un
+#   HOTSPOT INVISIBLE en la esquina inf-der del Shop público (DEC-138).
+# NIMVLETS_DEV_STARTER_HOTSPOT=1  -> sintetiza el click REAL de la esquina
+#   inf-der (mismo camino que un click del owner). Loguea si abrió o fue
+#   no-op (hotspot no armado = sin ofertas legítimas).
 # NIMVLETS_DEV_STARTER_OFFER=<petId>[/<variant>]  -> selecciona esa oferta
 #   EXACTA como hero. NIMVLETS_DEV_STARTER_HOVER=<petId>[/<variant>] ->
 #   hover (revela el precio). NIMVLETS_DEV_STARTER_CONFIRM=1 -> abre la
 #   confirmación. NIMVLETS_DEV_STARTER_FOCUS=<focusId> -> foco de teclado
 #   ("starter:back", "starteritem:frin/male", "get", …).
 
-# El Starter Shop tras elegir Frin hembra (oferta frin/male + 3 dev normales):
+# El Starter Shop tras elegir Frin hembra, ABIERTO POR EL HOTSPOT
+# INVISIBLE de la esquina inf-der (oferta frin/male + 3 dev normales):
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ss1 NIMVLETS_DEV_ONBOARDING=1 \
   NIMVLETS_DEV_ONBOARDING_CHOOSE=frin/female NIMVLETS_DEV_ONBOARDING_REVEAL=1 \
   NIMVLETS_DEV_GRANT_CLICKS=500 NIMVLETS_DEV_HIDE_PET=1 \
-  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_STARTER_SHOP=1 \
+  NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop NIMVLETS_DEV_STARTER_HOTSPOT=1 \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/starter_shop.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# El Shop público de un usuario legacy: NINGUNA pista visible; el click
+# de la esquina inf-der es no-op (hotspot no armado):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ss0 NIMVLETS_DEV_CLICK_TEST_COUNT=500 \
+  NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop \
+  NIMVLETS_DEV_STARTER_HOTSPOT=1 NIMVLETS_DEV_PRODUCT_SHOT=/tmp/public_shop_no_clue.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 
 # Frin Male seleccionado + confirmación (ES):

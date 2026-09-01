@@ -5453,3 +5453,122 @@ tocar: onboarding de producción (deshabilitado), branch
 `block/09b-starter-content-production-onboarding`, Nidir, la deuda
 `lie_to_sit` de Frin, contenido de animación, el catálogo de
 producción.
+
+---
+
+### DEC-138 — Block 10, corrección de QA del owner: wallet CANÓNICO en la cabecera compartida, y el Shop oculto de starters se vuelve VERDADERAMENTE oculto (hotspot invisible, sin afordancia visible)
+**Status:** DECIDIDO · Block 10 (pasada de corrección de QA del owner).
+**Depende de** DEC-127/DEC-130 (cabecera compartida / ruta canónica de
+preferencias), DEC-137 (Shop oculto de starters). **Supersede SOLO** el
+mecanismo de acceso VISIBLE de DEC-137 (la afordancia "Starter choices…"
+del Shop público). NO toca la elegibilidad, el gate de lifecycle == kCompleted,
+la regla de no-divulgación del secreto, la compra de variante EXACTA, la
+aplicación atómica de estado, ni el submodo en sí (incluido su "← Shop").
+
+**Contexto.** El owner probó Block 10 a fondo y aprobó casi todo. Dos
+rechazos:
+
+1. **Bug real de sincronización del wallet.** Con el mismo estado
+   corriendo, la cabecera de Collection y de Shop mostraba "500 clicks"
+   y la de **Settings** mostraba "0 clicks". El balance persistido/runtime
+   NO era 0 — solo Settings dibujaba mal. Causa raíz: `SettingsView::Render`
+   (Block 08) llamaba `DrawSectionHeader(..., /*clickBalance=*/0, ...)`
+   hard-codeado — Settings nunca recibió el balance. Collection y Shop
+   guardaban cada uno su propia copia de `clickBalance_` (empujada por
+   `SetModel(model, clickBalance)`); Settings no tenía ni el campo. Eran,
+   de hecho, autoridades de wallet por-sección.
+
+2. **El Shop oculto de starters no era lo bastante oculto.** El owner
+   rechazó la línea VISIBLE "Starter choices…" / "Opciones iniciales…"
+   dentro del Shop público. Quiere que sea un easter-egg de verdad: un
+   HOTSPOT INVISIBLE en la esquina inferior derecha.
+
+**Decisión.**
+
+- **Wallet CANÓNICO, autoridad ÚNICA en `ProductWindow`.** `ProductWindow`
+  gana `std::uint64_t clickBalance_`, lo fija `SetModels`, y `DrawFrame()`
+  lo pasa a `Render()` de la sección visible — las CUATRO. El balance
+  YA NO viaja con el modelo: `CollectionView::SetModel` /
+  `ShopView::SetModel` / `StarterShopView::SetModel` pierden el parámetro;
+  cada `Render(...)` gana un `std::uint64_t clickBalance` trailing (el
+  compilador obliga a pasarlo — una sección nueva no puede "olvidarse").
+  El texto se formatea UNA vez en la capa PURA: `BuildSectionHeaderLayout`
+  gana `clickBalance` y produce `SectionHeaderLayout::clicksText` (vía
+  `FormatClickCount`); `DrawSectionHeader` solo dibuja ese string (perdió
+  su parámetro de balance Y el de idioma — todo el texto ya viene
+  localizado en `header`). Cada `*LayoutInput` (Collection / Shop /
+  Settings / StarterShop) gana `clickBalance` y lo reenvía a
+  `BuildSectionHeaderLayout`. Mismo espíritu que DEC-130 para las
+  preferencias: una fuente de verdad, todas las vistas consumen la
+  MISMA. Sin bump de schema (AppState intacto).
+
+- **Afordancia visible ELIMINADA.** Se borra `ShopLayout::starterAffordance*`,
+  `ShopLayoutInput::starterAffordanceVisible`, `AppendStarterAffordance`,
+  el focusId `"starter:enter"` (fuera del focusOrder y del HitTest),
+  `ShopView::SetStarterAffordanceVisible` y `DrawStarterAffordance`. La
+  clave de localización `kStarterChoicesAffordance` se elimina (no queda
+  copy de producto muerta). `kStarterChoicesHeading` / `kStarterShopBack`
+  / `kStarterShopEmpty` se conservan — se usan DENTRO del submodo.
+
+- **HOTSPOT INVISIBLE, esquina inf-der.** `ShopLayout` gana
+  `bool starterHotspotArmed` + `UiRect starterHotspotRect` (48×48 pt,
+  anclado a `{viewportW-48, viewportH-48}` en coords de VIEWPORT, sin
+  scroll — es "chrome secreto", no contenido) + `HitStarterHotspot(x, y)`
+  (consulta SEPARADA de `HitTest`, que NUNCA devuelve nada para el
+  hotspot). NO se dibuja, NO está en `focusOrder`, sin hover, sin
+  cursor, sin foco, sin Tab. `ArmStarterHotspot` lo recalcula en cada
+  `BuildShopLayout` → el resize lo reubica. `ShopView::SetStarterHotspotArmed`
+  (lo arma `ProductWindow::SetModels` sii `!starterShopModel.Empty()`).
+  `ShopView::OnMouseDown`: SOLO cuando `HitTest` devolvió "" (zona
+  muerta, nunca sobre un control visible) se consulta
+  `HitStarterHotspot`; si cae, `enterStarterSubmode`. Solo click
+  primario. Sin ofertas legítimas → `starterHotspotArmed == false` →
+  no-op total (un usuario `kLegacyComplete` / `kPending`, o uno sin
+  hermana del secreto, no descubre nada).
+
+- **La elegibilidad sigue siendo autoridad del MODELO.** El hotspot es
+  solo una ENTRADA oculta al `StarterShopModel` ya filtrado — nunca
+  cambia qué ofertas hay. Un usuario que eligió `artu_dev` cuyo modelo
+  legítimo tiene solo `rato_dev` / `rinrin_dev`: el hotspot abre ESE
+  submodo; Frin sigue ausente.
+
+- **Dentro del submodo, todo igual.** Teclado / Esc / selección / Get /
+  Cancel / Confirm / "← Shop" sin cambios (el gesto de descubrimiento es
+  mouse-only; una vez adentro, el teclado funciona como siempre).
+
+- **Hooks DEV.** `NIMVLETS_DEV_STARTER_SHOP=1` sigue abriendo el submodo
+  DIRECTAMENTE (no cuenta como descubribilidad de producción). Nuevo
+  `NIMVLETS_DEV_STARTER_HOTSPOT=1`: sintetiza un click primario REAL en
+  la esquina inf-der y lo procesa por el MISMO camino que un click del
+  owner (`ProductWindow::ClickStarterHotspotForQA` → `HandleEvent` →
+  `ShopView::OnMouseDown` → `HitStarterHotspot`); loguea si abrió o fue
+  no-op — prueba el hotspot Y su gate sin un click humano.
+
+**Verificado.** `tests/SectionNavTest.cpp` (+1: `BuildSectionHeaderLayout`
+formatea el balance canónico a `clicksText`, EN/ES, singular/plural,
+agrupación de dígitos — para las 3 secciones). `tests/SettingsLayoutTest.cpp`
+(+1, REGRESIÓN de la falla exacta: `BuildSettingsLayout` con
+`in.clickBalance = 500` → `header.clicksText == "500 clicks"`; default 0
+documentado). `tests/ShopLayoutTest.cpp` (reemplaza los 2 tests de
+afordancia por 3 de hotspot: desarmado por defecto = focus order / hit-test
+intactos + `HitStarterHotspot` false en la esquina; armado = rect en el
+viewport pegado a la esquina inf-der, punto dentro cae, adyacente fuera
+no, NUNCA en focusOrder ni HitTest, hit-test de tarjetas intacto, Shop
+público vacío + armado sigue funcionando; el resize lo reubica). +
+`ShopLayoutTest`/`SettingsLayoutTest` chequean que la cabecera del Shop /
+Settings muestra el balance canónico. `tests/LocalizationTest.cpp`
+(`kStarterChoicesAffordance` removida; las 3 claves del submodo se
+mantienen). 491 tests C++ (era 488), 162 Python. Debug + Release +
+universal2 (lipo: x86_64 arm64), `nimvlets_macos_text_check` PASS,
+`nimvlets_macos_clickthrough_check` PASS. Smokes en vivo (Retina, appdata
+aislado): **Settings muestra "500 clicks"** igual que Shop / Collection
+(antes "0 clicks"); tras comprar frin/male, Settings muestra "350 clicks";
+Shop público de un usuario legacy = SIN ninguna pista visible;
+`NIMVLETS_DEV_STARTER_HOTSPOT` → OPENED para un usuario Frin-hembra,
+NO-OP para uno legacy; el hotspot de un usuario que eligió `artu_dev`
+abre `rato_dev` / `rinrin_dev` SIN Frin; ES completo ("Tienda", "←
+Tienda", "Opciones iniciales", "500 clics"); Nidir público a 300 sigue
+comprable; `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6. Congelado sin tocar: Nidir,
+la deuda `lie_to_sit` de Frin, onboarding, política de compra /
+elegibilidad, la Collection owned-only, el catálogo de producción, el
+schema de AppState.
