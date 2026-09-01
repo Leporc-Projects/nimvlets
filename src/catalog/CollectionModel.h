@@ -10,17 +10,24 @@
 namespace nimvlets::catalog {
 
 // La vista de "álbum de compañeros" que el Product UI dibuja: qué
-// Nimvlets existen, cuáles posee el owner (y — para Frin — qué variantes
-// concretas), cuál está en el escritorio. Puro: sin SDL, sin AppKit, sin
-// I/O — construido a partir de un PetCatalog ya cargado + las
-// AUTORIZACIONES de propiedad (PetEntitlement, Block 07 — antes un
-// simple conjunto de petIds) + la identidad activa. Ver
-// docs/PRODUCT_UI.md §4 y §6.
+// Nimvlets POSEE el owner (y — para Frin — qué variantes concretas),
+// cuál está en el escritorio. Puro: sin SDL, sin AppKit, sin I/O —
+// construido a partir de un PetCatalog ya cargado + las AUTORIZACIONES
+// de propiedad (PetEntitlement, Block 07) + la identidad activa. Ver
+// docs/PRODUCT_UI.md §4/§5/§6.
 //
-// La Collection sigue siendo UN ítem lógico por Nimvlet. Lo que Block 07
-// agrega es propiedad a nivel de VARIANTE: Frin puede tener Macho
-// poseído y Hembra no (o al revés, o ambas, o ninguna). El Shop es una
-// sección aparte — ver ShopModel.h; nada acá conoce precios ni compras.
+// **Block 09C (DEC-136) — la Collection es SOLO lo poseído.** Un Nimvlet
+// sin ninguna variante en la colección del owner NO aparece en el modelo
+// (antes se listaba `kLocked` con "Not in your collection"). Lo
+// públicamente comprable pero no poseído vive en el Shop, no acá:
+// `BuildCollectionModel` descarta los ítems que quedarían `kLocked`.
+//
+// La Collection sigue siendo UN ítem lógico por Nimvlet. Block 07 agrega
+// propiedad a nivel de VARIANTE: Frin puede tener Macho poseído y Hembra
+// no (o al revés, o ambas). Un Frin con al menos una variante poseída SÍ
+// aparece (`kOwnedInactive`), con la otra variante marcada no poseída. El
+// Shop es una sección aparte — ver ShopModel.h; nada acá conoce precios
+// ni compras.
 
 enum class OwnershipStatus {
     // Poseído y actualmente en el escritorio ("On desktop"). Exactamente
@@ -28,9 +35,10 @@ enum class OwnershipStatus {
     kActive,
     // Poseído (al menos una variante) pero no activo ("Use").
     kOwnedInactive,
-    // Ninguna variante en la colección del owner ("Not in your
-    // collection"). El Shop puede cambiar esto (Block 07); un pet locked
-    // sigue sin poder activarse.
+    // Ninguna variante en la colección del owner. **Un ítem que deriva a
+    // este estado se DESCARTA del modelo** (Block 09C / DEC-136) — el
+    // valor sobrevive solo como paso intermedio del cálculo y para
+    // `CanActivate`, que trata "no está en el modelo" == "no activable".
     kLocked,
 };
 
@@ -73,7 +81,9 @@ struct CollectionItem {
 };
 
 struct CollectionModel {
-    // En orden de catálogo, una fila por petId lógico.
+    // En orden de catálogo, una fila por petId lógico POSEÍDO (los
+    // `kLocked` se descartan — Block 09C / DEC-136). size() >= 1 en un
+    // modelo bien formado (siempre está al menos el pet activo).
     std::vector<CollectionItem> items;
 
     std::string activePetId;
@@ -90,9 +100,10 @@ struct CollectionModel {
 
 // Construye el modelo. `owned` puede venir en cualquier orden y con
 // duplicados. `activeId` es la identidad que el runtime tiene realmente
-// activa. Determinista y puro. NO impone el invariante "el activo es
-// propio" — para eso ver ResolveOwnedActiveIdentity, que src/app usa al
-// resolver el arranque.
+// activa. Determinista y puro. Descarta los Nimvlets no poseídos (Block
+// 09C / DEC-136); el pet activo se conserva SIEMPRE. NO impone el
+// invariante "el activo es propio" — para eso ver
+// ResolveOwnedActiveIdentity, que src/app usa al resolver el arranque.
 CollectionModel BuildCollectionModel(
     const PetCatalog& catalog,
     const std::vector<PetEntitlement>& owned,
@@ -101,9 +112,10 @@ CollectionModel BuildCollectionModel(
 // true solo si `petId` está en `model`, su status permite activarlo
 // (kActive o kOwnedInactive) Y la variante pedida es poseída. Con
 // `variantId` vacío en un pet CON variantes, exige que la variante por
-// defecto (selectedVariantId) sea poseída. Un pet kLocked NUNCA puede
-// activarse, y una variante no poseída de un pet por lo demás poseído
-// TAMPOCO (brief §6: "it must not be activatable").
+// defecto (selectedVariantId) sea poseída. Un pet no poseído no está en
+// el modelo (Block 09C) -> `Find` devuelve nullptr -> no activable; una
+// variante no poseída de un pet por lo demás poseído TAMPOCO se puede
+// activar (brief §6: "it must not be activatable").
 bool CanActivate(const CollectionModel& model, const std::string& petId, const std::string& variantId = "");
 
 // Devuelve una identidad que el owner REALMENTE tiene autorizada, para

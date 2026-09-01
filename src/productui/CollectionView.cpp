@@ -265,8 +265,13 @@ void CollectionView::Render(
 
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
-    // --- Segundo plano: la zona de la gallery (brief §12) ---
-    painter.FillRect(layout.galleryShelf, theme::kGalleryShelf);
+    // --- Segundo plano: la zona de la gallery (brief §12). Con un solo
+    //     Nimvlet poseído no hay gallery -> no se dibuja el segundo plano
+    //     (DEC-136). ---
+    const bool hasGallery = !layout.gallery.empty();
+    if (hasGallery) {
+        painter.FillRect(layout.galleryShelf, theme::kGalleryShelf);
+    }
 
     // --- Hero ---
     const CollectionHero& h = layout.hero;
@@ -348,6 +353,19 @@ void CollectionView::Render(
             DrawText(painter, text, h.statusText, type::kHeroStatus, TextWeight::kMedium,
                      StatusColor(h.status, h.accent.line), statusX, h.statusAnchor.y + 12.0f, HAlign::kLeft);
         }
+    }
+
+    // --- Un solo Nimvlet: línea quieta hacia el Shop, sin divisor
+    //     (DEC-136 / brief §4.A) ---
+    if (!hasGallery) {
+        if (!layout.emptyGalleryText.empty()) {
+            DrawText(painter, text, layout.emptyGalleryText, type::kSectionSub, TextWeight::kRegular,
+                     theme::kTextFaint, layout.emptyGalleryAnchor.CenterX(),
+                     layout.emptyGalleryAnchor.y + 13.0f, HAlign::kCenter,
+                     static_cast<int>(layout.emptyGalleryAnchor.w));
+        }
+        painter.PopClip();
+        return;
     }
 
     // --- Divisor (sobre el borde del segundo plano) ---

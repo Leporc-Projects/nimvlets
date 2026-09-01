@@ -15,6 +15,7 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     // {en, es}
     /* kCollection */         {"Collection", "Colección"},
     /* kYourCompanions */      {"Your companions", "Tus compañeros"},
+    /* kCollectionOnlyActive */ {"Meet more Nimvlets in the Shop.", "Conoce más Nimvlets en la Tienda."},
     /* kOnDesktop */           {"On desktop", "En el escritorio"},
     /* kUse */                 {"Use", "Usar"},
     /* kUsePetPrefix */        {"Use ", "Usar "},

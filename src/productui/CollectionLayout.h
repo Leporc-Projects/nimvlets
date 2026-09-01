@@ -95,11 +95,17 @@ struct CollectionLayout {
     // título/subtítulo de sección de Block 06.
     SectionHeaderLayout header;
 
-    UiRect dividerRect;            // hairline entre el hero y la gallery
-    UiRect galleryShelf;          // segundo plano: fondo un pelín más profundo bajo el divisor (§12)
+    UiRect dividerRect;            // hairline entre el hero y la gallery (w/h == 0 si la gallery está vacía)
+    UiRect galleryShelf;          // segundo plano: fondo un pelín más profundo bajo el divisor (§12; vacío si no hay gallery)
 
     CollectionHero hero;
     std::vector<GalleryItem> gallery;
+
+    // Block 09C / DEC-136: el owner tiene UN solo Nimvlet -> la gallery
+    // queda vacía. En vez de un divisor con un vacío debajo, una línea
+    // quieta que apunta al Shop. "" si la gallery tiene entradas.
+    std::string emptyGalleryText;
+    UiRect emptyGalleryAnchor;    // ancla centrada
 
     // Orden de tabulación: chips de variante del hero, luego "use" (si
     // habilitado), luego "item:<petId>" por cada entrada de la gallery.

@@ -299,19 +299,29 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     }
 
     const float heroBottom = std::max(h.art.Bottom(), y);
-    out.dividerRect = UiRect{kMargin, heroBottom + kDividerGap, contentW, 1.0f};
 
-    // --- Gallery: todos los pets MENOS el hero ---
+    // --- Gallery: todos los pets POSEÍDOS menos el hero (el modelo ya
+    //     excluye los no poseídos — DEC-136) ---
     std::vector<const CollectionItem*> galleryPets;
     for (const CollectionItem& item : model.items) {
         if (item.petId != heroPetId) {
             galleryPets.push_back(&item);
         }
     }
-
     const int count = static_cast<int>(galleryPets.size());
+
+    // El owner tiene un solo Nimvlet: sin divisor, sin segundo plano —
+    // una línea quieta hacia el Shop donde iría la gallery (brief §4.A).
+    if (count == 0) {
+        out.emptyGalleryText = Localized(StringKey::kCollectionOnlyActive, lang);
+        out.emptyGalleryAnchor = UiRect{kMargin, heroBottom + kDividerGap + 6.0f, contentW, 20.0f};
+        out.contentHeight = out.emptyGalleryAnchor.Bottom() + kMargin + sy;
+        return out;  // dividerRect / galleryShelf quedan en {} -> la vista no los dibuja
+    }
+
+    out.dividerRect = UiRect{kMargin, heroBottom + kDividerGap, contentW, 1.0f};
     float galleryBottom = out.dividerRect.Bottom() + kGalleryGap;
-    if (count > 0) {
+    {
         const int cols = std::min(count, 3);
         const float colW = std::min(kGalleryColMax, contentW / static_cast<float>(cols));
         const float galleryLeft = kMargin + (contentW - colW * static_cast<float>(cols)) * 0.5f;

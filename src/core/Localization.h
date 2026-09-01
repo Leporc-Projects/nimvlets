@@ -41,6 +41,10 @@ enum class StringKey {
     // Collection
     kCollection,        // "Collection" / "Colección"
     kYourCompanions,    // "Your companions" / "Tus compañeros"
+    // Línea quieta bajo el hero cuando el owner solo tiene un Nimvlet
+    // (la gallery quedaría vacía) — Block 09C / DEC-136. Apunta al Shop
+    // sin ser un CTA. "Nimvlets" / "Shop" siguen sus reglas de traducción.
+    kCollectionOnlyActive,  // "Meet more Nimvlets in the Shop." / "Conoce más Nimvlets en la Tienda."
     kOnDesktop,         // "On desktop" / "En el escritorio"
     kUse,              // "Use" (sub-línea del gallery) / "Usar"
     kUsePetPrefix,      // "Use " / "Usar " — se concatena con un nombre propio SIN traducir

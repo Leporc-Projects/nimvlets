@@ -82,8 +82,7 @@ CollectionModel BuildCollectionModel(
             item.status = OwnershipStatus::kLocked;
         }
 
-        // Variante seleccionada por defecto. Un pet locked no muestra
-        // detalle accionable, pero igual se le da un valor coherente.
+        // Variante seleccionada por defecto.
         const bool activePet = item.status == OwnershipStatus::kActive;
         std::string wanted = activePet ? activeId.variantId : std::string();
         const bool wantedExists =
@@ -97,6 +96,23 @@ CollectionModel BuildCollectionModel(
             item.selectedVariantId = item.variants.front().variantId;
         }
     }
+
+    // Block 09C — la Collection es SOLO lo que el owner ya tiene: un
+    // "álbum de compañeros", no la lista completa del roster (owner QA:
+    // un Nidir NO poseído no debe aparecer con "Not in your collection").
+    // Un Nimvlet sin NINGUNA variante poseída (`kLocked`) no pertenece a
+    // la Collection — vive en el Shop. El pet activo se conserva SIEMPRE:
+    // es `kActive` (nunca `kLocked`) aunque un estado corrupto lo tuviera
+    // sin poseer, y `ResolveOwnedActiveIdentity` ya lo repara en el
+    // arranque. Un Frin con una sola variante poseída es `kOwnedInactive`
+    // -> se conserva, con la otra variante marcada no poseída (sin ruta
+    // de compra visible — DEC-128). Ver docs/PRODUCT_UI.md §5/§6 y DEC-136.
+    model.items.erase(
+        std::remove_if(model.items.begin(), model.items.end(),
+                       [](const CollectionItem& it) {
+                           return it.status == OwnershipStatus::kLocked;
+                       }),
+        model.items.end());
 
     return model;
 }
