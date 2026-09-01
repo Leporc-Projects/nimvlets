@@ -3,6 +3,7 @@
   "production_onboarding_ready": false,
   "dev_synthetic_onboarding": true,
   "_comment": "SÓLO-DEV — descriptores SINTÉTICOS de onboarding para QA de la máquina de estados/presentación de Block 09A ANTES de que exista contenido real de Artu/Rato/Rin Rin. artu_dev/rato_dev/rinrin_dev NO son Artu/Rato/Rin Rin: toman prestados packs/previews existentes sólo para ejercitar el flujo (selección -> confirmación -> grant -> completitud -> reinicio -> activación). `dev_synthetic_onboarding: true` es el opt-in EXPLÍCITO del harness — es MUTUAMENTE EXCLUYENTE con `production_onboarding_ready` y NUNCA arma el camino de producción (el compilador rechaza los alias bajo `production_onboarding_ready`; src/app exige este byte para forzar el gate DEV). Ver DEC-133 y docs/ONBOARDING.md §DEV harness. NUNCA se envía. Sólo lo carga src/app cuando NIMVLETS_DEV_ONBOARDING está seteada. Regenerar: python3 tools/compile_pet_catalog.py assets/dev/onboarding_dev_catalog_manifest.json assets/dev/onboarding_dev_catalog.nvcat",
+  "_comment_block10": "Block 10 (Starter Shop oculto): `price_clicks` en cada entrada de starter es el precio de compra de ESA identidad EXACTA en el Starter Shop oculto — `publicly_purchasable` SIGUE en false (default), así estas entradas NUNCA aparecen en el Shop público. Estos precios son SÓLO DE QA / PROVISIONALES para ejercitar el submodo (frin/male<->frin/female y otros starters normales). NO son el balanceo final de la economía de starters V1 — el precio real de Artu/Rato/Rin Rin y de las variantes de Frin se decide más adelante. Los precios públicos de QA Bunny=120 / Nidir=300 (pet_catalog_manifest.json) son un tema APARTE y no cambian. Ver docs/ONBOARDING.md §15, docs/CATALOG.md §14 y DEC-137.",
   "entries": [
     {
       "pet_id": "frin",
@@ -10,35 +11,40 @@
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_male_pack.nvpack",
       "is_default": true,
-      "starter_role": "secret"
+      "starter_role": "secret",
+      "price_clicks": 150
     },
     {
       "pet_id": "frin",
       "variant_id": "female",
       "display_name": "Frin",
       "pack_path": "assets/dev/frin_female_pack.nvpack",
-      "starter_role": "secret"
+      "starter_role": "secret",
+      "price_clicks": 150
     },
     {
       "pet_id": "artu_dev",
       "variant_id": "",
       "display_name": "Artu (dev)",
       "pack_path": "assets/dev/bunny_pack.nvpack",
-      "starter_role": "normal"
+      "starter_role": "normal",
+      "price_clicks": 80
     },
     {
       "pet_id": "rato_dev",
       "variant_id": "",
       "display_name": "Rato (dev)",
       "pack_path": "assets/dev/nidir_pack.nvpack",
-      "starter_role": "normal"
+      "starter_role": "normal",
+      "price_clicks": 100
     },
     {
       "pet_id": "rinrin_dev",
       "variant_id": "",
       "display_name": "Rin Rin (dev)",
       "pack_path": "assets/dev/bunny_pack.nvpack",
-      "starter_role": "normal"
+      "starter_role": "normal",
+      "price_clicks": 120
     }
   ]
 }

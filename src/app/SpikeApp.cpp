@@ -983,6 +983,17 @@ catalog::ShopModel SpikeApp::BuildCurrentShopModel() const {
     return catalog::BuildShopModel(catalog_, appState_.clickBalance, CurrentEntitlements());
 }
 
+bool SpikeApp::OnboardingLifecycleCompleted() const {
+    // EXACTAMENTE kCompleted — un usuario que pasó por la elección real
+    // de starter. NO kLegacyComplete (dev/legacy) ni kPending (brief §5).
+    return appState_.onboardingLifecycle == persistence::OnboardingLifecycle::kCompleted;
+}
+
+catalog::StarterShopModel SpikeApp::BuildCurrentStarterShopModel() const {
+    return catalog::BuildStarterShopModel(
+        catalog_, OnboardingLifecycleCompleted(), CurrentEntitlements(), appState_.clickBalance);
+}
+
 content::FrameDefinition SpikeApp::CurrentRestFrame() const {
     if (pet_.states.empty()) {
         return content::FrameDefinition{};
@@ -999,7 +1010,8 @@ content::FrameDefinition SpikeApp::CurrentRestFrame() const {
 void SpikeApp::PushModelsToProductWindow() {
     if (productWindow_.IsOpen()) {
         productWindow_.SetModels(
-            BuildCurrentCollectionModel(), BuildCurrentShopModel(), appState_.clickBalance);
+            BuildCurrentCollectionModel(), BuildCurrentShopModel(), BuildCurrentStarterShopModel(),
+            appState_.clickBalance);
     }
 }
 
@@ -1131,7 +1143,8 @@ void SpikeApp::OpenProductWindow() {
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
     productWindow_.SetModels(
-        BuildCurrentCollectionModel(), BuildCurrentShopModel(), appState_.clickBalance);
+        BuildCurrentCollectionModel(), BuildCurrentShopModel(), BuildCurrentStarterShopModel(),
+        appState_.clickBalance);
     productWindow_.FocusWindow();
 }
 
@@ -1156,7 +1169,6 @@ void SpikeApp::HandleActivateRequest(const productui::ActivateRequest& request) 
 }
 
 void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) {
-    const double nowMs = static_cast<double>(SDL_GetTicks());
     // El objetivo es la IDENTIDAD de catálogo del ítem del Shop, no un
     // petId suelto (DEC-128). En Block 07 `variantId` siempre viene "".
     const catalog::PetIdentity target{request.petId, request.variantId};
@@ -1174,19 +1186,9 @@ void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) 
         return;
     }
 
-    // Mutación atómica EN MEMORIA: balance y propiedad en el MISMO
-    // AppState, sin escrituras intermedias (brief §13). Un solo
-    // SerializeAppState + un solo rename atómico persisten los dos
-    // juntos — nunca "gasté el balance pero no tengo el pet".
-    appState_.clickBalance = outcome.newBalance;
-    appState_.ownedEntitlements = ToPersistedEntitlements(outcome.newEntitlements);
-    persistenceScheduler_.MarkDirty(nowMs);
-    // Persistencia INMEDIATA tras una compra: el debounce normal de ~2s
-    // está bien para clicks (perder ~2s de clicks es trivial), pero una
-    // compra cambia propiedad — se fuerza el flush ahora. El per-click
-    // sigue usando el debounce; esto es la única excepción, y es solo
-    // llamar al flush que ya existe (ver docs/PERSISTENCE.md §6).
-    FlushPersistedState();
+    // Aplicación atómica compartida con el Starter Shop oculto (Block 10):
+    // balance + propiedad en el MISMO AppState, flush inmediato.
+    ApplyPurchasedState(outcome.newBalance, outcome.newEntitlements);
 
     SDL_Log(
         "nimvlets: Shop: purchased '%s' for %llu click(s) -- balance %llu -> %llu, ownership persisted",
@@ -1197,6 +1199,58 @@ void SpikeApp::HandlePurchaseRequest(const productui::PurchaseRequest& request) 
     // Refresco inmediato de AMBAS secciones (brief §16). El runtime del
     // pet NO se toca; activar el pet recién comprado es una acción
     // aparte del owner (el botón "Use" de la Collection).
+    PushModelsToProductWindow();
+}
+
+void SpikeApp::ApplyPurchasedState(
+    std::uint64_t newBalance, const std::vector<catalog::PetEntitlement>& newEntitlements) {
+    // El MISMO contrato atómico que una compra del Shop público (DEC-126):
+    // balance y propiedad en el MISMO AppState, sin escrituras
+    // intermedias, un solo SerializeAppState + un solo rename atómico.
+    // Un crash no puede persistir "gasté el balance pero no tengo el pet".
+    appState_.clickBalance = newBalance;
+    appState_.ownedEntitlements = ToPersistedEntitlements(newEntitlements);
+    persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    // Persistencia INMEDIATA: una compra cambia PROPIEDAD (a diferencia
+    // del per-click, que sigue con el debounce de ~2s).
+    FlushPersistedState();
+}
+
+void SpikeApp::HandleStarterPurchaseRequest(const productui::PurchaseRequest& request) {
+    // El objetivo es la IDENTIDAD EXACTA de la oferta del Starter Shop
+    // ({petId, variantId}) — para Frin, la VARIANTE concreta. NUNCA un
+    // {frin, ""} ni "todo Frin" (brief §13).
+    const catalog::PetIdentity target{request.petId, request.variantId};
+    const std::string targetLabel =
+        request.petId + (request.variantId.empty() ? "" : ("/" + request.variantId));
+
+    // Canal DISTINTO al del Shop público: EvaluateStarterPurchase re-checa
+    // INDEPENDIENTEMENTE el lifecycle == kCompleted, el rol de starter, el
+    // precio, la regla de no-divulgación del secreto, la propiedad y el
+    // saldo (brief §15). El modelo/UI no es un límite de seguridad.
+    const catalog::StarterPurchaseOutcome outcome = catalog::EvaluateStarterPurchase(
+        catalog_, OnboardingLifecycleCompleted(), target, appState_.clickBalance,
+        CurrentEntitlements());
+
+    if (outcome.result != catalog::StarterPurchaseResult::kSuccess) {
+        SDL_Log("nimvlets: Starter Shop: purchase of '%s' not completed (%s)", targetLabel.c_str(),
+                catalog::ToString(outcome.result));
+        PushModelsToProductWindow();  // reflejar el estado real si la confirmación llegó tarde
+        return;
+    }
+
+    ApplyPurchasedState(outcome.newBalance, outcome.newEntitlements);
+
+    SDL_Log(
+        "nimvlets: Starter Shop: purchased '%s' for %llu click(s) -- balance %llu -> %llu, "
+        "EXACT entitlement persisted (pet NOT auto-activated)",
+        targetLabel.c_str(), static_cast<unsigned long long>(outcome.price),
+        static_cast<unsigned long long>(outcome.price + outcome.newBalance),
+        static_cast<unsigned long long>(outcome.newBalance));
+
+    // Refresco inmediato: el Starter Shop (la oferta desaparece) y la
+    // Collection (la nueva variante ya es usable) sin reiniciar. El pet
+    // activo NO cambia (brief §17).
     PushModelsToProductWindow();
 }
 
@@ -1760,6 +1814,9 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             if (pe.hasPurchase) {
                 HandlePurchaseRequest(pe.purchase);
             }
+            if (pe.hasStarterPurchase) {
+                HandleStarterPurchaseRequest(pe.starterPurchase);
+            }
             if (pe.hasPreferenceChange) {
                 // Misma ruta canónica que la acción equivalente del menú
                 // rápido (block brief 08 §6).
@@ -2031,6 +2088,46 @@ int SpikeApp::Run() {
         }
     }
 
+    // Solo-DEV (Block 10 QA): SUMA n clics al wallet sin disparar
+    // animaciones — para tener saldo tras el onboarding (que deja el
+    // balance en 0) y ejercitar una compra del Starter Shop. Corre
+    // DESPUÉS de NIMVLETS_DEV_ONBOARDING_CHOOSE (que pone el balance en 0)
+    // y ANTES de NIMVLETS_DEV_STARTER_BUY / NIMVLETS_DEV_OPEN_COLLECTION,
+    // así una invocación de un solo tiro (CHOOSE + GRANT_CLICKS +
+    // STARTER_BUY | OPEN_COLLECTION + PRODUCT_SHOT) funciona. Combinar con
+    // NIMVLETS_DEV_APPDATA_DIR aislado. Ausente/vacía: no-op. Ver README.md.
+    if (const char* grant = std::getenv("NIMVLETS_DEV_GRANT_CLICKS");
+        grant != nullptr && grant[0] != '\0') {
+        char* end = nullptr;
+        const long long n = std::strtoll(grant, &end, 10);
+        if (end != grant && n > 0) {
+            appState_.clickBalance += static_cast<std::uint64_t>(n);
+            persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+            FlushPersistedState();
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_GRANT_CLICKS=%lld (balance now %llu)",
+                    n, static_cast<unsigned long long>(appState_.clickBalance));
+        }
+    }
+
+    // Solo-DEV (Block 10): confirma una compra del SHOP OCULTO DE STARTERS
+    // sin interacción ("<petId>" o "<petId>/<variant>", p. ej.
+    // "frin/male") — misma ruta que "Confirmar" en el submodo:
+    // EvaluateStarterPurchase -> ApplyPurchasedState (atómico) -> flush
+    // inmediato -> refresco de Collection y del propio Starter Shop.
+    // Requiere el lifecycle en kCompleted (p. ej. tras
+    // NIMVLETS_DEV_ONBOARDING_CHOOSE en el mismo run, o un run previo).
+    // Ausente/vacía: no-op. Ver README.md.
+    if (const char* sbuy = std::getenv("NIMVLETS_DEV_STARTER_BUY");
+        sbuy != nullptr && sbuy[0] != '\0') {
+        const std::string sbSpec(sbuy);
+        const std::size_t sbSlash = sbSpec.find('/');
+        productui::PurchaseRequest req;
+        req.petId = sbSlash == std::string::npos ? sbSpec : sbSpec.substr(0, sbSlash);
+        req.variantId = sbSlash == std::string::npos ? std::string() : sbSpec.substr(sbSlash + 1);
+        SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_STARTER_BUY='%s'", sbuy);
+        HandleStarterPurchaseRequest(req);
+    }
+
     // Mecanismo solo-DEV (Block 06): abre la Collection al arrancar,
     // para QA / capturas de pantalla sin tener que clickear el menú de
     // la barra. Ausente/vacía: no-op — la Collection solo se abre desde
@@ -2136,6 +2233,47 @@ int SpikeApp::Run() {
         if (const char* sc = std::getenv("NIMVLETS_DEV_SHOP_CONFIRM");
             sc != nullptr && sc[0] != '\0' && sc[0] != '0') {
             productWindow_.SetShopConfirmingForQA(true);
+        }
+        // --- Block 10: hooks de QA del SHOP OCULTO DE STARTERS ------
+        // NIMVLETS_DEV_STARTER_SHOP=1 — entra al submodo del Starter Shop
+        // (necesita NIMVLETS_DEV_SECTION=shop). Sin la variable, el Shop
+        // público normal (con la afordancia "Starter choices…" si hay
+        // ofertas).
+        if (const char* ss = std::getenv("NIMVLETS_DEV_STARTER_SHOP");
+            ss != nullptr && ss[0] != '\0' && ss[0] != '0') {
+            productWindow_.EnterStarterShopSubmodeForQA();
+        }
+        // NIMVLETS_DEV_STARTER_OFFER=<petId>[/<variant>] — selecciona esa
+        // oferta EXACTA como hero dentro del submodo.
+        if (const char* so = std::getenv("NIMVLETS_DEV_STARTER_OFFER");
+            so != nullptr && so[0] != '\0') {
+            const std::string oSpec(so);
+            const std::size_t oSlash = oSpec.find('/');
+            productWindow_.SelectStarterOfferForQA(
+                oSlash == std::string::npos ? oSpec : oSpec.substr(0, oSlash),
+                oSlash == std::string::npos ? std::string() : oSpec.substr(oSlash + 1));
+        }
+        // NIMVLETS_DEV_STARTER_HOVER=<petId>[/<variant>] — hover sobre una
+        // tarjeta de oferta (revela su precio).
+        if (const char* sh2 = std::getenv("NIMVLETS_DEV_STARTER_HOVER");
+            sh2 != nullptr && sh2[0] != '\0') {
+            const std::string hSpec(sh2);
+            const std::size_t hSlash = hSpec.find('/');
+            productWindow_.SetStarterHoverForQA(
+                hSlash == std::string::npos ? hSpec : hSpec.substr(0, hSlash),
+                hSlash == std::string::npos ? std::string() : hSpec.substr(hSlash + 1));
+        }
+        // NIMVLETS_DEV_STARTER_FOCUS=<focusId> — foco de teclado sobre un
+        // widget del submodo ("starter:back", "starteritem:frin/male", …).
+        if (const char* sfk = std::getenv("NIMVLETS_DEV_STARTER_FOCUS");
+            sfk != nullptr && sfk[0] != '\0') {
+            productWindow_.SetStarterKeyboardFocusForQA(sfk);
+        }
+        // NIMVLETS_DEV_STARTER_CONFIRM=1 — abre la confirmación inline
+        // (necesita NIMVLETS_DEV_STARTER_OFFER con una oferta asequible).
+        if (const char* scc = std::getenv("NIMVLETS_DEV_STARTER_CONFIRM");
+            scc != nullptr && scc[0] != '\0' && scc[0] != '0') {
+            productWindow_.SetStarterConfirmingForQA(true);
         }
         // NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity — foco de teclado sobre
         // una fila de Settings (captura del anillo de foco).

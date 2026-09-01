@@ -8,6 +8,8 @@
 #include "catalog/PetIdentity.h"
 #include "catalog/PurchasePolicy.h"
 #include "catalog/ShopModel.h"
+#include "catalog/StarterPurchasePolicy.h"
+#include "catalog/StarterShopModel.h"
 #include "content/AnimationController.h"
 #include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
@@ -238,6 +240,30 @@ private:
     // toca el runtime del pet. No-op silencioso en cualquier fallo.
     void HandlePurchaseRequest(const productui::PurchaseRequest& request);
 
+    // Resultado de que el owner haya confirmado una compra en el SHOP
+    // OCULTO DE STARTERS (Block 10). Evalúa
+    // catalog::EvaluateStarterPurchase — un canal DISTINTO al del Shop
+    // público, con su propio gate (lifecycle == kCompleted, rol de
+    // starter, regla de no-divulgación del secreto). Si es kSuccess usa
+    // el MISMO camino atómico de aplicación de estado que el Shop
+    // público (ApplyPurchasedState). NO auto-activa el pet (brief §17):
+    // solo otorga la identidad EXACTA. No-op silencioso en cualquier
+    // fallo.
+    void HandleStarterPurchaseRequest(const productui::PurchaseRequest& request);
+
+    // Camino ATÓMICO de aplicación compartido por el Shop público y el
+    // Starter Shop oculto (brief §16): muta `clickBalance` +
+    // `ownedEntitlements` en el MISMO AppState, marca dirty, y flushea de
+    // inmediato (un solo SerializeAppState + un solo rename atómico —
+    // DEC-126). Nunca persiste "gasté el balance pero no tengo el pet".
+    void ApplyPurchasedState(
+        std::uint64_t newBalance, const std::vector<catalog::PetEntitlement>& newEntitlements);
+
+    // true sii el lifecycle persistido es EXACTAMENTE
+    // persistence::OnboardingLifecycle::kCompleted — el gate del Starter
+    // Shop oculto (brief §5): NO kLegacyComplete, NO kPending.
+    bool OnboardingLifecycleCompleted() const;
+
     // --- Block 09A: onboarding de primer arranque -------------------
     //
     // Decide en Init() si ESTA sesión entra al gate de onboarding:
@@ -271,6 +297,7 @@ private:
 
     catalog::CollectionModel BuildCurrentCollectionModel() const;
     catalog::ShopModel BuildCurrentShopModel() const;
+    catalog::StarterShopModel BuildCurrentStarterShopModel() const;
 
     // Las autorizaciones de propiedad actuales como tipo de src/catalog
     // (appState_ las guarda como persistence::OwnedEntitlement — este

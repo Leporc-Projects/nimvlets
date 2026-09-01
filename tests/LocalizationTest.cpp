@@ -162,6 +162,23 @@ bool TestOnboardingStrings() {
     return true;
 }
 
+// Shop oculto de starters (Block 10). "Shop" SÍ se traduce ("Tienda");
+// los nombres propios (Frin) no. La afordancia lleva "…" (elipsis).
+bool TestStarterShopStrings() {
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesAffordance, Language::kEn),
+                      "Starter choices\xE2\x80\xA6"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesAffordance, Language::kEs),
+                      "Opciones iniciales\xE2\x80\xA6"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesHeading, Language::kEn), "Starter choices"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterChoicesHeading, Language::kEs), "Opciones iniciales"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterShopBack, Language::kEn), "\xE2\x86\x90 Shop"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterShopBack, Language::kEs), "\xE2\x86\x90 Tienda"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterShopEmpty, Language::kEn), "No more starter choices."));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kStarterShopEmpty, Language::kEs),
+                      "No quedan opciones iniciales."));
+    return true;
+}
+
 // El header de la Collection.
 bool TestCollectionHeaderStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kCollection, Language::kEn), "Collection"));
@@ -205,6 +222,7 @@ void RegisterLocalizationTests(testing::TestRunner& runner) {
     runner.Add("Localization/ShopStrings", TestShopStrings);
     runner.Add("Localization/SettingsStrings", TestSettingsStrings);
     runner.Add("Localization/OnboardingStrings", TestOnboardingStrings);
+    runner.Add("Localization/StarterShopStrings", TestStarterShopStrings);
     runner.Add("Localization/EveryKeyIsPopulatedAndDistinct", TestEveryKeyIsPopulatedAndDistinct);
 }
 

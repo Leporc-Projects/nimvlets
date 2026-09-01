@@ -61,8 +61,14 @@ add_executable(nimvlets_tests
   ShopModelTest.cpp
   PurchasePolicyTest.h
   PurchasePolicyTest.cpp
+  StarterShopModelTest.h
+  StarterShopModelTest.cpp
+  StarterPurchasePolicyTest.h
+  StarterPurchasePolicyTest.cpp
   ShopLayoutTest.h
   ShopLayoutTest.cpp
+  StarterShopLayoutTest.h
+  StarterShopLayoutTest.cpp
   SectionNavTest.h
   SectionNavTest.cpp
   SettingsLayoutTest.h
