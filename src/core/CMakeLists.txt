@@ -11,6 +11,8 @@ add_library(nimvlets_core STATIC
   DisplayControls.cpp
   Preferences.h
   Preferences.cpp
+  ClickCounting.h
+  ClickCounting.cpp
   Localization.h
   Localization.cpp
   Silhouette.h

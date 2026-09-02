@@ -15,6 +15,9 @@ add_library(nimvlets_platform_policy STATIC
   RendererPolicy.h
   RendererPolicy.cpp
   SystemShellTypes.h
+  GlobalClickTypes.h
+  GlobalClickTypes.cpp
+  GlobalClickMonitor.h
   QuickMenuModel.h
   QuickMenuModel.cpp
 )
