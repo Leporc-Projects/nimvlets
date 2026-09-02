@@ -5,7 +5,33 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 10 — Shop oculto de starters** (un
+Este repositorio está en **Block 11A — Modo de conteo de clics GLOBAL,
+opt-in** (una preferencia de **Settings** —y solo de Settings— que deja
+contar pulsaciones del botón primario en **cualquier** parte del
+sistema, no solo sobre el Nimvlet: `Click counting [ Nimvlet only ]
+[ Anywhere ]`, **apagada por defecto** para usuarios nuevos y migrados
+por igual. Es la feature que AGENTS.md §14 mantuvo **explícitamente
+prohibida** desde Block 01 hasta que un brief la autorizara; el brief de
+Block 11A la autoriza y **ninguna restricción de privacidad se relaja**.
+Es **mouse-only** y su única salida funcional es **+1 al contador**: la
+firma del callback nativo no tiene dónde llevar una coordenada, un
+timestamp, una app ni nada más. En macOS usa un event tap
+**listen-only** de CoreGraphics con la máscara de **un solo evento**
+(`kCGEventLeftMouseDown`) y el permiso **Input Monitoring** — **NO**
+Accessibility, **NO** Screen Recording — pedido desde **un solo lugar**,
+solo tras una explicación de primera parte y un "Continue" del owner,
+**nunca al arrancar**. El modo **pedido** y el **efectivo** son cosas
+distintas: si el permiso falta o se revoca, el conteo cae con seguridad
+a local y Settings lo dice, en vez de dejar de contar en silencio. Y un
+clic físico sobre el pet **nunca vale +2**: en modo global el monitor es
+la única fuente de moneda, mientras la animación de personalidad sigue
+igual. Windows y Linux reportan honestamente "no disponible" — el
+diseño está investigado, no escrito. AppState sube a **v6** sin mover la
+frontera histórica de propiedad (sigue congelada en 4). Ver
+[`docs/GLOBAL_CLICK_MODE.md`](docs/GLOBAL_CLICK_MODE.md),
+[`docs/PRIVACY_SECURITY.md`](docs/PRIVACY_SECURITY.md) §H,
+[`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §22 y DEC-139), sobre
+**Block 10 — Shop oculto de starters** (un
 submodo CONTEXTUAL de la sección Shop — no una cuarta pestaña: un
 usuario que completó el onboarding y eligió UNA variante de Frin puede
 comprar la OTRA con clics; la regla de no-divulgación mantiene a Frin
@@ -291,7 +317,7 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
 #   capturar un estado no-default de Settings y como smoke en vivo de que
 #   esa ruta produce el AppState/runtime esperado.
 # NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity -> foco de teclado sobre una fila
-#   de Settings (row:size|row:opacity|row:lock|row:language).
+#   de Settings (row:size|row:opacity|row:lock|row:clickcounting|row:language).
 # NIMVLETS_DEV_UI_NAV_SMOKE=1           -> smoke NO interactivo de que las
 #   tres pestañas (Collection · Shop · Settings) son ALCANZABLES con un
 #   click desde cualquier sección (mismo camino que un click del owner:
@@ -394,6 +420,30 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
 # NIMVLETS_DEV_STARTER_HOTSPOT=1  -> sintetiza el click REAL de la esquina
 #   inf-der (mismo camino que un click del owner). Loguea si abrió o fue
 #   no-op (hotspot no armado = sin ofertas legítimas).
+# --- Conteo de clics GLOBAL, opt-in (Block 11A) ----------------------
+# NIMVLETS_DEV_CLICK_COUNTING=nimvlet_only|anywhere -> pide ese modo por
+#   el MISMO camino que un click del owner en Settings
+#   (ApplyPreferenceChange -> EvaluateGlobalClickRequest). Con "anywhere"
+#   y el permiso ausente deja la explicación de primera parte VISIBLE, sin
+#   pedir nada todavía. Necesita NIMVLETS_DEV_OPEN_COLLECTION.
+# NIMVLETS_DEV_GLOBAL_CLICK_ACTION=continue|notnow|recheck -> acciona un
+#   botón del flujo de permiso por su camino real. OJO: "continue" SÍ
+#   llama al pedido nativo (puede mostrar el diálogo del OS) — es
+#   exactamente lo que hace ese botón.
+# NIMVLETS_DEV_GLOBAL_CLICKS=<n> -> empuja n clics primarios GLOBALES por
+#   el mismo camino que el monitor nativo. NO finge que el OS concedió
+#   ningún permiso: si el modo efectivo no es global, se IGNORAN — que es
+#   justamente la mitad interesante del test (probar, sin permiso de TCC,
+#   que un evento global no suma en modo local, y que en modo global
+#   activo cada evento suma exactamente 1). Loguea el balance antes/después.
+#
+#   Ejemplo — la regresión de doble conteo, sin tocar el estado real:
+#     NIMVLETS_DEV_APPDATA_DIR=/tmp/nv NIMVLETS_DEV_HIDE_PET=1 \
+#     NIMVLETS_DEV_CLICK_TEST_COUNT=4 NIMVLETS_DEV_GLOBAL_CLICKS=6 \
+#     ./build/macos-debug/src/app/nimvlets_spike
+#   Con el modo global ACTIVO, los 4 clics del pet suman 0 y los 6 globales
+#   suman 6. Ver docs/GLOBAL_CLICK_MODE.md §16 para la QA manual completa.
+#
 # NIMVLETS_DEV_STARTER_OFFER=<petId>[/<variant>]  -> selecciona esa oferta
 #   EXACTA como hero. NIMVLETS_DEV_STARTER_HOVER=<petId>[/<variant>] ->
 #   hover (revela el precio). NIMVLETS_DEV_STARTER_CONFIRM=1 -> abre la

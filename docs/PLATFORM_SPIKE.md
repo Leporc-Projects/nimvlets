@@ -736,3 +736,66 @@ Verificado además contra el binario real: instalación nueva siembra
 con `ownedPetIds=[bunny,frin]` se reescribe a v4 con esas tres
 autorizaciones; un save v4 corrupto con `active=nidir, owned={bunny}`
 reabre en bunny con `owned` intacto (nidir NO se otorgó).
+
+## 13. Modo de conteo de clics global, OPT-IN (Block 11A)
+
+Diseño completo en `docs/GLOBAL_CLICK_MODE.md`. Acá, el estado de
+plataforma con la disciplina PASS / NOT TESTED de AGENTS.md §4.
+
+### 13.1 Estado por plataforma
+
+| Item | macOS | Windows | Linux/X11 | Linux/Wayland |
+|---|---|---|---|---|
+| Capacidad reportada | `kSupportedNeedsPermission` | `kUnavailable` | `kUnavailable` | `kUnavailable` |
+| Permiso | **Input Monitoring** | — | — | — |
+| Preflight sin diálogo (`CGPreflightListenEventAccess`) | **PASS** | n/a | n/a | n/a |
+| Creación del event tap listen-only | **PASS** | NOT IMPLEMENTED | NOT IMPLEMENTED | NOT POSSIBLE |
+| Arranque/parada del monitor, shutdown limpio | **PASS** | n/a | n/a | n/a |
+| Arranque sin prompt con `anywhere` persistido | **PASS** | n/a | n/a | n/a |
+| Prevención de doble conteo (app-level) | **PASS** | n/a | n/a | n/a |
+| Persistencia v6 del modo | **PASS** | (compila) | (compila) | (compila) |
+| **Pulsación FÍSICA del escritorio contada** | **NOT TESTED** — requiere un humano; ver §13.3 | n/a | n/a | n/a |
+| Settings muestra "Not available on this system" | n/a | **NOT TESTED** (no se corrió) | **NOT TESTED** | **NOT TESTED** |
+
+### 13.2 Lo verificado en vivo (macOS 26.6, arm64, Debug + Release)
+
+Con `NIMVLETS_DEV_APPDATA_DIR` aislado y el pet oculto:
+
+- arranque en modo local: **ningún** monitor instalado, ningún prompt de
+  TCC;
+- 5 eventos globales reenviados en modo local → **0 contados**;
+- pedir "Anywhere" con el permiso ya concedido → *"global click monitor
+  ACTIVE"*;
+- **doble conteo:** con el modo global activo, 4 clics del pet + 6
+  eventos globales → balance 3 → **9** (los del pet sumaron **0**);
+- reinicio con `anywhere` persistido → preflight, arranque silencioso,
+  **sin prompt**, balance preservado;
+- volver a "Nimvlet only" → *"global click monitor stopped"*; los
+  eventos globales dejan de contar, los del pet vuelven;
+- el archivo en disco es **v6** y termina en `anywhere` /
+  `nimvlet_only`;
+- shutdown limpio en todos los casos (el monitor se para y hace `join`
+  ANTES del flush de estado).
+
+Regresiones de lo anterior, sin cambios: `NIMVLETS_DEV_UI_NAV_SMOKE`
+6/6; onboarding DEV completa y fija `lifecycle=completed`; el hotspot
+invisible del Starter Shop sigue abriendo con ofertas legítimas y siendo
+no-op sin ellas; compra del Shop público (Nidir a 300) intacta;
+`nimvlets_macos_text_check` y `nimvlets_macos_clickthrough_check` PASS.
+
+### 13.3 El hueco honesto
+
+**No se verificó que una pulsación FÍSICA real del botón primario en el
+escritorio llegue al tap y sume 1.** Sintetizar un clic requeriría
+`CGEventPost` / permiso de *post event* (o Accessibility) — APIs que
+este producto tiene prohibidas y que el guard de privacidad rechaza. Lo
+que sí quedó probado es todo lo que rodea a ese paso: el permiso, la
+creación del tap, el hilo, el reenvío al hilo principal, la política de
+conteo, la persistencia y el apagado. El paso restante es QA manual del
+owner — la checklist está en `docs/GLOBAL_CLICK_MODE.md` §16.
+
+**Windows y Linux: NOT RUNTIME VERIFIED.** No se escribió código Win32
+ni X11 para esta feature (brief §16/§17): los adapters reportan
+`kUnavailable` honestamente y el diseño investigado queda documentado en
+`docs/GLOBAL_CLICK_MODE.md` §12. Que compilen en CI no es una
+afirmación de comportamiento.

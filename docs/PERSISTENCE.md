@@ -124,7 +124,7 @@ igual que todo otro formato en disco de este repositorio).
 
 ```
 magic             : 8 bytes, "NVSTATE1"   (el magic NO cambia entre schemas)
-schemaVersion     : uint32                (4 desde Block 07)
+schemaVersion     : uint32                (6 desde Block 11A)
 -- cuerpo compartido v1+ (Block 03):
 clickBalance      : uint64
 activePetId       : string   (uint32 byte-length + UTF-8 bytes)
@@ -144,6 +144,8 @@ opacityPercent    : uint32  (0 => sin preferencia => 100)
 language          : string  ("en"/"es"; "" => nunca elegido => se resuelve del locale del OS, sin persistir)
 -- añadido de v5 (Block 09A):
 onboardingLifecycle : uint8  (0=kPending / 1=kLegacyComplete / 2=kCompleted — lifecycle de primer arranque, ver docs/ONBOARDING.md)
+-- añadido de v6 (Block 11A):
+clickCountingMode : string  ("nimvlet_only"/"anywhere"; "" => nunca elegido => "nimvlet_only". Ver docs/GLOBAL_CLICK_MODE.md)
 ```
 
 **Determinista:** serializar el mismo `AppState` dos veces produce una
@@ -152,9 +154,9 @@ iteración de map/set en ningún lugar del formato
 (`SerializationIsDeterministic` en `tests/AppStateSerializerTest.cpp`).
 
 **Versionado + migración hacia adelante (Block 06 DEC-109, Block 06.1
-DEC-116, Block 07 DEC-124/DEC-128, Block 09A DEC-131):**
-`DeserializeAppState` lee cualquier versión en `[1, kCurrentSchemaVersion]`
-— hoy **1..5**. Un archivo más viejo se lee con su layout y los campos
+DEC-116, Block 07 DEC-124/DEC-128, Block 09A DEC-131, Block 11A
+DEC-139):** `DeserializeAppState` lee cualquier versión en
+`[1, kCurrentSchemaVersion]` — hoy **1..6**. Un archivo más viejo se lee con su layout y los campos
 de versiones posteriores quedan en su default; `outState.schemaVersion`
 se fija a la versión actual, así que el próximo `Save()` lo reescribe al
 formato actual.
@@ -171,6 +173,26 @@ v5 -> `kLegacyComplete` (no destructivo); un v5 truncado antes del byte
 había archivo, aunque no parsee) para que src/app distinga un usuario
 nuevo de una recuperación de un archivo corrupto (nunca se onboardea a
 este último). Ver docs/ONBOARDING.md §2.
+
+**Migración v1..v5 -> v6 (Block 11A, DEC-139):** el campo
+`clickCountingMode` llega VACÍO, y `core::ParseClickCountingMode("")`
+es `kNimvletOnly`. Es decir: **todo usuario existente queda en conteo
+LOCAL**, y la app no pide ningún permiso de input por haber subido de
+schema. Un v6 truncado antes del string se rechaza (no se adivina); un
+valor desconocido dentro de un v6 se lee como `kNimvletOnly` — el
+default privado, la misma disciplina que `sizeChoice` / `language`.
+`""` y `"nimvlet_only"` son estados DISTINTOS en disco ("nunca elegí"
+vs. "elegí local") y los dos se comportan igual en runtime.
+
+> **Esta subida de schema NO tocó la frontera histórica de propiedad.**
+> El riesgo concreto es escribir la migración como
+> `if (oldSchema < currentSchema) expandir Frin`: con
+> `kCurrentSchemaVersion == 6`, eso haría que un save v4 o v5 —propiedad
+> ya explícita— volviera a pasar por la expansión histórica y ganara
+> variantes que su dueño nunca compró. El gate real sigue siendo
+> `< AppState::kFirstExplicitEntitlementSchema` (**== 4**), un umbral
+> semántico fijo. `tests/EntitlementMigrationTest.cpp` fija v4→v6 y
+> v5→v6 como regresión explícita, y que la constante siga valiendo 4.
 
 **Migración de propiedad v2/v3 -> v4, en dos etapas** (DEC-128,
 afinada por DEC-129):
@@ -208,7 +230,7 @@ El resto es "los campos nuevos arrancan en su default". El click
 balance, la posición de ventana, el idioma, la propiedad, el
 pet/variante activo y las preferencias de tamaño/opacidad/lock
 **sobreviven** cada actualización. Una versión más nueva desconocida
-(v5+) o basura sigue tratándose como datos corruptos (ver §5), nunca se
+(v7+) o basura sigue tratándose como datos corruptos (ver §5), nunca se
 adivina. `NormalizeOwnedEntitlements` (orden + dedup, sobre una copia)
 mantiene la salida determinista byte a byte;
 `catalog::CanonicalizePetEntitlements` (orden + dedup, sin subsunción —

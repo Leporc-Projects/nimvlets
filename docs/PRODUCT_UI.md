@@ -1072,10 +1072,15 @@ mueve el foco a otro lado.
 ### 20.6 Frontera para Settings futuros
 
 Bloques futuros pueden agregar preferencias (launch-at-login,
-fullscreen, modo de clics global opt-in). **Nada de eso se implementa ni
-se insinúa acá** — sin placeholders deshabilitados, sin registry
-especulativo. Un `PreferenceField` nuevo + su fila + su `Apply*` es todo
-lo que haría falta.
+fullscreen, …). **Nada de eso se implementa ni se insinúa acá** — sin
+placeholders deshabilitados, sin registry especulativo. Un
+`PreferenceField` nuevo + su fila + su `Apply*` es todo lo que haría
+falta.
+
+> **Block 11A tomó exactamente ese camino** para el modo de clics global
+> —la primera de las preferencias que este párrafo anticipaba— sin
+> cambiar la arquitectura: un `PreferenceField::kClickCounting`, una
+> fila, y un quinto `Apply*`. Ver §22.
 
 ## 21. El SHOP OCULTO DE STARTERS — submodo contextual del Shop (Block 10)
 
@@ -1253,3 +1258,101 @@ El catálogo de producción NO se toca (`starterRole: kNone` + precio 0 en
 sus 4 entradas) → el Starter Shop está **inerte en producción**. Se
 ejercita solo por el harness sintético-DEV (`NIMVLETS_DEV_ONBOARDING`).
 Ver `docs/ONBOARDING.md` §16 y `README.md`.
+
+## 22. Interaction — el modo de conteo de clics OPT-IN (Block 11A)
+
+Ver `docs/GLOBAL_CLICK_MODE.md` para el diseño completo (semántica,
+permiso, plataformas, privacidad). Acá, lo que es de Product UI.
+
+### 22.1 Un tercer grupo en Settings
+
+`Collection · Shop · Settings` no cambia: **no hay una cuarta pestaña**.
+Settings gana un tercer grupo, entre "Companion" (el pet) y "Language"
+(chrome de la app), que es donde encaja conceptualmente — es *cómo se
+interactúa* con el pet. **Las filas de Companion no se mueven.**
+
+```
+Interaction
+  Click counting     [ Nimvlet only ]  [ Anywhere ]
+                     Where a click has to happen for it to count.
+```
+
+Y, **solo cuando hay algo útil que decir**, un bloque de aviso debajo:
+la explicación de privacidad previa al permiso, o el estado del monitor,
+o un reintento. En el estado por defecto del producto (modo local) **no
+se dibuja nada de eso**: estado de permiso que el owner no pidió es
+ruido, no información.
+
+### 22.2 El menú rápido NO gana esto (decisión de producto)
+
+Es la **primera** preferencia que vive solo en Settings. El menú de la
+barra se queda deliberadamente chico; Settings pasa a ser más capaz que
+él. `tests/QuickMenuModelTest.cpp` fija la regresión: ninguna etiqueta
+del menú, en ningún nivel, menciona el conteo de clics ni el permiso, y
+el conjunto de submenús sigue siendo exactamente `Size` / `Opacity` /
+`Language`.
+
+Por eso `SpikeApp::ApplyClickCountingMode` es el único de los cinco
+`Apply*` que **no** llama a `PushShellState()` — todo lo demás de la
+ruta canónica (DEC-130) es idéntico: muta un campo de `appState_`,
+`MarkDirty` con el mismo debounce, efecto de runtime, y
+`PushPreferencesToProductWindow`.
+
+### 22.3 Sin ramas por plataforma en el Product UI (brief §18)
+
+`SettingsLayout` consume `platform::GlobalClickUiState` — capacidad,
+permiso y actividad **ya resueltos a estado genérico** por una política
+pura en `nimvlets_platform_policy`. `src/productui` no contiene ningún
+`#ifdef __APPLE__` / `#ifdef _WIN32`, y ni siquiera sabe qué permiso
+existe: el **nombre del permiso** ("Input Monitoring") llega como DATO
+en `GlobalClickUiState::permissionName` y se sustituye en el token
+`{permission}` de la copy localizada
+(`productui::FormatWithPermission`), el mismo idioma de `{n}` / `{pet}`
+que el Shop ya usaba.
+
+En una plataforma sin capacidad, el segmento "Anywhere" **se dibuja
+apagado** —para que la línea de estado tenga a qué referirse— y queda
+fuera del hit-test y del recorrido con flechas.
+
+### 22.4 Teclado / foco
+
+El foco sigue viviendo en la **fila** (`row:clickcounting`), igual que
+las otras cuatro. Los botones del aviso (`gc:notnow`, `gc:continue`,
+`gc:recheck`) son widgets propios y se tabulan **justo después de su
+fila**, no al final del formulario, así el orden de foco sigue al orden
+visual. `Esc` con la explicación abierta equivale a "Not now" (la
+descarta) antes de poder cerrar la ventana — el mismo patrón que `Esc`
+saliendo del submodo del Starter Shop.
+
+### 22.5 Wallet canónico en vivo
+
+Un clic global reenviado pasa por el MISMO
+`SpikeApp::HandleCountedClick` → `PushModelsToProductWindow()` que un
+clic del pet, así que la cabecera compartida se actualiza en vivo en
+**las cuatro** superficies (Collection · Shop · Starter Shop · Settings)
+sin valores obsoletos. La arquitectura de DEC-138 se preserva tal cual:
+no se reintroduce ningún balance por sección.
+
+### 22.6 Presentación / tamaño
+
+Se preserva el lenguaje visual existente: mismos grupos separados por
+aire y una regla hairline, mismos controles segmentados, sin cards, sin
+acento por pet, sin iconos, sin previews. **Este bloque NO es la pasada
+visual futura del universo Nimvlets** y no rediseña Collection ni Shop.
+
+A 800×560 el estado **por defecto** (modo local, sin aviso) sigue
+entrando **sin scroll**, en EN y ES. Con un aviso desplegado el
+contenido pasa de largo y la vista scrollea — para eso existe
+`ClampSettingsScroll`, y es parte de por qué el aviso es condicional en
+vez de permanente. Fijado en `tests/SettingsLayoutTest.cpp`.
+
+### 22.7 AppState / privacidad
+
+- **Schema v6** (`AppState::clickCountingMode`) — ver
+  `docs/PERSISTENCE.md` §3.
+- Event-driven, como el resto de Settings: redibuja solo ante un cambio
+  real. Con el modo global activo y en reposo no hay polling, ni timer,
+  ni término nuevo en el `waitMs` del event loop.
+- El único permiso del sistema que este producto pide, se pide desde
+  Settings y solo tras una acción explícita del owner — nunca al
+  arrancar. Ver `docs/PRIVACY_SECURITY.md` §H.

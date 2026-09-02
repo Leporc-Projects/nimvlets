@@ -5572,3 +5572,165 @@ comprable; `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6. Congelado sin tocar: Nidir,
 la deuda `lie_to_sit` de Frin, onboarding, política de compra /
 elegibilidad, la Collection owned-only, el catálogo de producción, el
 schema de AppState.
+
+### DEC-139 — Modo de conteo de clics GLOBAL, opt-in: autorizado e implementado; modo pedido vs. efectivo; prevención de doble conteo; Input Monitoring (no Accessibility); AppState v6
+
+**Fecha:** 2026-09-01 · **Bloque:** 11A · **Estado:** vigente ·
+**Supersede:** la prohibición de AGENTS.md §14 y de
+`docs/PRIVACY_SECURITY.md` §B ("no implementar hasta que un bloque lo
+autorice explícitamente"), **solo** esa prohibición.
+
+**Contexto.** Desde Block 01, contar clics fuera del Nimvlet era una
+feature futura **prohibida**: AGENTS.md §14 la vetaba junto con el
+permiso que necesitaría, y DEC-086 registra que en Block 05 se descartó
+explícitamente un monitor global de `NSEvent` —técnicamente viable para
+el problema de click-through— por esta misma regla. El brief de Block
+11A la autoriza. **Ninguna restricción de privacidad se relaja**; varias
+se vuelven más específicas y quedan fijadas por tests.
+
+**Producto.** Una preferencia de **Settings** —y solo de Settings—:
+`Click counting [ Nimvlet only ] [ Anywhere ]`, default **Nimvlet
+only**, para usuarios nuevos y migrados por igual. El menú rápido **no**
+la gana: es la primera preferencia que vive solo en Settings, y esa
+asimetría es deliberada (el menú se queda chico; Settings crece).
+`tests/QuickMenuModelTest.cpp` fija la regresión.
+
+**Modo PEDIDO vs. modo EFECTIVO.** Se persiste lo que el owner eligió;
+lo que está pasando se DERIVA
+(`core::ResolveEffectiveClickCounting(requested, monitorActive)`):
+efectivo es Global sii se pidió `Anywhere` **y** el monitor corre de
+verdad. Si no puede activarse —permiso denegado/revocado, backend
+ausente, fallo de arranque— cae con seguridad a **Local**: los clics
+sobre el pet siguen contando. Nunca se descarta un clic en silencio ni
+se finge que el modo global está activo.
+
+*Decisión de UX pedida explícitamente por el brief §5:* la preferencia
+persistida **NO se auto-degrada**. Al confirmar con "Continue" se
+escribe `anywhere` aunque el permiso quede pendiente, y Settings muestra
+el estado real. Razón: en macOS `CGRequestListenEventAccess()` casi
+nunca concede en el momento (el diálogo solo ofrece abrir Ajustes del
+Sistema). Revertir la preferencia haría que el owner concediera el
+permiso, volviera, y encontrara el control de vuelta en "Nimvlet only" —
+más ambiguo, no menos. Así, el control refleja lo que el owner eligió y
+la línea de estado refleja lo que ocurre.
+
+**Prevención de doble conteo — el punto central.** En modo global, un
+clic sobre el pet lo ven las dos rutas y valdría +2. La regla vive en
+una política PURA (`core::CountedClickShouldIncrement`), no en `if
+(global)` repartidos: (Local, pet)→sí; (Local, global)→no *(defensivo:
+un evento reenviado tarde no se cuela)*; (Global, pet)→**no**; (Global,
+global)→sí. `SpikeApp::HandleCountedClick(source, nowMs)` es el ÚNICO
+punto de mutación del wallet para las dos fuentes. No hay segundo
+wallet, ni contadores por fuente, ni `source` persistido. En modo global
+el clic sobre el pet **sigue** disparando su animación de personalidad:
+solo cambia de dónde viene la moneda.
+
+**Semántica de arrastre, guiada por privacidad.** En modo global una
+pulsación primaria cuenta **una vez, aunque se vuelva un arrastre**.
+Distinguir clic de arrastre exigiría mirar el movimiento del puntero —
+coordenadas. Se prefiere una semántica ligeramente distinta y honesta
+antes que un seguimiento de puntero que el producto promete no hacer. En
+modo local la semántica histórica no cambia (un arrastre no cuenta).
+
+**macOS.** `CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+**kCGEventTapOptionListenOnly**, CGEventMaskBit(**kCGEventLeftMouseDown**))`,
+con permiso **Input Monitoring** (`CGPreflightListenEventAccess` /
+`CGRequestListenEventAccess`) — **NO Accessibility** (`AXIsProcessTrusted`
+sigue prohibido en todo `src/`), **NO** Screen Recording, **NO** root.
+El callback lee el TIPO del evento y nada más.
+
+*Hilo dedicado, y por qué.* Se leyó primero la fuente pineada de SDL
+3.4.12 (AGENTS.md §4): `Cocoa_PumpEventsUntilDate` usa
+`NSDefaultRunLoopMode`, así que el run loop principal **sí** atiende
+sources… mientras espera. Durante un render, la carga de un `.nvpack` o
+un redibujo del Product UI, no. Un `CGEventTap` tiene timeout duro y el
+sistema lo **deshabilita** si el callback no responde
+(`kCGEventTapDisabledByTimeout`) — colgarlo del run loop principal
+apagaría el conteo justo cuando el owner interactúa. El hilo existe solo
+mientras el modo está activo, bloquea en `CFRunLoopRun()` (cero polling,
+cero wakeups periódicos), y se para con una `CFRunLoopSource` **señalada**
+—latched— que elimina la carrera "Stop() antes de CFRunLoopRun()" sin
+necesitar un despertar de guardia. `Stop()` hace `join`.
+
+*Entrega.* Un `SDL_PushEvent` de un `SDL_EVENT_USER` propio **sin código
+ni datos** — el mismo seam que el menú rápido usa desde Block 06.
+`SDL_PushEvent` es thread-safe y (leído de la fuente) dispara el wakeup
+del `SDL_WaitEventTimeout` principal.
+
+**Sin prompt al arrancar.** Elegir "Anywhere" muestra primero una
+explicación de primera parte; **solo "Continue"** puede llamar al pedido
+nativo. En cada arranque se hace *preflight* (que nunca muestra
+diálogo): si ya está concedido el monitor arranca en silencio, si no se
+cae a local y Settings lo dice. Tras un pedido pendiente/denegado se
+nombra el lugar del OS y se ofrece **"Check again"** —
+**deliberadamente NO** un deep link `x-apple.systempreferences:` hacia
+Input Monitoring, que no es API documentada y ha cambiado entre
+versiones.
+
+**Capacidad, no plataforma.** Settings consume
+`platform::GlobalClickUiState` (capacidad/permiso/actividad ya
+resueltos) y el **nombre del permiso como DATO** sustituido en
+`{permission}`. `src/productui`, `src/app` y `src/core` no contienen
+ningún `#ifdef __APPLE__` / `#ifdef _WIN32`.
+
+**Windows / Linux: honestidad, no paridad fingida.** Los adapters
+reportan `kUnavailable` y Settings dibuja "Anywhere" apagado con "Not
+available on this system". El diseño Win32 (`WH_MOUSE_LL`, nunca
+`WH_KEYBOARD_LL`) y el X11 (`XI_RawButtonPress`) quedan **investigados y
+documentados, no escritos**: brief §16/§17 + AGENTS.md §4 — un hook
+global de input no se demuestra compilando, y este bloque no tuvo
+Windows ni Linux para correrlo. Wayland no puede, por diseño del
+protocolo, sin capturar pantalla / `/dev/input` / un portal que
+*desvía* el puntero.
+
+**AppState v6.** Un solo campo nuevo: `clickCountingMode`, string
+(`""`/`"nimvlet_only"`/`"anywhere"`), con la disciplina de
+`sizeChoice`/`language`. Migración v1..v5 → **`kNimvletOnly`**.
+**La frontera histórica de propiedad NO se movió:** el gate sigue siendo
+`< kFirstExplicitEntitlementSchema` (**== 4**), un umbral semántico
+fijo, jamás `kCurrentSchemaVersion` — el error que el brief §12 pedía
+descartar. Fijado por regresión: v4→v6 y v5→v6 no ganan variantes de
+Frin, no reinterpretan propiedad, y la constante sigue valiendo 4.
+
+**El guard de privacidad se afila, no se afloja.** El test de Python que
+prohibía `CGEventTapCreate` de plano ahora fija que: el tap y las APIs
+de permiso viven en **exactamente un archivo**; el tap es listen-only y
+nunca `kCGEventTapOptionDefault`; la máscara es exactamente
+`kCGEventLeftMouseDown` (falla si aparece cualquier otro evento); el
+callback no lee coordenadas/flags/timestamp/proceso destino; el pedido
+de permiso ocurre en un solo call site; el callback de reenvío no tiene
+parámetros de datos; y `AppState` no persiste nada más que el modo.
+Además sigue prohibiendo, en todo `src/`, Accessibility, captura de
+pantalla, HID crudo, síntesis de eventos, `WH_KEYBOARD_LL`, constantes
+de teclado, enumeración de apps y red. El guard mide **código**, no
+comentarios — para que los adapters puedan explicar en prosa justamente
+lo que no usan.
+
+**Verificado.** 535 tests C++ (eran 491) y 166 Python (eran 162), Debug
++ Release + universal2 (lipo: x86_64 arm64, tests corriendo en el
+binario fat), `nimvlets_macos_text_check` y
+`nimvlets_macos_clickthrough_check` PASS. En vivo en macOS 26.6 (arm64),
+app-data aislado: arranque local sin monitor ni prompt; 5 eventos
+globales en modo local → **0 contados**; "Anywhere" con permiso
+concedido → monitor **ACTIVE**; **doble conteo**: 4 clics del pet + 6
+eventos globales → balance 3 → **9** (los del pet sumaron 0); reinicio
+con `anywhere` persistido → preflight y arranque **sin prompt**; volver
+a local → *"monitor stopped"* y los eventos globales dejan de contar;
+archivo en disco **v6**; shutdown limpio siempre. Release en reposo:
+**0.0 % de CPU en 12 muestras** y RSS indistinguible, con el monitor ON
+y OFF. Regresiones sin cambios: `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6,
+onboarding DEV (`lifecycle=completed`), hotspot invisible del Starter
+Shop, compra del Shop público (Nidir a 300), Collection owned-only,
+EN/ES completo.
+
+**Hueco honesto.** No se verificó que una pulsación **física** real del
+escritorio llegue al tap y sume 1: sintetizar un clic exigiría
+`CGEventPost` / permiso de *post event* o Accessibility, prohibidos acá.
+Todo lo que rodea a ese paso quedó probado. La checklist de QA manual
+del owner está en `docs/GLOBAL_CLICK_MODE.md` §16.
+
+**Congelado sin tocar:** Nidir (control dorado), la deuda `lie_to_sit`
+de Frin, el contenido de Bunny/Nidir/Frin, el timing de hover, el
+scheduling ambient, la precedencia de animaciones, onboarding de
+producción, la política de compra/elegibilidad, el Starter Shop oculto,
+la Collection owned-only, el catálogo de producción, y Block 09B.

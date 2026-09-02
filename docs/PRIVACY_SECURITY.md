@@ -43,11 +43,19 @@ admin/root. Sigue sin instalarse ningún monitor global de `NSEvent`
 descartó explícitamente por esta razón — ver DEC-086 y AGENTS.md
 §5/§14).
 
-## B. Global click mode (future, opt-in — NOT implemented)
+## B. Global click mode — IMPLEMENTED in Block 11A (opt-in)
 
-A future, entirely separate, opt-in feature may let the user count
-clicks anywhere on the system, not just on the Nimvlet. Requirements
-that must hold **before** it can ship, in any block that implements it:
+> **Estado.** Esta sección describía, desde Block 01, una feature
+> **futura y prohibida**. El brief de Block 11A la autorizó y la
+> implementó. Los requisitos de abajo eran condiciones *previas* al
+> envío; ahora son **contratos permanentes cumplidos**, y se verifican
+> contra la fuente real en `tools/test_asset_pipeline.py`
+> (`PrivacyInvariantTest`). Ver **§H** para el estado real de lo
+> implementado, y `docs/GLOBAL_CLICK_MODE.md` para el diseño completo.
+
+Una feature separada y opt-in deja al usuario contar clics en cualquier
+parte del sistema, no solo sobre el Nimvlet. Requisitos que debían
+cumplirse **antes** de poder enviarla — y que se cumplen:
 
 - The exact OS permission it needs, and exactly what it observes, must
   be explained to the user before it's requested.
@@ -62,11 +70,21 @@ that must hold **before** it can ship, in any block that implements it:
 - Implemented as a separate, clearly bounded module — not folded into
   the standard interaction path.
 
-This is **not implemented in Block 01**, and no permission for it —
-Accessibility, Input Monitoring, or otherwise — is requested anywhere
-in this block's code. Grep-able guarantee: `src/` contains no reference
-to `CGEventTap`, `AXIsProcessTrusted`, `SetWindowsHookEx`, or any other
-global-hook API.
+**Histórico (Block 01–10).** Durante diez bloques esto no estuvo
+implementado y ningún permiso — Accessibility, Input Monitoring, ni
+ningún otro — se pidió en ninguna parte del código; la garantía
+grep-eable era que `src/` no contenía ninguna referencia a `CGEventTap`,
+`AXIsProcessTrusted`, `SetWindowsHookEx` ni ninguna otra API de hook
+global.
+
+**Desde Block 11A** esa garantía se vuelve más específica en vez de
+desaparecer: `CGEventTapCreate` y las APIs de permiso de Input
+Monitoring existen en **exactamente un archivo**
+(`src/platform/macos/GlobalClickMonitor.mm`) y en ningún otro;
+`AXIsProcessTrusted`, `AXUIElement`, `SetWindowsHookEx`,
+`WH_KEYBOARD_LL`, `CGEventPost` y toda API de captura de pantalla o de
+enumeración de apps **siguen sin aparecer en ningún lugar de `src/`**.
+Ver §H.
 
 ## C. Explicit non-goals (every block, unless one is explicitly revised)
 
@@ -74,8 +92,11 @@ Nimvlets does not, and this block does not add anything that:
 
 - captures the screen or any window's contents;
 - logs keyboard input, globally or otherwise;
-- logs mouse clicks globally (see §B — that's a distinct, future,
-  opt-in feature with its own rules);
+- logs mouse clicks globally (see §B/§H — desde Block 11A existe un
+  modo OPT-IN, apagado por defecto, que **cuenta** —no registra—
+  pulsaciones del botón primario: sin coordenadas, sin timestamps, sin
+  historial, sin app, sin contenido; su única salida funcional es
+  incrementar el contador);
 - enumerates other running applications for behavioral purposes;
 - opens network sockets or makes network requests (Block 01: zero
   network activity, confirmed in the Block 01 report);
@@ -175,3 +196,70 @@ nuevo** (brief §20), grep-verificable igual que el resto de `src/`:
 - **Sin cuenta, sin red, sin telemetría, sin sync.** Igual que siempre.
   El nuevo estado persistido (propiedad + preferencias del menú) va al
   mismo único archivo local sin autenticación de §E.
+
+## H. Conteo de clics global, OPT-IN (Block 11A)
+
+Ver `docs/GLOBAL_CLICK_MODE.md` para el diseño completo. Lo relevante
+para este documento:
+
+**Qué observa.** Exclusivamente **pulsaciones del botón primario al
+bajar**, en todo el sistema, y solo mientras el owner lo activó. La
+única salida funcional es **+1 al contador de clics**.
+
+**Qué NO observa — nunca, en ningún modo:**
+
+| | |
+|---|---|
+| teclado | pixeles de pantalla / capturas |
+| contenido o títulos de ventanas | aplicación activa o enfocada |
+| nombres de procesos/apps | URLs, texto, portapapeles |
+| coordenadas del puntero | timestamps de clics |
+| trayectorias | historial de clics |
+| estadísticas por app | contenido de la rueda de scroll |
+
+El botón derecho, el medio y el scroll ni siquiera están en la máscara
+del event tap: no hay nada que "descartar".
+
+**La firma del callback es la garantía estructural**, no una promesa de
+prosa:
+
+```cpp
+using GlobalPrimaryClickCallback = void (*)(void* userData);
+```
+
+No hay dónde poner una coordenada.
+
+**Permiso.** En macOS: **Input Monitoring** (TCC). **NO** Accessibility
+(`AXIsProcessTrusted` / `AXUIElement` siguen prohibidos en todo `src/`),
+**NO** Screen Recording, **NO** admin/root. Se pide desde **un solo
+call site**, solo tras un "Continue" explícito del owner sobre una
+explicación de primera parte, y **jamás al arrancar** — ni siquiera
+cuando el estado guardado dice `anywhere`: ahí se hace *preflight* (que
+nunca muestra un diálogo) y, si no está concedido, se cae a conteo local
+y Settings lo informa.
+
+**Listen-only.** El clic del usuario nunca se modifica, suprime, retrasa
+ni consume.
+
+**Qué se persiste.** Solo la preferencia del owner
+(`AppState::clickCountingMode`: `""` / `"nimvlet_only"` / `"anywhere"`,
+schema v6). Nada más: ni coordenadas, ni timestamps, ni historial, ni
+contadores por fuente, ni el estado del permiso. El default de producto
+y de migración es **Nimvlet only** — ningún usuario existente queda con
+conteo global habilitado por actualizar.
+
+**Sin red, sin telemetría, sin nube, sin cuenta**, igual que siempre.
+
+**Módulo separado.** Vive en su propia frontera
+(`src/platform/GlobalClickMonitor.h` + un adapter por OS), deliberadamente
+fuera de `TransparentWindowSupport` / `SystemShell` / el input normal de
+SDL.
+
+**Verificado por tests, no solo escrito.** `tools/test_asset_pipeline.py`
+(`PrivacyInvariantTest`) chequea contra la fuente real que el event tap
+y las APIs de permiso viven en un único archivo, que el tap es
+listen-only, que su máscara es exactamente `kCGEventLeftMouseDown`, que
+el callback no lee coordenadas/flags/timestamp/proceso destino, que el
+pedido de permiso ocurre una sola vez, que el callback de reenvío no
+tiene parámetros de datos, y que `AppState` no persiste nada más que el
+modo. El guard mide **código**, no comentarios.

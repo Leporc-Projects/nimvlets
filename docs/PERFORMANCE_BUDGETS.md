@@ -804,3 +804,68 @@ nuevos, y **reusa el mismo bundle `.nvprev`** cargado una vez al abrir
 - 20 ciclos open/close del Product UI (con el Shop en el medio): sin
   leak, RSS asienta como en Block 06.2. `Close()` libera renderer +
   texturas + las dos vistas.
+
+## Mediciones reales de Block 11A (modo de conteo de clics global, opt-in)
+
+macOS **Release**, Apple Silicon nativo (macOS 26.6), una máquina,
+directorio de app-data aislado, pet oculto. Sin `sudo`, solo `ps`.
+**Doce muestras de `%cpu` a 5 s de intervalo tras 5 s de asentamiento**
+(ventana de 60 s), más el tiempo de CPU acumulado sobre esa misma
+ventana — nunca una sola muestra (regla de metodología de este
+documento). El intervalo ambient se fija en 3600 s
+(`NIMVLETS_DEV_PASSIVE_INTERVAL_SECONDS`) para aislar el piso real de
+reposo: sin eso, las cifras las domina el timer de animación del pet
+(~12 s), que es **idéntico** en los dos escenarios y no tiene nada que
+ver con esta feature.
+
+| Escenario | %cpu (12 muestras) | CPU acumulada / 60 s | RSS |
+|---|---|---|---|
+| **Global OFF** (Nimvlet only — el default) | `0.0` ×12 | ~40 ms | ≈165 MB |
+| **Global ON** (Anywhere, event tap ACTIVO) | `0.0` ×12 | ~10 ms | ≈165 MB |
+
+RSS medido en 3 corridas pareadas: `165/164`, `165/165`, `165/165` MB.
+
+### Lo que estas cifras SÍ dicen
+
+- **Con el modo global APAGADO —el default— el costo es literalmente el
+  de antes de este bloque.** No se instala ningún monitor, no hay hilo
+  extra, no hay polling, no hay wakeups. El adapter se *crea* (para que
+  Settings pueda reportar la capacidad honestamente) pero no instala
+  nada nativo hasta un `Start()` explícito.
+- **Con el modo global ENCENDIDO y en reposo, no hay delta medible.**
+  0.0 % en las doce muestras, y RSS indistinguible. El tiempo de CPU
+  acumulado dio incluso *menor* en la corrida ON que en la OFF (10 vs
+  40 ms) — eso es ruido entre corridas, no una señal; lo honesto es
+  decir que **ambos son efectivamente cero** y que la diferencia está
+  por debajo de lo que este método resuelve.
+- **Es monitoreo event-driven de verdad, no polling disfrazado.** El
+  hilo dedicado bloquea en `CFRunLoopRun()` sin timeout y sin wakeups
+  periódicos; se despierta solo cuando el sistema entrega un evento. Su
+  parada usa una `CFRunLoopSource` **señalada** (latched), justamente
+  para no necesitar un despertar periódico de guardia.
+- **El event loop principal no cambió.** El cálculo de `waitMs` no gana
+  ningún término nuevo (DEC-112 intacto): un clic global llega como un
+  `SDL_EVENT_USER` empujado desde el hilo del monitor, que despierta el
+  `SDL_WaitEventTimeout` por el mismo mecanismo de wakeup que ya usaba
+  el menú rápido nativo desde Block 06.
+- **El callback nativo no provoca redibujos.** Lo único que se redibuja
+  tras un clic global es el wallet de la cabecera del Product UI, y solo
+  si está abierto y el balance realmente cambió.
+
+### Honestidad sobre los threads
+
+`ps -M` mostró +1 hilo con el monitor activo en una corrida y el mismo
+número en otra: el conteo total fluctúa con hilos internos de
+SDL/Metal, así que **no es un discriminador confiable** medido así. Lo
+que sí es un hecho de construcción, no de medición: el monitor crea
+**exactamente un** hilo mientras está activo, y `Stop()` hace `join`
+antes de volver.
+
+### Lo que NO se midió
+
+El costo por clic real con el tap instalado (cuánto tarda el callback,
+cuánto cuesta el `SDL_PushEvent`): requeriría clics físicos reales y una
+instrumentación que este bloque no tiene. Por construcción el callback
+compara un entero y llama una función; la mutación del wallet es un
+`++` sobre un `uint64` más el mismo debounce de persistencia que ya
+existía. **NOT MEASURED**, no estimado.

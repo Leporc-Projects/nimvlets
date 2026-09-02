@@ -474,3 +474,41 @@ occurred"):
 
 La validación real de Linux es, por diseño de este bloque, el job de CI
 de §9 una vez integrado -- no esta sesión.
+
+## 14. Conteo de clics global (Block 11A): NO disponible en Linux
+
+Ver `docs/GLOBAL_CLICK_MODE.md` §12.2 para el detalle. Resumen, con la
+misma disciplina de §3 (investigar antes de escribir código nativo, y no
+declarar verificado lo que no se corrió):
+
+**X11.** `XI_RawButtonPress` de XInput2 sobre la ventana raíz daría, en
+teoría, una notificación pasiva del botón primario sin grabs, sin
+suprimir input y sin root — encajaría detrás de la interfaz
+`platform::GlobalClickMonitor` sin cambiarla. **No se implementó.** Este
+proyecto no usa Xlib directamente en ningún lado: XInput2 está activado
+*dentro de la SDL pineada* (`SDL_X11_XINPUT`, ver
+`cmake/FetchSDL3.cmake`), no en nuestro código, y
+`src/platform/linux/` no enlaza `libX11` ni `libXi`. Hacerlo exigiría
+dependencias de desarrollo nuevas (+ paquetes nuevos en CI), una
+conexión X propia en paralelo a la que SDL ya administra (o hurgar en su
+interna), y un bucle de eventos aparte — exactamente lo que AGENTS.md
+§10 pide no agregar sin razón concreta, y §4 prohíbe declarar verificado
+sin correrlo. §13 de este documento ya registra que Linux nunca tuvo QA
+interactiva. Diseñado, no fingido.
+
+**Wayland.** No hay camino legítimo, y no por una limitación de este
+proyecto sino por **diseño del protocolo**: un cliente Wayland ordinario
+solo recibe input cuando el compositor le da foco al puntero sobre su
+propia superficie. Las únicas rutas para "ver clics en cualquier lado"
+serían capturar la pantalla (prohibido de forma permanente, AGENTS.md
+§5), leer `/dev/input` (root o grupo `input`, prohibido), o un portal de
+**captura** de entrada — cuya semántica *desvía/captura* el puntero en
+vez de observarlo pasivamente, rompería el uso normal del escritorio y
+no es lo que esta feature hace.
+
+**Consecuencia de producto, en los dos backends:** el adapter
+(`src/platform/linux/GlobalClickMonitor.cpp`, sin cabeceras X11 ni
+protocolo Wayland) reporta `kUnavailable`; Settings dibuja el segmento
+"Anywhere" apagado con la línea "Not available on this system"; y el
+modo "Nimvlet only" funciona exactamente igual que siempre. Se suma a la
+lista de limitaciones honestas de §6, no se disimula.

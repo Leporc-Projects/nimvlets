@@ -116,10 +116,15 @@ see `.gitignore`.
   window/UI (SDL window events) or polls cursor *position*
   (`SDL_GetGlobalMouseState`, `NSEvent.mouseLocation`-equivalent —
   position only, not content). It never installs a global input hook.
-- **Do not request Accessibility, Input Monitoring, Screen Recording,
-  or admin/root permissions.** If some feature seems to need one, stop
-  and document the blocker instead of silently requesting it — see
-  `docs/PRIVACY_SECURITY.md`.
+- **Do not request Accessibility, Screen Recording, or admin/root
+  permissions.** If some feature seems to need one, stop and document
+  the blocker instead of silently requesting it — see
+  `docs/PRIVACY_SECURITY.md`. **Input Monitoring** is the single
+  exception, and only for the opt-in global click mode authorized in
+  Block 11A: it is requested from exactly one call site, only after an
+  explicit owner action in Settings that showed a first-party
+  explanation first, and never at startup — see §14 and
+  `docs/GLOBAL_CLICK_MODE.md`.
 - No screen capture, no keyboard logging, no enumerating other apps for
   behavioral purposes, no network sockets, no telemetry, no
   runtime-downloaded assets.
@@ -136,12 +141,15 @@ see `.gitignore`.
   product-behavior vs. developer-tooling, not "screenshots are
   forbidden". Diagnostic captures are never shipped, never automated
   into the product, and never stored in the repository.
-- **Global click counting is a future, explicitly opt-in feature.** Do
-  not implement it, and do not request any permission for it, until a
-  block brief explicitly says to. When it does land, it must be
-  mouse-only (no keyboard), must not do content/screen inspection or
-  app-name tracking, and must not store coordinate/history data — only
-  increment a counter. See `docs/PRIVACY_SECURITY.md`.
+- **Global click counting is an implemented, explicitly opt-in
+  feature** since Block 11A (it was a prohibited future feature from
+  Block 01 through Block 10). The constraints it had to satisfy are now
+  permanent contracts, not future conditions: mouse-only (never
+  keyboard), no content/screen inspection, no app-name tracking, no
+  coordinate/history storage — the only functional output is
+  incrementing the click counter. It is OFF by default and never
+  activates without an explicit owner opt-in. See §14,
+  `docs/GLOBAL_CLICK_MODE.md`, and `docs/PRIVACY_SECURITY.md` §H.
 
 ## 6. Performance
 
@@ -267,12 +275,43 @@ placeholder shape is a generic, unnamed "blob," not a Nimvlet.
 
 ## 14. Global input monitoring
 
-Do not implement global (system-wide) click or keyboard monitoring of
-any kind, and do not request the permissions it would need
-(Accessibility / Input Monitoring), until a future block brief
-explicitly authorizes it as the separate, opt-in "global click mode"
-feature described in `docs/PRIVACY_SECURITY.md`. This is a hard rule,
-not a default that changes because it would be convenient.
+**Block 11A authorized exactly one form of global input monitoring, and
+only that one.** Before it, this section forbade all of it. What
+changed is the authorization; none of the privacy constraints did.
+
+What is allowed — and nothing beyond it:
+
+- **Primary mouse button DOWN, observed passively, and nothing else.**
+  Never keyboard. Never right/middle button, scroll, or motion: they
+  are not even in the event mask, so there is nothing to "discard".
+- **Listen-only.** The user's click is never modified, suppressed,
+  delayed, or consumed.
+- **The only functional output is "+1 to the click balance."** The
+  native callback's signature carries no payload at all
+  (`void (*)(void* userData)`) — no coordinates, no timestamp, no
+  button, no target app or window. You cannot leak what you cannot
+  carry.
+- **Nothing is persisted but the owner's mode preference.** No
+  coordinates, no timestamps, no click history, no per-source or
+  per-app counters, no cached permission state.
+- **OFF by default**, for new and migrated users alike. The app never
+  requests an input permission because it launched, because a save says
+  so, or from onboarding / Shop / Collection / the quick menu — only
+  from an explicit owner action in Settings that showed a first-party
+  explanation first.
+- **macOS: Input Monitoring, never Accessibility**
+  (`AXIsProcessTrusted` / `AXUIElement` remain forbidden everywhere in
+  `src/`), never Screen Recording, never admin/root.
+- **Confined to one file.** The event tap and the permission APIs live
+  only in `src/platform/macos/GlobalClickMonitor.mm`; nothing else in
+  `src/` may name them. `tools/test_asset_pipeline.py`
+  (`PrivacyInvariantTest`) enforces every bullet above against the real
+  source.
+
+Anything wider than this — keyboard monitoring, per-app statistics,
+coordinate tracking, click history, event synthesis — stays prohibited
+and still needs its own explicit block authorization. See
+`docs/GLOBAL_CLICK_MODE.md` and `docs/PRIVACY_SECURITY.md` §H.
 
 ## 15. Git workflow
 
@@ -342,5 +381,6 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/NIDIR_CONTENT.md` | Real asset source convention, import/normalization/mirror pipeline, and the directional content model (Block 04.2). |
 | `docs/BUNNY_CONTENT.md` | Bunny's migration to real production art, canonical-direction inversion, and the QA-driven downscale-quality/70-30-hover/rest-of-size corrections (Block 04.3). |
 | `docs/FRIN_CONTENT.md` | Frin's real male/female import and the named-state behavior graph (seated/lying transitions) it introduced (Block 05). |
-| `docs/PRODUCT_UI.md` | Product shell: the Collection window (hero + gallery composition, per-pet accent hero stage, two visual planes, soft accented action button), the **Shop** section + the **Settings** section + `Collection · Shop · Settings` text navigation, the click **wallet** (spendable, atomic purchase transaction, immediate persist), **variant-capable entitlements** (`catalog::PetEntitlement`), inline purchase confirmation, the **single canonical preference path** shared by the quick menu and Settings (`core::Preferences` + `SpikeApp::Apply*`, DEC-130), lightweight compiled previews (`.nvprev`), Retina text path, native quick menu, size/opacity/lock/hide controls, EN/ES localization + editorial contract, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope (Block 06 / 06.1 / 06.2 / 07 / 08). |
+| `docs/PRODUCT_UI.md` | Product shell: the Collection window (hero + gallery composition, per-pet accent hero stage, two visual planes, soft accented action button), the **Shop** section + the **Settings** section + `Collection · Shop · Settings` text navigation, the click **wallet** (spendable, atomic purchase transaction, immediate persist), **variant-capable entitlements** (`catalog::PetEntitlement`), inline purchase confirmation, the **single canonical preference path** shared by the quick menu and Settings (`core::Preferences` + `SpikeApp::Apply*`, DEC-130), lightweight compiled previews (`.nvprev`), Retina text path, native quick menu, size/opacity/lock/hide controls, EN/ES localization + editorial contract, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope, and the **Interaction** group — the opt-in global click-counting preference that lives only in Settings (Block 06 / 06.1 / 06.2 / 07 / 08 / 11A). |
+| `docs/GLOBAL_CLICK_MODE.md` | The opt-in system-wide primary-click counting mode: requested vs effective mode, double-count prevention, the macOS Input Monitoring event tap, the platform support matrix, and the privacy audit (Block 11A). |
 | `docs/ONBOARDING.md` | First-run onboarding architecture (Block 09A, **not enabled for production yet**): the persisted `OnboardingLifecycle` (AppState schema v5) + migration of existing users as legacy-complete, the data-driven starter roster (`catalog::StarterRole`, catalog schema v4), the pure `catalog::OnboardingPolicy` (selection eval, exact Frin-variant grant, atomic idempotent completion transaction, zero starting balance), the event-driven 44-second session-dwell secret reveal, the production content-readiness gate, the DEV-only `NIMVLETS_DEV_ONBOARDING` harness, the Block 09B boundary (DEC-131 / DEC-132 / DEC-133 / DEC-134), and **§15/§16 — the Block 10 hidden STARTER SHOP** (`catalog::StarterShopModel` / `StarterPurchasePolicy`, `lifecycle == kCompleted` gate, secret non-disclosure rule, exact-variant purchase, contextual Shop submode; DEC-137). |
