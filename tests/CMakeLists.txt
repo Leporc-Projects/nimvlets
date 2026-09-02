@@ -76,6 +76,8 @@ add_executable(nimvlets_tests
   StarterShopLayoutTest.cpp
   SectionNavTest.h
   SectionNavTest.cpp
+  ProductWindowStateTest.h
+  ProductWindowStateTest.cpp
   SettingsLayoutTest.h
   SettingsLayoutTest.cpp
   OnboardingPolicyTest.h
