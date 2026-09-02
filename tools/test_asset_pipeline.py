@@ -2059,6 +2059,17 @@ class PrivacyInvariantTest(unittest.TestCase):
 
         # Una sola mascara, un solo evento: el boton primario al bajar.
         self.assertIn("CGEventMaskBit(kCGEventLeftMouseDown)", code)
+        # Y EXACTAMENTE un bit: nada de mascaras OR-eadas ni de una
+        # segunda llamada que agregue otro evento. Re-auditado en la
+        # correccion de QA de Block 11A, porque macOS presenta Input
+        # Monitoring con una redaccion mucho mas amplia ("keystrokes from
+        # any application") de lo que esta mascara permite observar --
+        # quien acota el alcance es este bit, no la categoria de TCC.
+        self.assertEqual(
+            code.count("CGEventMaskBit("), 1,
+            "la mascara del tap debe ser UN solo CGEventMaskBit, sin bits OR-eados")
+        self.assertNotIn(
+            "kCGEventMaskForAllEvents", code, "jamas una mascara de todos los eventos")
         for other in (
             "kCGEventRightMouseDown", "kCGEventOtherMouseDown", "kCGEventScrollWheel",
             "kCGEventMouseMoved", "kCGEventLeftMouseDragged", "kCGEventFlagsChanged",
