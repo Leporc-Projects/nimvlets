@@ -2913,6 +2913,18 @@ int SpikeApp::Run() {
             SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_RESET_POSITION (via canonical path)");
             ResetPetPositionToSafeDefault();
         }
+        // NIMVLETS_DEV_PRODUCT_SHOT_SIZE=WxH — Block 12A: redimensiona la
+        // ventana antes de capturar, para revisar cabecera / nav / wallet
+        // en el mínimo soportado y en un viewport ancho (brief §32).
+        if (const char* sz = std::getenv("NIMVLETS_DEV_PRODUCT_SHOT_SIZE");
+            sz != nullptr && sz[0] != '\0') {
+            int w = 0;
+            int h = 0;
+            if (std::sscanf(sz, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+                SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_PRODUCT_SHOT_SIZE=%dx%d", w, h);
+                productWindow_.ResizeForQA(w, h);
+            }
+        }
         // Solo-DEV: vuelca el framebuffer de la Collection a un BMP y
         // sale (captura de QA a densidad nativa, sin captura de pantalla
         // del SO — brief §29). Ausente: no-op.

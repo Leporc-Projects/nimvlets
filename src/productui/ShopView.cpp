@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "productui/OrnamentGeometry.h"
+#include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/ShopPaint.h"
 #include "productui/UiTheme.h"
@@ -312,9 +314,15 @@ void ShopView::Render(
 
     // --- BROWSE: la estantería de personajes es todo el contenido ---
     if (layout.presentation == ShopPresentation::kBrowse) {
-        DrawText(painter, text, layout.browseHeading, type::kSectionSub, TextWeight::kRegular,
-                 theme::kTextMuted, layout.browseHeadingAnchor.CenterX(),
-                 layout.browseHeadingAnchor.y + 13.0f, HAlign::kCenter,
+        // Encabezado contextual con un motivo editorial chico a la
+        // izquierda (referencia E) — mismo copy, un poco más de carácter.
+        const float bh = MeasureText(text, layout.browseHeading, type::role::kCaption,
+                                     TextWeight::kRegular, painter.Scale());
+        const float adv = HeadingMotifAdvance(6.0f);
+        const float lx = layout.browseHeadingAnchor.CenterX() - (bh + adv) * 0.5f;
+        DrawHeadingMotif(painter, lx, layout.browseHeadingAnchor.y + 9.0f, tokens::kOrnamentNeutral);
+        DrawText(painter, text, layout.browseHeading, type::role::kCaption, TextWeight::kRegular,
+                 tokens::kTextSecondary, lx + adv, layout.browseHeadingAnchor.y + 13.0f, HAlign::kLeft,
                  static_cast<int>(layout.browseHeadingAnchor.w));
 
         for (const ShopTile& t : layout.tiles) {
@@ -330,11 +338,16 @@ void ShopView::Render(
     }
 
     // --- SELECTED: hero grande + rail compacto de la estantería ----
-    painter.FillRect(layout.shelfBackground, theme::kGalleryShelf);
+    painter.FillRect(layout.shelfBackground, tokens::kSurfaceSoft);
 
     DrawShopHero(painter, text, previews, layout.hero, focusedId);
 
-    painter.FillRect(layout.dividerRect, theme::kHairline);
+    // Divisor ornamental (── ◇ ──) entre el detalle del personaje y la
+    // estantería (referencia D) — un motivo quieto, uno por pantalla.
+    DrawOrnamentalDivider(
+        painter,
+        UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
+        tokens::kBorder, tokens::kOrnamentNeutral);
 
     for (const ShopTile& t : layout.rail) {
         const bool hovered = hoverId_ == t.focusId;

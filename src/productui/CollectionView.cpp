@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <utility>
 
+#include "productui/ButtonStyle.h"
+#include "productui/OrnamentGeometry.h"
+#include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
 
@@ -334,15 +337,15 @@ void CollectionView::Render(
         }
 
         if (h.actionEnabled) {
-            // Botón primario con la identidad del pet: relleno tenue +
-            // borde y texto oscuros legibles — NUNCA casi-negro (§17).
-            painter.FillRoundRect(h.actionButton, 9.0f, h.accent.softFill);
-            painter.StrokeRoundRect(h.actionButton, 9.0f, 1.5f, h.accent.line);
-            if (focusedId == h.actionFocusId) {
-                painter.StrokeRoundRect(h.actionButton.Inset(-3.0f), 12.0f, 2.0f, h.accent.line);
-            }
-            DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, h.accent.deepInk,
-                     h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter);
+            // Botón primario con la identidad del pet (Block 12A —
+            // sistema de botones): relleno tenue del acento + tinta
+            // oscura del acento, clampada a contraste legible si un pet
+            // futuro no llega — NUNCA casi-negro arbitrario (DEC-121).
+            DrawButton(painter, text, h.actionButton, h.actionLabel,
+                       ResolveButtonVisual(ButtonRole::kPrimary, &h.accent,
+                                           ButtonStateFlags{false, false,
+                                                            focusedId == h.actionFocusId, false}),
+                       type::role::kButton);
         } else if (h.showStatusLine) {
             // ACTIVO: "● On desktop". LOCKED: "Not in your collection",
             // sin punto. Sin botón, sin duplicar (brief §18).
@@ -360,27 +363,42 @@ void CollectionView::Render(
     //     (DEC-136 / brief §4.A) ---
     if (!hasGallery) {
         if (!layout.emptyGalleryText.empty()) {
-            DrawText(painter, text, layout.emptyGalleryText, type::kSectionSub, TextWeight::kRegular,
-                     theme::kTextFaint, layout.emptyGalleryAnchor.CenterX(),
-                     layout.emptyGalleryAnchor.y + 13.0f, HAlign::kCenter,
+            // Línea editorial quieta hacia el Shop, con el mismo motivo
+            // chico que los encabezados contextuales (referencia E).
+            const float ew = MeasureText(text, layout.emptyGalleryText, type::role::kCaption,
+                                         TextWeight::kRegular, painter.Scale());
+            const float adv = HeadingMotifAdvance(6.0f);
+            const float lx = layout.emptyGalleryAnchor.CenterX() - (ew + adv) * 0.5f;
+            DrawHeadingMotif(painter, lx, layout.emptyGalleryAnchor.y + 9.0f, tokens::kOrnamentNeutral);
+            DrawText(painter, text, layout.emptyGalleryText, type::role::kCaption, TextWeight::kRegular,
+                     tokens::kTextMuted, lx + adv, layout.emptyGalleryAnchor.y + 13.0f, HAlign::kLeft,
                      static_cast<int>(layout.emptyGalleryAnchor.w));
         }
         painter.PopClip();
         return;
     }
 
-    // --- Divisor (sobre el borde del segundo plano) ---
-    painter.FillRect(layout.dividerRect, theme::kHairline);
+    // --- Divisor ornamental (── ◇ ──) entre el hero y la gallery
+    //     (referencia D) — sobre el borde del segundo plano. ---
+    DrawOrnamentalDivider(
+        painter,
+        UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
+        tokens::kBorder, tokens::kOrnamentNeutral);
 
     // --- Gallery ---
     for (const GalleryItem& g : layout.gallery) {
         const bool hovered = hoverId_ == g.focusId;
         const bool focused = focusedId == g.focusId;
-        if (hovered) {
-            painter.FillRoundRect(g.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
-        }
+        // Item de gallery = el mismo panel enmarcado suave que las cards
+        // del Shop (brief §22): superficie que "levanta" sobre el
+        // segundo plano + hairline, wash al hover, anillo de foco
+        // neutro. Owned-only / hero activo / "Use" / variantes de Frin
+        // SIN cambios.
+        DrawSoftPanel(painter, g.cell.Inset(2.0f), 12.0f,
+                      hovered ? tokens::kHoverWash : tokens::kSurfaceRaised, tokens::kBorder,
+                      /*innerHighlight=*/false);
         if (focused) {
-            painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, g.accentLine);
+            painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, tokens::kFocus);
         }
 
         const unsigned char pedAlpha =

@@ -200,6 +200,13 @@ class ProductWindow {
         view_.SetVariantKeyboardFocusForQA(variantId);
     }
 
+    // Solo-DEV (QA / capturas, Block 12A): redimensiona la ventana a
+    // (w, h) puntos lógicos y re-sincroniza escala + viewports, para
+    // capturar la cabecera / nav / wallet en el tamaño mínimo soportado
+    // y en un viewport más ancho (brief §32). No forma parte del
+    // producto. No-op si está cerrada o si (w, h) no es razonable.
+    void ResizeForQA(int logicalW, int logicalH);
+
     // Solo-DEV (QA / capturas): sección visible, personaje seleccionado
     // del Shop (browse-first: sin selección => modo BROWSE), y estado de
     // confirmación de compra. Los valores de Settings los empuja src/app

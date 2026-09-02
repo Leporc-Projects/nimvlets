@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <utility>
 
+#include "productui/ButtonStyle.h"
+#include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
 
@@ -70,19 +72,20 @@ void SettingsView::DrawNotice(
     }
 
     for (const SettingsNoticeButton& b : notice.buttons) {
-        const bool hovered = hoverId_ == b.focusId;
-        if (hovered) {
-            painter.FillRoundRect(b.rect, 7.0f, theme::kHoverWash);
-        }
-        painter.StrokeRoundRect(b.rect, 7.0f, 1.25f, theme::kHairline);
-        if (focusedId == b.focusId) {
-            painter.StrokeRoundRect(
-                UiRect{b.rect.x - 4.0f, b.rect.y - 4.0f, b.rect.w + 8.0f, b.rect.h + 8.0f}, 10.0f,
-                2.0f, theme::kText);
-        }
-        DrawText(painter, text, b.label, type::kButton, TextWeight::kMedium, theme::kText,
-                 b.rect.CenterX(), b.rect.CenterY() + 4.5f, HAlign::kCenter,
-                 static_cast<int>(b.rect.w - 4.0f));
+        // "Continue" (el único camino que puede pedir el permiso) es la
+        // acción consecuente -> Primary (acento neutro, Settings no tiene
+        // pet). "Not now" -> Quiet. "Check again" -> Secondary. Es el
+        // único lugar de Settings que estrena el sistema de botones —
+        // Settings sigue siendo la sección más callada (brief §23).
+        const GlobalClickAction act = ParseGlobalClickAction(b.focusId);
+        const ButtonRole role = act == GlobalClickAction::kContinue  ? ButtonRole::kPrimary
+                                : act == GlobalClickAction::kNotNow   ? ButtonRole::kQuiet
+                                                                      : ButtonRole::kSecondary;
+        DrawButton(painter, text, b.rect, b.label,
+                   ResolveButtonVisual(role, nullptr,
+                                       ButtonStateFlags{hoverId_ == b.focusId, false,
+                                                        focusedId == b.focusId, false}),
+                   type::role::kButton, TextWeight::kMedium);
     }
 }
 

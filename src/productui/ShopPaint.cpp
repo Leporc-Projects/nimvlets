@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "productui/ButtonStyle.h"
+#include "productui/Ornaments.h"
 #include "productui/UiTheme.h"
 
 namespace nimvlets::productui {
@@ -46,12 +48,18 @@ void DrawShopTile(
     UiPainter& painter, TextCache& text, PetPreviewCache& previews, const ShopTile& t,
     double nameSize, unsigned char pedestalAlpha, bool hovered, bool focused, bool revealVisible,
     bool selectedMark) {
-    if (hovered) {
-        painter.FillRoundRect(t.cell.Inset(2.0f), 12.0f, theme::kHoverWash);
-    }
+    // Tarjeta = panel enmarcado suave (Block 12A, brief §21): superficie
+    // que "levanta" un susurro sobre el fondo + hairline; wash al hover;
+    // anillo de foco de teclado neutro. Geometría de la rejilla,
+    // contenido y semántica de hover/selección SIN cambios.
+    DrawSoftPanel(painter, t.cell.Inset(2.0f), 12.0f,
+                  hovered ? tokens::kHoverWash : tokens::kSurfaceRaised, tokens::kBorder,
+                  /*innerHighlight=*/false);
     if (focused) {
-        painter.StrokeRoundRect(t.cell.Inset(2.0f), 12.0f, 2.0f, t.accentLine);
+        painter.StrokeRoundRect(t.cell.Inset(2.0f), 12.0f, 2.0f, tokens::kFocus);
     }
+    // Pedestal con el tinte de identidad del pet detrás del arte —
+    // conserva el acento por pet en la card (brief §21).
     painter.FillRoundRect(t.art.Inset(-5.0f), 12.0f, t.pedestalTint.WithAlpha(pedestalAlpha));
 
     SDL_Texture* art = previews.Get(t.petId, t.variantId);
@@ -111,34 +119,28 @@ void DrawShopHero(
     }
 
     if (h.confirm.visible) {
-        DrawTextWrapped(painter, text, h.confirm.prompt, type::kHeroBody, TextWeight::kRegular,
-                        theme::kText, h.confirm.promptAnchor.x, h.confirm.promptAnchor.y + 13.0f,
+        DrawTextWrapped(painter, text, h.confirm.prompt, type::role::kBody, TextWeight::kRegular,
+                        tokens::kTextPrimary, h.confirm.promptAnchor.x, h.confirm.promptAnchor.y + 13.0f,
                         h.confirm.promptAnchor.w, 16.0f, 2);
 
-        painter.StrokeRoundRect(h.confirm.cancelButton, 8.0f, 1.5f, theme::kHairline);
-        if (focusedId == h.confirm.cancelFocusId) {
-            painter.StrokeRoundRect(h.confirm.cancelButton.Inset(-3.0f), 11.0f, 2.0f, theme::kText);
-        }
-        DrawText(painter, text, h.confirm.cancelLabel, type::kButton, TextWeight::kMedium,
-                 theme::kTextMuted, h.confirm.cancelButton.CenterX(),
-                 h.confirm.cancelButton.CenterY() + 4.5f, HAlign::kCenter);
-
-        painter.FillRoundRect(h.confirm.confirmButton, 8.0f, h.accent.softFill);
-        painter.StrokeRoundRect(h.confirm.confirmButton, 8.0f, 1.5f, h.accent.line);
-        if (focusedId == h.confirm.confirmFocusId) {
-            painter.StrokeRoundRect(h.confirm.confirmButton.Inset(-3.0f), 11.0f, 2.0f, h.accent.line);
-        }
-        DrawText(painter, text, h.confirm.confirmLabel, type::kButton, TextWeight::kSemibold,
-                 h.accent.deepInk, h.confirm.confirmButton.CenterX(),
-                 h.confirm.confirmButton.CenterY() + 4.5f, HAlign::kCenter);
+        // Cancelar = Secondary (contorno hairline); Confirmar = Primary
+        // con el acento del pet (Block 12A — sistema de botones).
+        DrawButton(painter, text, h.confirm.cancelButton, h.confirm.cancelLabel,
+                   ResolveButtonVisual(ButtonRole::kSecondary, nullptr,
+                                       ButtonStateFlags{false, false,
+                                                        focusedId == h.confirm.cancelFocusId, false}),
+                   type::role::kButton, TextWeight::kMedium);
+        DrawButton(painter, text, h.confirm.confirmButton, h.confirm.confirmLabel,
+                   ResolveButtonVisual(ButtonRole::kPrimary, &h.accent,
+                                       ButtonStateFlags{false, false,
+                                                        focusedId == h.confirm.confirmFocusId, false}),
+                   type::role::kButton);
     } else if (h.actionEnabled) {
-        painter.FillRoundRect(h.actionButton, 9.0f, h.accent.softFill);
-        painter.StrokeRoundRect(h.actionButton, 9.0f, 1.5f, h.accent.line);
-        if (focusedId == h.actionFocusId) {
-            painter.StrokeRoundRect(h.actionButton.Inset(-3.0f), 12.0f, 2.0f, h.accent.line);
-        }
-        DrawText(painter, text, h.actionLabel, type::kButton, TextWeight::kSemibold, h.accent.deepInk,
-                 h.actionButton.CenterX(), h.actionButton.CenterY() + 4.5f, HAlign::kCenter);
+        DrawButton(painter, text, h.actionButton, h.actionLabel,
+                   ResolveButtonVisual(ButtonRole::kPrimary, &h.accent,
+                                       ButtonStateFlags{false, false,
+                                                        focusedId == h.actionFocusId, false}),
+                   type::role::kButton);
     } else if (h.showStatusLine) {
         float statusX = h.statusAnchor.x;
         const bool owned = h.status == ShopItemStatus::kOwned;

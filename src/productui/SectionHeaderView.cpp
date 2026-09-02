@@ -82,7 +82,7 @@ void DrawSectionHeader(
             painter.FillRect(UiRect{tab.underline.x, tab.underline.y, tab.underline.w, 1.5f},
                              tokens::kTextPrimary);
             DrawDiamond(painter,
-                        UiRect{tab.underline.CenterX() - 3.0f, tab.underline.y + 3.0f, 6.0f, 6.0f},
+                        UiRect{tab.underline.CenterX() - 2.5f, tab.underline.y + 2.0f, 5.0f, 5.0f},
                         tokens::kOrnamentNeutral);
         }
     }

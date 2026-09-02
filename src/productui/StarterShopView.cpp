@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/ShopPaint.h"
 #include "productui/UiTheme.h"
@@ -327,9 +328,12 @@ void StarterShopView::Render(
     }
 
     // SELECTED.
-    painter.FillRect(layout.shelfBackground, theme::kGalleryShelf);
+    painter.FillRect(layout.shelfBackground, tokens::kSurfaceSoft);
     DrawShopHero(painter, text, previews, layout.hero, focusedId);
-    painter.FillRect(layout.dividerRect, theme::kHairline);
+    DrawOrnamentalDivider(
+        painter,
+        UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
+        tokens::kBorder, tokens::kOrnamentNeutral);
     for (const ShopTile& t : layout.rail) {
         const bool hovered = hoverId_ == t.focusId;
         const bool focused = focusedId == t.focusId;

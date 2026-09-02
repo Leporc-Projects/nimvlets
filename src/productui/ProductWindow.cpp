@@ -147,6 +147,22 @@ void ProductWindow::FocusWindow() {
     SDL_RaiseWindow(window_);
 }
 
+void ProductWindow::ResizeForQA(int logicalW, int logicalH) {
+    if (window_ == nullptr || logicalW < 200 || logicalH < 200 || logicalW > 6000 ||
+        logicalH > 6000) {
+        return;
+    }
+    SDL_SetWindowSize(window_, logicalW, logicalH);
+    RecomputeScale();
+    view_.OnViewportChanged();
+    shopView_.OnViewportChanged();
+    starterShopView_.OnViewportChanged();
+    settingsView_.OnViewportChanged();
+    onboardingView_.OnViewportChanged();
+    pendingExpose_ = true;
+    SDL_Log("nimvlets: [dev] Product UI resized to %dx%d logical for QA", logicalW, logicalH);
+}
+
 void ProductWindow::MinimizeForQA() {
     if (window_ != nullptr) {
         SDL_MinimizeWindow(window_);
