@@ -188,6 +188,13 @@ std::vector<std::uint8_t> SerializeAppState(const AppState& state) {
     // UI de onboarding (brief §4).
     AppendUint8(out, static_cast<std::uint8_t>(state.onboardingLifecycle));
 
+    // --- Añadido de v6 (Block 11A) ---
+    // El modo de conteo de clics PEDIDO ("" / "nimvlet_only" /
+    // "anywhere"). Un string, igual que sizeChoice/language. Es LO ÚNICO
+    // que esta feature persiste: nunca coordenadas, timestamps,
+    // historial ni estado de permiso (docs/PRIVACY_SECURITY.md §H).
+    AppendString(out, state.clickCountingMode);
+
     return out;
 }
 
@@ -320,12 +327,29 @@ bool DeserializeAppState(
         state.onboardingLifecycle = OnboardingLifecycle::kLegacyComplete;
     }
 
+    // Bloque v6 (Block 11A): modo de conteo de clics PEDIDO.
+    if (schemaVersion >= 6) {
+        if (!reader.ReadString(state.clickCountingMode)) {
+            outError = reader.Error();  // v6 truncado antes del string -> falla, no adivina
+            return false;
+        }
+    }
+    // MIGRACIÓN v1..v5 -> v6: el campo simplemente queda vacío, y
+    // core::ParseClickCountingMode("") == kNimvletOnly. Es la invariante
+    // del brief §12: NINGÚN usuario existente queda con conteo global
+    // habilitado por actualizar, y nada acá toca propiedad, balance,
+    // lifecycle ni preferencias. La reconciliación histórica de
+    // propiedad sigue gateada por `< kFirstExplicitEntitlementSchema`
+    // (== 4) en src/app — un umbral fijo que este bump NO mueve
+    // (DEC-129 / DEC-139).
+
     // schemaVersion == 1: los campos v2/v3/v4 quedan en su default.
     // schemaVersion == 2: `language` queda "" (src/app lo resuelve
     // desde el locale del OS en el próximo arranque); la propiedad se
     // parsea provisionalmente a `{petId, ""}` y src/app la reconcilia.
     // schemaVersion == 3: idem propiedad; `language` se conserva.
     // schemaVersion <= 4: `onboardingLifecycle` = kLegacyComplete.
+    // schemaVersion <= 5: `clickCountingMode` queda "" -> kNimvletOnly.
 
     outState = std::move(state);
     outError.clear();

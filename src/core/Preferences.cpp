@@ -7,7 +7,7 @@ namespace nimvlets::core {
 
 Preferences PreferencesFromStored(
     std::string_view sizeChoiceId, std::uint32_t opacityPercent, bool lockPosition,
-    std::string_view languageId) {
+    std::string_view languageId, std::string_view clickCountingModeId) {
     Preferences p;
     p.size = ParsePetSizeChoice(sizeChoiceId);
     // 0 = "sin preferencia guardada" -> 100 (totalmente opaco), igual que
@@ -18,6 +18,9 @@ Preferences PreferencesFromStored(
                            : NormalizeOpacityPercent(static_cast<int>(opacityPercent));
     p.lockPosition = lockPosition;
     p.language = ParseLanguage(languageId);
+    // Cualquier cosa que no sea el id EXACTO "anywhere" cae al default
+    // local — incluido el "" de todo save v1..v5 (brief §12).
+    p.clickCounting = ParseClickCountingMode(clickCountingModeId);
     return p;
 }
 

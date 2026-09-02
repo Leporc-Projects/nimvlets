@@ -110,6 +110,13 @@ struct AppState {
     //   v1/v2/v3/v4 migra a `kLegacyComplete` (usuario existente, ya
     //   onboardeado — se preserva TODO lo demás exacto). Ver
     //   docs/ONBOARDING.md y DEC-131.
+    // v6 (Block 11A): agrega `clickCountingMode` — la preferencia OPT-IN
+    //   de conteo de clics ("" / "nimvlet_only" / "anywhere"). Todo
+    //   v1..v5 migra al DEFAULT LOCAL: el campo llega vacío y
+    //   core::ParseClickCountingMode lo lee como kNimvletOnly. Un
+    //   usuario existente NUNCA queda con conteo global habilitado por
+    //   una actualización, y la app nunca pide un permiso de input por
+    //   haber subido de schema. Ver docs/GLOBAL_CLICK_MODE.md y DEC-139.
     //
     // Cada subida trae una migración hacia adelante mínima: un archivo
     // más viejo se lee con su layout, los campos nuevos quedan en su
@@ -118,8 +125,8 @@ struct AppState {
     // que el próximo Save() lo reescriba — así el click balance, la
     // posición, la propiedad y las preferencias del owner sobreviven
     // cada actualización. Ver docs/PERSISTENCE.md §3 y
-    // DEC-109/DEC-116/DEC-124/DEC-131.
-    static constexpr std::uint32_t kCurrentSchemaVersion = 5;
+    // DEC-109/DEC-116/DEC-124/DEC-131/DEC-139.
+    static constexpr std::uint32_t kCurrentSchemaVersion = 6;
 
     // El primer schema que guardó la propiedad como pares
     // {petId, variantId} explícitos (v4), en vez de `ownedPetIds`
@@ -128,8 +135,12 @@ struct AppState {
     // (`catalog::ExpandHistoricalWholePetEntitlements`) SOLO cuando la
     // versión EN DISCO es < esto — nunca sobre un v4+ (DEC-129). Es un
     // umbral SEMÁNTICO fijo, no `kCurrentSchemaVersion`: subir el schema
-    // por una razón no relacionada (v5, onboarding) no debe empezar a
-    // "migrar" propiedad de un v4.
+    // por una razón no relacionada (v5, onboarding; v6, modo de conteo
+    // de clics) no debe empezar a "migrar" propiedad de un v4. Esta
+    // constante NO se toca al subir de schema — es la frontera histórica
+    // CONGELADA de DEC-129, y `4` es su valor permanente. Ver
+    // tests/EntitlementMigrationTest.cpp, que fija v4->v6 y v5->v6 como
+    // regresión explícita.
     static constexpr std::uint32_t kFirstExplicitEntitlementSchema = 4;
 
     std::uint32_t schemaVersion = kCurrentSchemaVersion;
@@ -233,6 +244,29 @@ struct AppState {
     // solo este único enum de lifecycle.
     OnboardingLifecycle onboardingLifecycle = OnboardingLifecycle::kPending;
 
+    // --- Modo de conteo de clics (Block 11A, schema v6) --------------
+    //
+    // La preferencia OPT-IN de dónde cuentan los clics: "" (el owner
+    // nunca eligió) / "nimvlet_only" / "anywhere". Se guarda como STRING
+    // por la misma razón que `sizeChoice` y `language` — es una
+    // preferencia, y `core::PreferencesFromStored` ya tiene el idioma de
+    // "parsear un campo crudo y normalizar lo desconocido a un default
+    // seguro" (core::ParseClickCountingMode: cualquier cosa que no sea
+    // "anywhere" -> kNimvletOnly).
+    //
+    // Este campo guarda el modo PEDIDO, no el efectivo. Que el conteo
+    // global esté REALMENTE activo depende de la capacidad de la
+    // plataforma y del permiso del OS, que no son estado persistible: se
+    // consultan en cada arranque (ver platform::GlobalClickMonitor). Un
+    // "anywhere" persistido cuyo permiso ya no está NUNCA se auto-
+    // degrada en disco — el owner sigue viendo lo que eligió, y Settings
+    // le dice que no está activo (docs/GLOBAL_CLICK_MODE.md §4).
+    //
+    // NUNCA se persiste nada más de esta feature: ni coordenadas, ni
+    // timestamps, ni historial de clics, ni contadores por fuente, ni el
+    // estado del permiso (AGENTS.md §5, docs/PRIVACY_SECURITY.md §H).
+    std::string clickCountingMode;
+
     friend bool operator==(const AppState& a, const AppState& b) {
         return a.schemaVersion == b.schemaVersion &&
                a.clickBalance == b.clickBalance &&
@@ -245,7 +279,8 @@ struct AppState {
                a.sizeChoice == b.sizeChoice &&
                a.opacityPercent == b.opacityPercent &&
                a.language == b.language &&
-               a.onboardingLifecycle == b.onboardingLifecycle;
+               a.onboardingLifecycle == b.onboardingLifecycle &&
+               a.clickCountingMode == b.clickCountingMode;
     }
 };
 
