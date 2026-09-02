@@ -31,6 +31,9 @@
 #include "FormatTest.h"
 #include "LocalizationTest.h"
 #include "PetAccentTest.h"
+#include "ContrastTest.h"
+#include "OrnamentGeometryTest.h"
+#include "ButtonStyleTest.h"
 #include "PetEditorialTest.h"
 #include "PreviewArtifactTest.h"
 #include "QuickMenuModelTest.h"
@@ -98,6 +101,9 @@ int main() {
     nimvlets::tests::RegisterPreferencesTests(runner);
     nimvlets::tests::RegisterLocalizationTests(runner);
     nimvlets::tests::RegisterPetAccentTests(runner);
+    nimvlets::tests::RegisterContrastTests(runner);
+    nimvlets::tests::RegisterOrnamentGeometryTests(runner);
+    nimvlets::tests::RegisterButtonStyleTests(runner);
     nimvlets::tests::RegisterPetEditorialTests(runner);
     nimvlets::tests::RegisterPreviewArtifactTests(runner);
     nimvlets::tests::RegisterStatefulBehaviorTests(runner);

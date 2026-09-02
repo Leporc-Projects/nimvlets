@@ -1,0 +1,107 @@
+#include "ButtonStyleTest.h"
+
+#include "productui/ButtonStyle.h"
+#include "productui/Contrast.h"
+#include "productui/PetAccent.h"
+#include "productui/VisualTokens.h"
+
+using nimvlets::productui::ButtonRole;
+using nimvlets::productui::ButtonStateFlags;
+using nimvlets::productui::ButtonVisual;
+using nimvlets::productui::ContrastRatio;
+using nimvlets::productui::PetAccent;
+using nimvlets::productui::PetAccentFor;
+using nimvlets::productui::ResolveButtonVisual;
+namespace tokens = nimvlets::productui::tokens;
+
+namespace nimvlets::tests {
+
+namespace {
+
+ButtonStateFlags Rest() { return ButtonStateFlags{}; }
+
+// Primary con contexto de pet: relleno = softFill del acento, borde =
+// line del acento, y la etiqueta es LEGIBLE sobre el relleno (>= 4.5:1)
+// para cada pet real y el fallback neutro.
+bool TestPrimaryUsesPetAccentAndStaysReadable() {
+    for (const char* id : {"bunny", "nidir", "frin", "sweetie", "does_not_exist"}) {
+        const PetAccent acc = PetAccentFor(id);
+        const ButtonVisual v = ResolveButtonVisual(ButtonRole::kPrimary, &acc, Rest());
+        NIMVLETS_CHECK(v.fill == acc.softFill);
+        NIMVLETS_CHECK(v.border == acc.line);
+        NIMVLETS_CHECK(v.fill.a == 255 && v.ink.a == 255);
+        NIMVLETS_CHECK(ContrastRatio(v.ink, v.fill) >= 4.5);
+    }
+    return true;
+}
+
+// Primary sin contexto de pet (accent == nullptr) cae al neutro cálido
+// y sigue siendo legible.
+bool TestPrimaryNullAccentFallsBackToNeutral() {
+    const ButtonVisual v = ResolveButtonVisual(ButtonRole::kPrimary, nullptr, Rest());
+    const PetAccent neutral = PetAccentFor("");
+    NIMVLETS_CHECK(v.fill == neutral.softFill);
+    NIMVLETS_CHECK(ContrastRatio(v.ink, v.fill) >= 4.5);
+    return true;
+}
+
+// Un acento sintético demasiado claro para su propio deepInk: el
+// resolvedor CLAMPA la tinta más oscura en vez de devolver un par
+// ilegible (nunca texto invisible — brief §17).
+bool TestPrimaryClampsUnreadableAccent() {
+    PetAccent bad = PetAccentFor("frin");
+    bad.softFill = nimvlets::productui::UiColor{0xF2, 0xF2, 0xF2, 0xFF};
+    bad.deepInk = nimvlets::productui::UiColor{0xC8, 0xC8, 0xC8, 0xFF};  // gris claro sobre casi-blanco: ilegible
+    const ButtonVisual v = ResolveButtonVisual(ButtonRole::kPrimary, &bad, Rest());
+    NIMVLETS_CHECK(ContrastRatio(v.ink, v.fill) >= 4.5);
+    NIMVLETS_CHECK(!(v.ink == bad.deepInk));  // se tuvo que oscurecer
+    return true;
+}
+
+// Secondary / Quiet no tienen relleno en reposo; Quiet además no tiene
+// borde.
+bool TestSecondaryAndQuietAreRestrainedAtRest() {
+    const ButtonVisual sec = ResolveButtonVisual(ButtonRole::kSecondary, nullptr, Rest());
+    NIMVLETS_CHECK(sec.fill.a == 0);
+    NIMVLETS_CHECK(sec.border == tokens::kBorder);
+    NIMVLETS_CHECK(sec.ink == tokens::kTextSecondary);
+
+    const ButtonVisual quiet = ResolveButtonVisual(ButtonRole::kQuiet, nullptr, Rest());
+    NIMVLETS_CHECK(quiet.fill.a == 0);
+    NIMVLETS_CHECK(quiet.border.a == 0);
+    return true;
+}
+
+// Estados: foco pide el anillo; hover pinta un wash; disabled queda
+// legible-pero-apagado y SIN anillo de foco.
+bool TestInteractionStates() {
+    const ButtonVisual focused =
+        ResolveButtonVisual(ButtonRole::kSecondary, nullptr, ButtonStateFlags{false, false, true, false});
+    NIMVLETS_CHECK(focused.drawFocusRing);
+
+    const ButtonVisual hoveredQuiet =
+        ResolveButtonVisual(ButtonRole::kQuiet, nullptr, ButtonStateFlags{true, false, false, false});
+    NIMVLETS_CHECK(hoveredQuiet.fill == tokens::kHoverWash);
+
+    const PetAccent nidir = PetAccentFor("nidir");
+    const ButtonVisual disabled = ResolveButtonVisual(
+        ButtonRole::kPrimary, &nidir, ButtonStateFlags{true, false, true, true});
+    NIMVLETS_CHECK(!disabled.drawFocusRing);
+    NIMVLETS_CHECK(disabled.ink == tokens::kTextMuted);
+    return true;
+}
+
+}  // namespace
+
+void RegisterButtonStyleTests(testing::TestRunner& runner) {
+    runner.Add("ButtonStyle/PrimaryUsesPetAccentAndStaysReadable",
+               TestPrimaryUsesPetAccentAndStaysReadable);
+    runner.Add("ButtonStyle/PrimaryNullAccentFallsBackToNeutral",
+               TestPrimaryNullAccentFallsBackToNeutral);
+    runner.Add("ButtonStyle/PrimaryClampsUnreadableAccent", TestPrimaryClampsUnreadableAccent);
+    runner.Add("ButtonStyle/SecondaryAndQuietAreRestrainedAtRest",
+               TestSecondaryAndQuietAreRestrainedAtRest);
+    runner.Add("ButtonStyle/InteractionStates", TestInteractionStates);
+}
+
+}  // namespace nimvlets::tests

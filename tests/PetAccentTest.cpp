@@ -1,7 +1,10 @@
 #include "PetAccentTest.h"
 
+#include "productui/Contrast.h"
 #include "productui/PetAccent.h"
 
+using nimvlets::productui::ContrastRatio;
+using nimvlets::productui::HeroStageStyle;
 using nimvlets::productui::PetAccent;
 using nimvlets::productui::PetAccentFor;
 using nimvlets::productui::UiColor;
@@ -42,6 +45,46 @@ bool TestHeroShapeAngularityPerPet() {
     NIMVLETS_CHECK(!PetAccentFor("bunny").angularShape);
     NIMVLETS_CHECK(!PetAccentFor("frin").angularShape);
     NIMVLETS_CHECK(PetAccentFor("nidir").angularShape);
+    return true;
+}
+
+// Block 12A: la costura `heroStage` es consistente con el bool
+// `angularShape` de compatibilidad, para cada pet y el fallback.
+bool TestHeroStageStyleMatchesAngularShape() {
+    for (const char* id : {"bunny", "nidir", "frin", "kyubi", "sweetie", "does_not_exist"}) {
+        const PetAccent a = PetAccentFor(id);
+        const bool faceted = a.heroStage == HeroStageStyle::kFacetedRound;
+        NIMVLETS_CHECK(faceted == a.angularShape);
+    }
+    NIMVLETS_CHECK(PetAccentFor("nidir").heroStage == HeroStageStyle::kFacetedRound);
+    NIMVLETS_CHECK(PetAccentFor("bunny").heroStage == HeroStageStyle::kSoftOval);
+    return true;
+}
+
+// Block 12A: cada identidad trae un acento SECUNDARIO opaco y poblado
+// (nunca cero) — incluido el fallback neutro (brief §10: nunca deja un
+// campo sin poblar).
+bool TestSecondaryAccentPresentForEveryIdentity() {
+    for (const char* id : {"bunny", "nidir", "frin", "rato", "rin_rin", "artu", "kyubi", "sweetie",
+                           "", "does_not_exist"}) {
+        const PetAccent a = PetAccentFor(id);
+        NIMVLETS_CHECK(a.secondary.a == 255);
+        NIMVLETS_CHECK(Lum(a.secondary) > 0);
+        NIMVLETS_CHECK(!(a.secondary == a.line));  // un tono complementario, no una copia
+    }
+    return true;
+}
+
+// Block 12A / DEC-143: el botón Primary usa deepInk sobre softFill; el
+// par tiene que ser legible (>= 4.5:1, WCAG AA texto normal) para cada
+// pet real y el fallback neutro, medido con productui::ContrastRatio —
+// no "a ojo".
+bool TestButtonInkMeetsWcagAaOnSoftFill() {
+    for (const char* id : {"bunny", "nidir", "frin", "rato", "rin_rin", "artu", "kyubi", "sweetie",
+                           "", "does_not_exist"}) {
+        const PetAccent a = PetAccentFor(id);
+        NIMVLETS_CHECK(ContrastRatio(a.deepInk, a.softFill) >= 4.5);
+    }
     return true;
 }
 
@@ -94,6 +137,10 @@ void RegisterPetAccentTests(testing::TestRunner& runner) {
     runner.Add("PetAccent/KnownPetsHaveDistinctAccents", TestKnownPetsHaveDistinctAccents);
     runner.Add("PetAccent/AccentHuesMatchDesignDirection", TestAccentHuesMatchDesignDirection);
     runner.Add("PetAccent/HeroShapeAngularityPerPet", TestHeroShapeAngularityPerPet);
+    runner.Add("PetAccent/HeroStageStyleMatchesAngularShape", TestHeroStageStyleMatchesAngularShape);
+    runner.Add("PetAccent/SecondaryAccentPresentForEveryIdentity",
+               TestSecondaryAccentPresentForEveryIdentity);
+    runner.Add("PetAccent/ButtonInkMeetsWcagAaOnSoftFill", TestButtonInkMeetsWcagAaOnSoftFill);
     runner.Add("PetAccent/UnknownPetFallsBackToNeutral", TestUnknownPetFallsBackToNeutral);
     runner.Add("PetAccent/ShapeTintIsPalerThanLine", TestShapeTintIsPalerThanLine);
     runner.Add("PetAccent/ButtonSoftFillIsLightAndDeepInkIsDark", TestButtonSoftFillIsLightAndDeepInkIsDark);

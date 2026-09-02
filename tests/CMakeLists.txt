@@ -100,6 +100,12 @@ add_executable(nimvlets_tests
   LocalizationTest.cpp
   PetAccentTest.h
   PetAccentTest.cpp
+  ContrastTest.h
+  ContrastTest.cpp
+  OrnamentGeometryTest.h
+  OrnamentGeometryTest.cpp
+  ButtonStyleTest.h
+  ButtonStyleTest.cpp
   PetEditorialTest.h
   PetEditorialTest.cpp
   PreviewArtifactTest.h

@@ -1,5 +1,6 @@
 #include "SectionNavTest.h"
 
+#include <cmath>
 #include <string>
 
 #include "core/Localization.h"
@@ -7,11 +8,13 @@
 
 using nimvlets::core::Language;
 using nimvlets::productui::BuildSectionHeaderLayout;
+using nimvlets::productui::ComputeWalletPill;
 using nimvlets::productui::NavFocusIdFor;
 using nimvlets::productui::NavTargetSection;
 using nimvlets::productui::ProductSection;
 using nimvlets::productui::SectionHeaderLayout;
 using nimvlets::productui::SectionTab;
+using nimvlets::productui::WalletPillMetrics;
 
 namespace nimvlets::tests {
 
@@ -106,6 +109,58 @@ bool TestHeaderFormatsCanonicalBalance() {
     return true;
 }
 
+// Block 12A: la geometría de la pill del wallet es pura y monótona en el
+// ancho del texto — la vista y el test consumen la MISMA función, no
+// pueden divergir. spark y texto quedan DENTRO de la pill, con aire.
+bool TestWalletPillMetricsAreSaneAndMonotonic() {
+    const WalletPillMetrics zero = ComputeWalletPill(0.0f);
+    const WalletPillMetrics small = ComputeWalletPill(40.0f);
+    const WalletPillMetrics big = ComputeWalletPill(180.0f);  // ~"1 000 000 clics"
+
+    NIMVLETS_CHECK(zero.height > 0.0f);
+    NIMVLETS_CHECK(zero.width > 0.0f);
+    // El centro del spark y el ancla del texto están dentro de la pill,
+    // en orden, con aire a la izquierda.
+    NIMVLETS_CHECK(zero.sparkCenterX > 0.0f && zero.sparkCenterX < zero.textLeftX);
+    NIMVLETS_CHECK(zero.textLeftX < zero.width);
+    // Monótona y "ancho crece 1:1 con el texto".
+    NIMVLETS_CHECK(small.width > zero.width);
+    NIMVLETS_CHECK(big.width > small.width);
+    NIMVLETS_CHECK(std::abs((big.width - small.width) - (180.0f - 40.0f)) < 1e-3f);
+    // El hueco a la derecha del texto (padding) es igual para cualquier
+    // largo: width - textLeftX - textWidth == padX constante.
+    NIMVLETS_CHECK(std::abs((small.width - small.textLeftX - 40.0f) -
+                            (big.width - big.textLeftX - 180.0f)) < 1e-3f);
+    return true;
+}
+
+// La cabecera compartida no rompe su layout con un balance grande en ES
+// ni en el mínimo / un viewport ancho (brief §32): el ancla derecha del
+// balance queda dentro del contenido y las pestañas caben a su
+// izquierda.
+bool TestHeaderHoldsAtResizeAndLargeBalance() {
+    for (const float w : {600.0f, 800.0f, 1200.0f}) {
+        for (const Language lang : {Language::kEn, Language::kEs}) {
+            const SectionHeaderLayout h = BuildSectionHeaderLayout(
+                w, 40.0f, 0.0f, ProductSection::kShop, lang, /*clickBalance=*/1000000);
+            NIMVLETS_CHECK(h.tabs.size() == 3);
+            // El ancla derecha del balance está en el margen derecho.
+            NIMVLETS_CHECK(std::abs(h.clicksAnchorRight.x - (w - 40.0f)) < 1e-3f);
+            // La última pestaña termina bien a la izquierda del margen
+            // derecho — hay lugar para la pill.
+            const SectionTab& last = h.tabs.back();
+            NIMVLETS_CHECK(last.hitRect.Right() < w - 40.0f);
+            // La pill estimada (texto ~ 12 px/char a 13 pt) entra dentro
+            // del ancho de contenido y no pisa el wordmark (~120 pt).
+            const WalletPillMetrics pill =
+                ComputeWalletPill(static_cast<float>(h.clicksText.size()) * 9.0f);
+            NIMVLETS_CHECK(pill.width < (w - 2.0f * 40.0f));
+            NIMVLETS_CHECK((h.clicksAnchorRight.x - pill.width) > (40.0f + 120.0f));
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 void RegisterSectionNavTests(testing::TestRunner& runner) {
@@ -114,6 +169,10 @@ void RegisterSectionNavTests(testing::TestRunner& runner) {
     runner.Add("SectionNav/NavRoundTripThroughHeaderLayout", TestNavRoundTripThroughHeaderLayout);
     runner.Add("SectionNav/NavFocusIdForKnownSections", TestNavFocusIdForKnownSections);
     runner.Add("SectionNav/HeaderFormatsCanonicalBalance", TestHeaderFormatsCanonicalBalance);
+    runner.Add("SectionNav/WalletPillMetricsAreSaneAndMonotonic",
+               TestWalletPillMetricsAreSaneAndMonotonic);
+    runner.Add("SectionNav/HeaderHoldsAtResizeAndLargeBalance",
+               TestHeaderHoldsAtResizeAndLargeBalance);
 }
 
 }  // namespace nimvlets::tests
