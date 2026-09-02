@@ -2,6 +2,7 @@ add_library(nimvlets_platform_macos STATIC
   TransparentWindowSupport.mm
   TextRasterizer.mm
   QuickMenu.mm
+  GlobalClickMonitor.mm
 )
 
 target_include_directories(nimvlets_platform_macos PUBLIC ${CMAKE_SOURCE_DIR}/src)

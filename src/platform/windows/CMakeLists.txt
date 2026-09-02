@@ -2,6 +2,7 @@ add_library(nimvlets_platform_windows STATIC
   TransparentWindowSupport.cpp
   TextRasterizer.cpp
   SystemShell.cpp
+  GlobalClickMonitor.cpp
 )
 
 target_include_directories(nimvlets_platform_windows PUBLIC ${CMAKE_SOURCE_DIR}/src)
