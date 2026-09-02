@@ -36,11 +36,11 @@ struct QuickMenuModel {
 // language); el nombre del pet y los porcentajes de opacidad no se
 // traducen.
 //
-// Estructura (block brief 06 §14 + 06.1 §2):
+// Estructura (block brief 06 §14 + 06.1 §2; renombre de Block 11B):
 //   [nombre del pet]        (header, deshabilitado)
 //   ----
 //   Show Nimvlet / Hide Nimvlet   (según state.petHidden)
-//   Collection…
+//   Open Nimvlets…                (abre/enfoca el Product UI)
 //   ----
 //   Size ▸     { Small, Medium, Large }      (checkable, exactamente uno marcado)
 //   Opacity ▸  { 100%, 85%, 70%, 55% }       (checkable)

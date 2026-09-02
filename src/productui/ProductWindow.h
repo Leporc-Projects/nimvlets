@@ -44,6 +44,12 @@ struct ProductWindowEvent {
     // productui::GlobalClickAction.
     bool hasGlobalClickAction = false;
     GlobalClickAction globalClickAction = GlobalClickAction::kNone;
+    // El owner usó un control TRANSITORIO de Companion en Settings
+    // (Block 11B): Shown / Hidden / Reset position. NO es un cambio de
+    // preferencia persistida — ver productui::SettingsCommand. src/app lo
+    // enruta a SpikeApp::ApplyPetVisibility / ResetPetPositionToSafeDefault.
+    bool hasSettingsCommand = false;
+    SettingsCommand settingsCommand = SettingsCommand::kNone;
     bool hasOnboardingSelection = false;  // el owner confirmó un starter en el onboarding (Block 09A)
     catalog::PetIdentity onboardingSelection;
 };
@@ -118,6 +124,13 @@ class ProductWindow {
     // de primera parte está visible (Block 11A). Lo empuja src/app junto
     // con las preferencias. No-op si está cerrada.
     void SetGlobalClick(const platform::GlobalClickUiState& state, bool explanationVisible);
+
+    // Estado runtime de Companion TRANSITORIO para Settings (Block 11B):
+    // visibilidad del pet AHORA + si "Reset position" está disponible en
+    // este backend. Lo empuja src/app al abrir y cada vez que la
+    // visibilidad cambia — venga de Settings o del menú rápido
+    // (sincronización bidireccional, brief §4). No-op si está cerrada.
+    void SetCompanionRuntime(bool petShown, bool positionResetAvailable);
 
     // --- Modo ONBOARDING de primer arranque (Block 09A) --------------
     //

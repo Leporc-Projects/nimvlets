@@ -100,6 +100,16 @@ void SettingsView::SetGlobalClick(
     dirty_ = true;
 }
 
+void SettingsView::SetCompanionRuntime(bool petShown, bool positionResetAvailable) {
+    if (petShown == petShown_ && positionResetAvailable == positionResetAvailable_) {
+        return;
+    }
+    petShown_ = petShown;
+    positionResetAvailable_ = positionResetAvailable;
+    SyncFocusList(BuildLayout(viewportW_, viewportH_));
+    dirty_ = true;
+}
+
 void SettingsView::SetLanguage(Language language) {
     if (language == prefs_.language) {
         return;
@@ -125,6 +135,8 @@ SettingsLayout SettingsView::BuildLayout(float w, float h) const {
     in.prefs = prefs_;
     in.globalClick = globalClick_;
     in.globalClickExplanationVisible = globalClickExplanationVisible_;
+    in.petShown = petShown_;
+    in.positionResetAvailable = positionResetAvailable_;
     in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     return BuildSettingsLayout(in);
 }
@@ -230,12 +242,40 @@ SettingsViewResult SettingsView::ActivateWidget(const std::string& focusId) {
         r.dirty = true;
         return r;
     }
+    if (const SettingsCommand cmd = ParseSettingsCommand(focusId);
+        cmd != SettingsCommand::kNone) {
+        // Click de mouse directo sobre un segmento transitorio de
+        // Companion (Block 11B): "Shown" / "Hidden" / "Reset position".
+        // NO muta ninguna preferencia — src/app lo enruta a la ruta
+        // canónica. El layout ya sacó "Reset position" apagado del
+        // hit-test, así que un `cmd:resetpos` acá siempre es válido.
+        r.hasCommand = true;
+        r.command = cmd;
+        r.dirty = true;
+        return r;
+    }
     if (StartsWith(focusId, "opt:")) {
         const SettingsChange change = ChangeForSegment(focusId);
         if (ChangeIsAllowed(change)) {
             r.hasChange = true;
             r.change = change;
         }
+        r.dirty = true;
+        return r;
+    }
+    if (focusId == "row:visibility") {
+        // Enter / Espacio sobre la fila Visibility: alterna Shown <-> Hidden.
+        r.hasCommand = true;
+        r.command = petShown_ ? SettingsCommand::kHidePet : SettingsCommand::kShowPet;
+        r.dirty = true;
+        return r;
+    }
+    if (focusId == "row:position") {
+        // Enter / Espacio sobre la fila Position: "Reset position". Solo
+        // llega acá si la fila está en el anillo de foco, y el layout la
+        // saca cuando el backend no puede colocar la ventana (Wayland).
+        r.hasCommand = true;
+        r.command = SettingsCommand::kResetPosition;
         r.dirty = true;
         return r;
     }
@@ -284,6 +324,10 @@ SettingsViewResult SettingsView::OnMouseDown(float x, float y) {
         const std::size_t first = hit.find(':');
         const std::size_t second = hit.find(':', first + 1);
         focus_.Focus("row:" + hit.substr(first + 1, second - first - 1));
+    } else if (StartsWith(hit, "cmd:")) {
+        // Igual que "opt:": el foco vive en la fila transitoria, no en su
+        // segmento (Block 11B).
+        focus_.Focus(hit == "cmd:resetpos" ? "row:position" : "row:visibility");
     }
     SettingsViewResult r = ActivateWidget(hit);
     r.dirty = true;
@@ -334,6 +378,29 @@ SettingsViewResult SettingsView::OnKey(int sdlKeycode, bool shiftHeld) {
         case SDLK_LEFT: {
             keyboardFocus_ = true;
             const int dir = sdlKeycode == SDLK_RIGHT ? +1 : -1;
+            if (focused == "row:visibility") {
+                // Segmentos [Shown, Hidden]. ← va hacia "Shown", → hacia
+                // "Hidden"; en el extremo no hace nada (clamp, igual que
+                // las filas de preferencia).
+                if (dir > 0 && petShown_) {
+                    r.hasCommand = true;
+                    r.command = SettingsCommand::kHidePet;
+                } else if (dir < 0 && !petShown_) {
+                    r.hasCommand = true;
+                    r.command = SettingsCommand::kShowPet;
+                }
+                dirty_ = true;
+                r.dirty = true;
+                return r;
+            }
+            if (focused == "row:position") {
+                // Un solo botón: las flechas no cambian ningún valor
+                // (Enter/Espacio lo activan). Igual se marca dirty por si
+                // el chrome de foco de teclado se acaba de encender.
+                dirty_ = true;
+                r.dirty = true;
+                return r;
+            }
             if (onRow) {
                 PreferenceField field = PreferenceField::kSize;
                 if (ParseField(focused.substr(4), field)) {

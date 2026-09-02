@@ -43,6 +43,12 @@ struct SettingsViewResult {
     // preferencia por sí misma; src/app decide qué hacer.
     bool hasGlobalClickAction = false;
     GlobalClickAction globalClickAction = GlobalClickAction::kNone;
+    // Block 11B: un comando de Companion TRANSITORIO (Shown / Hidden /
+    // Reset position). Igual que `hasGlobalClickAction`, NO muta ninguna
+    // preferencia persistida: src/app lo enruta a la ruta canónica
+    // (SpikeApp::ApplyPetVisibility / ResetPetPositionToSafeDefault).
+    bool hasCommand = false;
+    SettingsCommand command = SettingsCommand::kNone;
 };
 
 // La sección SETTINGS del Product UI (Block 08). Misma arquitectura que
@@ -75,6 +81,13 @@ class SettingsView {
     // permiso — igual que nunca muta sus propias preferencias.
     void SetGlobalClick(const platform::GlobalClickUiState& state, bool explanationVisible);
 
+    // Estado runtime de Companion TRANSITORIO (Block 11B): si la ventana
+    // del pet está visible AHORA, y si este backend puede colocar una
+    // toplevel en absoluto ("Reset position" disponible). Lo empuja
+    // src/app junto con las preferencias — la vista nunca lo deduce ni lo
+    // persiste. Ver docs/PRODUCT_UI.md §20.
+    void SetCompanionRuntime(bool petShown, bool positionResetAvailable);
+
     const core::Preferences& Preferences() const { return prefs_; }
 
     // Coordenadas en PUNTOS lógicos de la ventana.
@@ -93,7 +106,8 @@ class SettingsView {
     void OnEnterSection();
 
     // Solo-DEV (QA / capturas): pone el foco de TECLADO sobre una fila
-    // ("row:size" / "row:opacity" / "row:lock" / "row:language") para la
+    // ("row:visibility" / "row:size" / "row:opacity" / "row:lock" /
+    // "row:position" / "row:clickcounting" / "row:language") para la
     // captura del anillo de foco.
     void SetKeyboardFocusForQA(const std::string& rowFocusId) {
         SyncFocusList(BuildLayout(viewportW_, viewportH_));
@@ -127,6 +141,10 @@ class SettingsView {
     core::Preferences prefs_;
     platform::GlobalClickUiState globalClick_;
     bool globalClickExplanationVisible_ = false;
+    // Estado runtime de Companion (Block 11B), empujado por src/app.
+    // TRANSITORIO: nunca se persiste.
+    bool petShown_ = true;
+    bool positionResetAvailable_ = true;
     // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
     // ProductWindow) para que BuildLayout() lo pase a la cabecera
     // compartida — igual que Collection / Shop.

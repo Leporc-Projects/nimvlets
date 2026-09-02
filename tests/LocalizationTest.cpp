@@ -47,7 +47,7 @@ bool TestLanguageEndonyms() {
 bool TestEnglishMenuStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kShowNimvlet, Language::kEn), "Show Nimvlet"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kHideNimvlet, Language::kEn), "Hide Nimvlet"));
-    NIMVLETS_CHECK(Eq(Localized(StringKey::kCollectionMenuItem, Language::kEn), "Collection…"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOpenNimvletsMenuItem, Language::kEn), "Open Nimvlets…"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kSize, Language::kEn), "Size"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kOpacity, Language::kEn), "Opacity"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kLockPosition, Language::kEn), "Lock Position"));
@@ -59,7 +59,7 @@ bool TestEnglishMenuStrings() {
 bool TestSpanishMenuStrings() {
     NIMVLETS_CHECK(Eq(Localized(StringKey::kShowNimvlet, Language::kEs), "Mostrar Nimvlet"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kHideNimvlet, Language::kEs), "Ocultar Nimvlet"));
-    NIMVLETS_CHECK(Eq(Localized(StringKey::kCollectionMenuItem, Language::kEs), "Colección…"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kOpenNimvletsMenuItem, Language::kEs), "Abrir Nimvlets…"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kSize, Language::kEs), "Tamaño"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kOpacity, Language::kEs), "Opacidad"));
     NIMVLETS_CHECK(Eq(Localized(StringKey::kLockPosition, Language::kEs), "Bloquear posición"));

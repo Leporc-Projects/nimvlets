@@ -1325,6 +1325,122 @@ void SpikeApp::ApplyPetWindowMetrics() {
     MarkNeedsRedraw(static_cast<double>(SDL_GetTicks()));
 }
 
+// --- Block 11B: controles TRANSITORIOS de Companion ----------------
+
+void SpikeApp::ApplyPetVisibility(bool hidden) {
+    if (onboardingActive_) {
+        // El usuario nuevo no posee ningún Nimvlet todavía — no hay pet
+        // real que mostrar/ocultar hasta que elija su starter (mismo
+        // guard que el toggle del menú rápido).
+        SDL_Log("nimvlets: visibility change ignored during onboarding (no Nimvlet chosen yet)");
+        return;
+    }
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    petHidden_ = hidden;
+    if (petHidden_) {
+        SDL_HideWindow(window_);
+    } else {
+        SDL_ShowWindow(window_);
+        MarkNeedsRedraw(nowMs);
+    }
+    // TRANSITORIO: NO se toca appState_ ni persistenceScheduler_ —
+    // esconder != salir, y el pet arranca visible en cada lanzamiento
+    // (brief §4).
+    SDL_Log(
+        "nimvlets: pet window %s (application still running; visibility is session state, not persisted)",
+        petHidden_ ? "hidden" : "shown");
+    // Las DOS superficies reflejan el mismo hecho por la misma ruta: el
+    // menú rápido ("Show"/"Hide") y la fila Visibility de Settings.
+    PushShellState();
+    PushCompanionStateToProductWindow();
+}
+
+void SpikeApp::ResetPetPositionToSafeDefault() {
+    if (window_ == nullptr) {
+        return;
+    }
+    if (!platform::AbsoluteWindowPositioningSupported()) {
+        // Wayland: xdg-shell no permite colocar una toplevel en absoluto.
+        // Settings ya dibuja "Reset position" apagado — esto es la
+        // defensa honesta si igual llegara un comando (p. ej. por un
+        // camino DEV). Sin crash, sin fingir.
+        SDL_Log(
+            "nimvlets: Reset position requested but this window system cannot place a toplevel "
+            "at an absolute position (see docs/LINUX_PLATFORM.md) — no-op");
+        return;
+    }
+
+    // Paso 1: el display que contiene el Product UI (desde donde se
+    // invocó la acción). Si por alguna razón no está abierto, se cae al
+    // display de la ventana del pet.
+    SDL_Window* reference = SDL_GetWindowFromID(productWindow_.WindowId());
+    if (reference == nullptr) {
+        reference = window_;
+    }
+    const SDL_DisplayID displayId = SDL_GetDisplayForWindow(reference);
+    if (displayId == 0) {
+        SDL_Log("nimvlets: Reset position: SDL_GetDisplayForWindow failed: %s — no-op", SDL_GetError());
+        return;
+    }
+    SDL_Rect bounds{};
+    if (!SDL_GetDisplayBounds(displayId, &bounds)) {
+        SDL_Log("nimvlets: Reset position: SDL_GetDisplayBounds failed: %s — no-op", SDL_GetError());
+        return;
+    }
+
+    // Paso 2: la colocación SEGURA canónica para ese display (centrada,
+    // acotada) — la MISMA que el arranque usa sin posición guardada,
+    // resuelta por la pieza pura de core.
+    const core::WindowTopLeft target = core::SafePetPlacement(
+        core::DisplayBounds{bounds.x, bounds.y, bounds.w, bounds.h}, EffectiveCanvasWidth(),
+        EffectiveCanvasHeight());
+
+    // Paso 3: mover el pet. Se chequea el valor de retorno real (igual
+    // que la restauración de Init()): en un backend sin capacidad esto
+    // ya se filtró arriba, pero un fallo puntual igual se loguea sin
+    // fingir. Funciona con el pet OCULTO (la ventana existe) y con Lock
+    // Position ON (Lock solo gatea el inicio de un DRAG — core::PetDragAllowed —,
+    // no un reset explícito del owner; brief §7/§22).
+    if (!SDL_SetWindowPosition(window_, target.x, target.y)) {
+        SDL_Log("nimvlets: Reset position: SDL_SetWindowPosition failed: %s", SDL_GetError());
+        return;
+    }
+
+    // Paso 4: persistir por la MISMA ruta canónica que el fin de un drag.
+    appState_.lastWindowPosition = persistence::WindowPosition{target.x, target.y};
+    persistenceScheduler_.MarkDirty(static_cast<double>(SDL_GetTicks()));
+    // El pet se movió: re-resolver la dirección una vez contra la
+    // posición nueva, igual que al soltar un drag.
+    UpdateDirectionFromWindowPosition();
+    SDL_Log(
+        "nimvlets: Reset position -> pet moved to the safe default of its Product UI display "
+        "(persisted via the usual position path)");
+}
+
+void SpikeApp::HandleSettingsCommand(productui::SettingsCommand command) {
+    switch (command) {
+        case productui::SettingsCommand::kShowPet:
+            ApplyPetVisibility(false);
+            break;
+        case productui::SettingsCommand::kHidePet:
+            ApplyPetVisibility(true);
+            break;
+        case productui::SettingsCommand::kResetPosition:
+            ResetPetPositionToSafeDefault();
+            break;
+        case productui::SettingsCommand::kNone:
+            break;
+    }
+}
+
+void SpikeApp::PushCompanionStateToProductWindow() {
+    if (!productWindow_.IsOpen()) {
+        return;
+    }
+    productWindow_.SetCompanionRuntime(
+        !petHidden_, platform::AbsoluteWindowPositioningSupported());
+}
+
 void SpikeApp::OpenProductWindow() {
     // Durante el onboarding la ventana ya está abierta EN EL GATE:
     // "Collection…" del menú solo la re-enfoca, no cambia a la
@@ -1341,6 +1457,9 @@ void SpikeApp::OpenProductWindow() {
     // Block 08 (preferencias) + Block 11A (estado del conteo global) —
     // el mismo punto único que usa cualquier cambio posterior.
     PushPreferencesToProductWindow();
+    // Block 11B: visibilidad actual del pet + capacidad de "Reset
+    // position" de este backend, para la fila Companion de Settings.
+    PushCompanionStateToProductWindow();
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
     productWindow_.SetModels(
@@ -1457,27 +1576,17 @@ void SpikeApp::HandleStarterPurchaseRequest(const productui::PurchaseRequest& re
 
 void SpikeApp::HandleShellAction(int shellActionCode, bool& running) {
     const auto action = static_cast<platform::ShellAction>(shellActionCode);
-    const double nowMs = static_cast<double>(SDL_GetTicks());
     switch (action) {
         case platform::ShellAction::kTogglePetVisibility:
-            if (onboardingActive_) {
-                // El usuario nuevo no posee ningún Nimvlet todavía — no
-                // hay pet real que mostrar hasta que elija su starter.
-                SDL_Log("nimvlets: Show/Hide ignored during onboarding (no Nimvlet chosen yet)");
-                break;
-            }
-            petHidden_ = !petHidden_;
-            if (petHidden_) {
-                SDL_HideWindow(window_);
-            } else {
-                SDL_ShowWindow(window_);
-                MarkNeedsRedraw(nowMs);
-            }
-            SDL_Log("nimvlets: pet window %s (application still running)", petHidden_ ? "hidden" : "shown");
-            PushShellState();
+            // El menú rápido es un toggle; Settings manda Shown/Hidden
+            // explícito. Ambos entran por la MISMA ruta canónica
+            // (SpikeApp::ApplyPetVisibility, Block 11B — que además
+            // re-empuja el estado a Settings, sincronización
+            // bidireccional). El guard de onboarding vive ahí.
+            ApplyPetVisibility(!petHidden_);
             break;
 
-        case platform::ShellAction::kOpenCollection:
+        case platform::ShellAction::kOpenProductUi:
             OpenProductWindow();
             break;
 
@@ -2037,6 +2146,12 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             if (pe.hasGlobalClickAction) {
                 HandleGlobalClickAction(pe.globalClickAction);
             }
+            if (pe.hasSettingsCommand) {
+                // Block 11B: Shown / Hidden / Reset position — la MISMA
+                // ruta canónica que el menú rápido (visibilidad) y que el
+                // fin de un drag (posición).
+                HandleSettingsCommand(pe.settingsCommand);
+            }
             if (pe.hasOnboardingSelection) {
                 HandleOnboardingSelection(pe.onboardingSelection);
             }
@@ -2407,7 +2522,7 @@ std::optional<int> SpikeApp::RunDevRestoreSmokeIfRequested() {
 
     // 2. VISIBLE -> la trae al frente. NO crea una segunda ventana.
     bool running = true;
-    HandleShellAction(static_cast<int>(platform::ShellAction::kOpenCollection), running);
+    HandleShellAction(static_cast<int>(platform::ShellAction::kOpenProductUi), running);
     pumpUntil([] { return false; }, 150);
     check("visible -> same window forward",
           productWindow_.IsOpen() && productWindow_.WindowId() == windowId);
@@ -2433,7 +2548,7 @@ std::optional<int> SpikeApp::RunDevRestoreSmokeIfRequested() {
 
         // EL camino del menú rápido, sin atajos: el mismo SDL_EVENT_USER
         // que manda "Collection…" acaba acá.
-        HandleShellAction(static_cast<int>(platform::ShellAction::kOpenCollection), running);
+        HandleShellAction(static_cast<int>(platform::ShellAction::kOpenProductUi), running);
         const bool restored = pumpUntil([this] { return !productWindow_.IsMinimized(); }, 3000);
 
         const bool sameWindow = productWindow_.IsOpen() && productWindow_.WindowId() == windowId;
@@ -2625,7 +2740,9 @@ int SpikeApp::Run() {
         // capturas de un estado no-default de Settings y como smoke en
         // vivo de que esa ruta produce el AppState/runtime esperado
         // (brief §27/§28). Tokens: small|medium|large, 100|85|70|55,
-        // lock|unlock, en|es. Ausente/vacía: no-op.
+        // lock|unlock, en|es. Block 11B añade shown|hidden (por la ruta
+        // canónica ApplyPetVisibility — TRANSITORIO, no persiste).
+        // Ausente/vacía: no-op.
         if (const char* prefs = std::getenv("NIMVLETS_DEV_PREFS"); prefs != nullptr && prefs[0] != '\0') {
             SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_PREFS='%s' (via canonical Apply* path)", prefs);
             std::string tok;
@@ -2652,6 +2769,10 @@ int SpikeApp::Run() {
                     ApplyUiLanguage(core::Language::kEn);
                 } else if (tok == "es") {
                     ApplyUiLanguage(core::Language::kEs);
+                } else if (tok == "shown") {
+                    ApplyPetVisibility(false);
+                } else if (tok == "hidden") {
+                    ApplyPetVisibility(true);
                 } else if (!tok.empty()) {
                     SDL_Log("nimvlets: NIMVLETS_DEV_PREFS: ignoring unknown token '%s'", tok.c_str());
                 }
@@ -2777,9 +2898,20 @@ int SpikeApp::Run() {
             HandleGlobalClickAction(action);
         }
         // NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity — foco de teclado sobre
-        // una fila de Settings (captura del anillo de foco).
+        // una fila de Settings (captura del anillo de foco). Block 11B:
+        // acepta también row:visibility / row:position.
         if (const char* sf = std::getenv("NIMVLETS_DEV_SETTINGS_FOCUS"); sf != nullptr && sf[0] != '\0') {
             productWindow_.SetSettingsKeyboardFocusForQA(sf);
+        }
+        // NIMVLETS_DEV_RESET_POSITION=1 — Block 11B: invoca la acción de
+        // recuperación de Settings por la MISMA ruta canónica
+        // (SpikeApp::ResetPetPositionToSafeDefault), sin un click real.
+        // Smoke en vivo: la ventana del pet queda en el destino seguro y
+        // appState_.lastWindowPosition se marca dirty.
+        if (const char* rp = std::getenv("NIMVLETS_DEV_RESET_POSITION");
+            rp != nullptr && rp[0] != '\0' && rp[0] != '0') {
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_RESET_POSITION (via canonical path)");
+            ResetPetPositionToSafeDefault();
         }
         // Solo-DEV: vuelca el framebuffer de la Collection a un BMP y
         // sale (captura de QA a densidad nativa, sin captura de pantalla
@@ -2847,13 +2979,12 @@ int SpikeApp::Run() {
 
     // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para
     // capturar la Collection sin la ventana always-on-top del pet en el
-    // cuadro. Equivale a elegir "Hide Nimvlet" en el menú. Ver README.md.
+    // cuadro. Equivale a elegir "Hide Nimvlet" en el menú — desde Block
+    // 11B por la MISMA ruta canónica (ApplyPetVisibility). Ver README.md.
     if (const char* hidePet = std::getenv("NIMVLETS_DEV_HIDE_PET");
         hidePet != nullptr && hidePet[0] != '\0' && hidePet[0] != '0') {
-        petHidden_ = true;
-        SDL_HideWindow(window_);
-        PushShellState();
         SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_HIDE_PET (pet window hidden at startup)");
+        ApplyPetVisibility(true);
     }
 
     // Mecanismo solo-DEV (Block 06): dispara una activación desde la

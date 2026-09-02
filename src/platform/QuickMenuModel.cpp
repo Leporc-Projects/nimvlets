@@ -65,7 +65,7 @@ QuickMenuModel BuildQuickMenuModel(const ShellState& state) {
     model.items.push_back(Action(
         Localized(state.petHidden ? StringKey::kShowNimvlet : StringKey::kHideNimvlet, lang),
         ShellAction::kTogglePetVisibility));
-    model.items.push_back(Action(Localized(StringKey::kCollectionMenuItem, lang), ShellAction::kOpenCollection));
+    model.items.push_back(Action(Localized(StringKey::kOpenNimvletsMenuItem, lang), ShellAction::kOpenProductUi));
     model.items.push_back(Separator());
 
     model.items.push_back(Submenu(Localized(StringKey::kSize, lang), {

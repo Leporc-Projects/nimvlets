@@ -100,7 +100,11 @@ const char* FieldToken(PreferenceField field) {
 
 struct SegSpec {
     std::string label;
-    std::string value;   // token para el focusId ("small", "70", "on", "es")
+    // Token del focusId. Normalmente "small" / "70" / "on" / "es", que se
+    // expande a "opt:<field>:<value>". Si ya viene con el prefijo "cmd:"
+    // (filas transitorias de Block 11B: "cmd:show" / "cmd:hide" /
+    // "cmd:resetpos") se usa TAL CUAL.
+    std::string value;
     bool selected = false;
     bool enabled = true;
 };
@@ -151,6 +155,26 @@ std::vector<SegSpec> LanguageSegs(Language current) {
     };
 }
 
+// [ Shown ] [ Hidden ] — Block 11B. TRANSITORIO: el segmento marcado
+// sigue el estado de runtime (petShown), no una preferencia persistida.
+// focusIds "cmd:show" / "cmd:hide" — se rutean por ParseSettingsCommand,
+// no por ParseField.
+std::vector<SegSpec> VisibilitySegs(bool petShown, Language lang) {
+    return {
+        {Localized(StringKey::kVisibilityShown, lang), "cmd:show", petShown},
+        {Localized(StringKey::kVisibilityHidden, lang), "cmd:hide", !petShown},
+    };
+}
+
+// [ Reset position ] — Block 11B. Una ACCIÓN, no un toggle: `selected`
+// siempre false. `enabled` sigue la capacidad del backend: en Wayland se
+// dibuja apagado y queda fuera del hit-test / foco (brief §9).
+std::vector<SegSpec> ResetPositionSegs(bool available, Language lang) {
+    return {
+        {Localized(StringKey::kResetPosition, lang), "cmd:resetpos", false, available},
+    };
+}
+
 // Coloca una fila (label + segmentos [+ hint]) a partir de `y`. Devuelve
 // la y tras la fila (hint incluido).
 float LayoutRow(
@@ -163,7 +187,9 @@ float LayoutRow(
     for (const SegSpec& s : segs) {
         SettingsSegment seg;
         seg.label = s.label;
-        seg.focusId = std::string("opt:") + FieldToken(row.field) + ":" + s.value;
+        seg.focusId = s.value.rfind("cmd:", 0) == 0
+                          ? s.value
+                          : std::string("opt:") + FieldToken(row.field) + ":" + s.value;
         seg.selected = s.selected;
         seg.enabled = s.enabled;
         const float w = SegWidth(s.label);
@@ -296,10 +322,34 @@ GlobalClickAction ParseGlobalClickAction(const std::string& focusId) {
     return GlobalClickAction::kNone;
 }
 
+SettingsCommand ParseSettingsCommand(const std::string& focusId) {
+    if (focusId == "cmd:show") {
+        return SettingsCommand::kShowPet;
+    }
+    if (focusId == "cmd:hide") {
+        return SettingsCommand::kHidePet;
+    }
+    if (focusId == "cmd:resetpos") {
+        return SettingsCommand::kResetPosition;
+    }
+    return SettingsCommand::kNone;
+}
+
 const SettingsRow* SettingsLayout::FindRow(PreferenceField field) const {
     for (const SettingsGroup& g : groups) {
         for (const SettingsRow& r : g.rows) {
-            if (r.field == field) {
+            if (r.kind == SettingsRowKind::kPreference && r.field == field) {
+                return &r;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const SettingsRow* SettingsLayout::FindRowKind(SettingsRowKind kind) const {
+    for (const SettingsGroup& g : groups) {
+        for (const SettingsRow& r : g.rows) {
+            if (r.kind == kind) {
                 return &r;
             }
         }
@@ -353,7 +403,7 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
 
     float y = out.header.bodyTop;
 
-    // --- Grupo "Companion": tamaño, opacidad, lock ---
+    // --- Grupo "Companion": visibilidad, tamaño, opacidad, lock, posición ---
     {
         SettingsGroup g;
         g.title = Localized(StringKey::kSettingsCompanion, lang);
@@ -361,6 +411,17 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
         y += kGroupTitleH + kGroupTitleToRule;
         g.rule = UiRect{contentX, y, contentW, 1.0f};
         y += 1.0f + kRuleToRows;
+
+        // Visibility (Block 11B): primero — es lo más básico del pet
+        // ("¿está en el escritorio?"). TRANSITORIO: el segmento marcado
+        // sigue el runtime, no una preferencia.
+        SettingsRow visibility;
+        visibility.kind = SettingsRowKind::kVisibility;
+        visibility.label = Localized(StringKey::kVisibility, lang);
+        visibility.focusId = "row:visibility";
+        y = LayoutRow(visibility, y, contentX, contentW, VisibilitySegs(in.petShown, lang));
+        y += kRowGap;
+        g.rows.push_back(std::move(visibility));
 
         SettingsRow size;
         size.field = PreferenceField::kSize;
@@ -384,7 +445,23 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
         lock.focusId = "row:lock";
         lock.hint = Localized(StringKey::kLockPositionHint, lang);
         y = LayoutRow(lock, y, contentX, contentW, LockSegs(in.prefs.lockPosition, lang));
+        y += kRowGap;
         g.rows.push_back(std::move(lock));
+
+        // Position (Block 11B): una acción de recuperación. En Wayland el
+        // botón se dibuja apagado y una línea corta lo explica (brief §9);
+        // Lock Position NO lo bloquea — es un reset EXPLÍCITO del owner
+        // (brief §7). No persiste una preferencia: mueve el pet ahora.
+        SettingsRow position;
+        position.kind = SettingsRowKind::kPosition;
+        position.label = Localized(StringKey::kPosition, lang);
+        position.focusId = "row:position";
+        if (!in.positionResetAvailable) {
+            position.hint = Localized(StringKey::kPositionUnavailable, lang);
+        }
+        y = LayoutRow(position, y, contentX, contentW,
+                      ResetPositionSegs(in.positionResetAvailable, lang));
+        g.rows.push_back(std::move(position));
 
         out.groups.push_back(std::move(g));
     }
@@ -446,7 +523,16 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
 
     for (const SettingsGroup& g : out.groups) {
         for (const SettingsRow& r : g.rows) {
-            out.focusOrder.push_back(r.focusId);
+            // "Reset position" apagado (Wayland): fuera del anillo de
+            // foco, igual que el segmento "Anywhere" sin capacidad — una
+            // acción no accionable no debe recibir foco de teclado
+            // (brief §9/§20).
+            const bool disabledAction =
+                r.kind == SettingsRowKind::kPosition &&
+                (r.segments.empty() || !r.segments.front().enabled);
+            if (!disabledAction) {
+                out.focusOrder.push_back(r.focusId);
+            }
             // Los botones del aviso se tabulan JUSTO DESPUÉS de su fila:
             // el orden de foco sigue el orden visual, sin saltos.
             for (const SettingsNoticeButton& b : r.notice.buttons) {

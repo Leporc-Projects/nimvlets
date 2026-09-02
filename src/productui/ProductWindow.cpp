@@ -245,6 +245,10 @@ void ProductWindow::SetGlobalClick(
     settingsView_.SetGlobalClick(state, explanationVisible);
 }
 
+void ProductWindow::SetCompanionRuntime(bool petShown, bool positionResetAvailable) {
+    settingsView_.SetCompanionRuntime(petShown, positionResetAvailable);
+}
+
 void ProductWindow::EnterOnboarding(catalog::OnboardingOffer offer) {
     onboarding_ = true;
     onboardingView_.SetOffer(std::move(offer));
@@ -568,6 +572,10 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         if (r.hasGlobalClickAction) {
             out.hasGlobalClickAction = true;
             out.globalClickAction = r.globalClickAction;
+        }
+        if (r.hasCommand) {
+            out.hasSettingsCommand = true;
+            out.settingsCommand = r.command;
         }
         if (r.requestClose) {
             out.closeRequested = true;

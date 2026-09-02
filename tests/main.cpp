@@ -19,6 +19,7 @@
 #include "ProductWindowStateTest.h"
 #include "SectionNavTest.h"
 #include "SettingsLayoutTest.h"
+#include "SettingsCompanionTest.h"
 #include "OnboardingLayoutTest.h"
 #include "OnboardingPolicyTest.h"
 #include "DirectionTest.h"
@@ -81,6 +82,7 @@ int main() {
     nimvlets::tests::RegisterSectionNavTests(runner);
     nimvlets::tests::RegisterProductWindowStateTests(runner);
     nimvlets::tests::RegisterSettingsLayoutTests(runner);
+    nimvlets::tests::RegisterSettingsCompanionTests(runner);
     nimvlets::tests::RegisterOnboardingPolicyTests(runner);
     nimvlets::tests::RegisterOnboardingLayoutTests(runner);
     nimvlets::tests::RegisterFocusListTests(runner);

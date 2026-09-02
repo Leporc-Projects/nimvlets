@@ -41,7 +41,7 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
 
     /* kShowNimvlet */         {"Show Nimvlet", "Mostrar Nimvlet"},
     /* kHideNimvlet */         {"Hide Nimvlet", "Ocultar Nimvlet"},
-    /* kCollectionMenuItem */  {"Collection…", "Colección…"},
+    /* kOpenNimvletsMenuItem */ {"Open Nimvlets…", "Abrir Nimvlets…"},
     /* kSize */                {"Size", "Tamaño"},
     /* kSizeSmall */           {"Small", "Pequeño"},
     /* kSizeMedium */          {"Medium", "Mediano"},
@@ -57,6 +57,14 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
                                "Evita que puedas mover tu Nimvlet al arrastrarlo."},
     /* kOn */                  {"On", "Activado"},
     /* kOff */                 {"Off", "Desactivado"},
+
+    /* kVisibility */          {"Visibility", "Visibilidad"},
+    /* kVisibilityShown */     {"Shown", "Visible"},
+    /* kVisibilityHidden */    {"Hidden", "Oculto"},
+    /* kPosition */            {"Position", "Posición"},
+    /* kResetPosition */       {"Reset position", "Restablecer posición"},
+    /* kPositionUnavailable */ {"Position can't be reset on this system.",
+                               "La posición no se puede restablecer en este sistema."},
 
     /* kOnboardingChooseFirst */        {"Choose your first Nimvlet", "Elige tu primer Nimvlet"},
     /* kOnboardingConfirmStarter */     {"Make {pet} your first Nimvlet?",

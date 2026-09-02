@@ -71,11 +71,14 @@ bool TestShowHideLabelFollowsVisibility() {
     return true;
 }
 
-bool TestCollectionAndQuitArePresent() {
+bool TestOpenProductUiAndQuitArePresent() {
     const QuickMenuModel m = BuildQuickMenuModel(ShellState{});
-    const MenuItem* collection = Find(m, ShellAction::kOpenCollection);
-    NIMVLETS_CHECK(collection != nullptr);
-    NIMVLETS_CHECK(collection->label == "Collection…");
+    // Block 11B: el item que abre el Product UI se llama "Open Nimvlets…"
+    // (antes "Collection…"), y su acción es kOpenProductUi (antes
+    // kOpenCollection). La ventana ya trae Collection · Shop · Settings.
+    const MenuItem* openUi = Find(m, ShellAction::kOpenProductUi);
+    NIMVLETS_CHECK(openUi != nullptr);
+    NIMVLETS_CHECK(openUi->label == "Open Nimvlets…");
 
     // Quit es el último item accionable.
     NIMVLETS_CHECK(m.items.back().kind == MenuItemKind::kAction);
@@ -167,7 +170,7 @@ bool TestSpanishRelabelsEverything() {
     const QuickMenuModel m = BuildQuickMenuModel(s);
 
     NIMVLETS_CHECK(Find(m, ShellAction::kTogglePetVisibility)->label == "Ocultar Nimvlet");
-    NIMVLETS_CHECK(Find(m, ShellAction::kOpenCollection)->label == "Colección…");
+    NIMVLETS_CHECK(Find(m, ShellAction::kOpenProductUi)->label == "Abrir Nimvlets…");
     NIMVLETS_CHECK(Find(m, ShellAction::kToggleLockPosition)->label == "Bloquear posición");
     NIMVLETS_CHECK(FindSubmenu(m, "Tamaño") != nullptr);
     NIMVLETS_CHECK(FindSubmenu(m, "Opacidad") != nullptr);
@@ -257,13 +260,61 @@ bool TestQuickMenuHasNoClickCountingOption() {
     return true;
 }
 
+// Block 11B, brief §1/§14: Settings es la superficie de configuración
+// COMPLETA; el menú rápido es un subconjunto deliberadamente chico. Los
+// controles que 11B agrega SOLO a Settings —Visibility (Shown/Hidden) y
+// Position (Reset position)— NUNCA aparecen en el menú. El menú conserva
+// su Show/Hide de siempre (que es la MISMA visibilidad, por la misma
+// ruta canónica), pero no gana "Reset position" ni un submenú nuevo.
+bool TestQuickMenuStaysASmallSubsetOfSettings() {
+    for (const Language lang : {Language::kEn, Language::kEs}) {
+        ShellState s;
+        s.language = lang;
+        s.currentPetName = "Nidir";
+        const QuickMenuModel m = BuildQuickMenuModel(s);
+
+        // "Position" / "Posición" a secas NO se prohíben: "Lock Position"
+        // / "Bloquear posición" son items legítimos del menú desde Block
+        // 06. Se prohíben las etiquetas EXACTAS de los controles nuevos.
+        const char* forbidden[] = {
+            "Reset position", "Restablecer posición", "Visibility", "Visibilidad",
+            "Shown",          "Hidden",               "Visible",
+        };
+        for (const MenuItem& it : m.items) {
+            for (const char* bad : forbidden) {
+                NIMVLETS_CHECK(it.label.find(bad) == std::string::npos);
+            }
+            for (const MenuItem& sub : it.submenu) {
+                for (const char* bad : forbidden) {
+                    NIMVLETS_CHECK(sub.label.find(bad) == std::string::npos);
+                }
+            }
+        }
+
+        // Sigue habiendo exactamente los tres submenús de Block 06.1
+        // (Size / Opacity / Language) — 11B no agrega ninguno.
+        int submenus = 0;
+        for (const MenuItem& it : m.items) {
+            submenus += it.kind == MenuItemKind::kSubmenu ? 1 : 0;
+        }
+        NIMVLETS_CHECK(submenus == 3);
+
+        // Y el toggle de visibilidad de siempre sigue estando (es la
+        // MISMA visibilidad transitoria que Settings — solo que el menú
+        // la muestra como un toggle Show/Hide).
+        NIMVLETS_CHECK(Find(m, ShellAction::kTogglePetVisibility) != nullptr);
+    }
+    return true;
+}
+
 }  // namespace
 
 void RegisterQuickMenuModelTests(testing::TestRunner& runner) {
     runner.Add("QuickMenuModel/QuickMenuHasNoClickCountingOption", TestQuickMenuHasNoClickCountingOption);
+    runner.Add("QuickMenuModel/QuickMenuStaysASmallSubsetOfSettings", TestQuickMenuStaysASmallSubsetOfSettings);
     runner.Add("QuickMenuModel/HeaderShowsPetNameOrFallback", TestHeaderShowsPetNameOrFallback);
     runner.Add("QuickMenuModel/ShowHideLabelFollowsVisibility", TestShowHideLabelFollowsVisibility);
-    runner.Add("QuickMenuModel/CollectionAndQuitArePresent", TestCollectionAndQuitArePresent);
+    runner.Add("QuickMenuModel/OpenProductUiAndQuitArePresent", TestOpenProductUiAndQuitArePresent);
     runner.Add("QuickMenuModel/LockPositionIsCheckable", TestLockPositionIsCheckable);
     runner.Add("QuickMenuModel/SizeSubmenuChecksExactlyOne", TestSizeSubmenuChecksExactlyOne);
     runner.Add("QuickMenuModel/OpacitySubmenuSnapsToNearestChoice", TestOpacitySubmenuSnapsToNearestChoice);

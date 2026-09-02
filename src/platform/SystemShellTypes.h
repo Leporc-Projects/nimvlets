@@ -18,7 +18,14 @@ namespace nimvlets::platform {
 // src/app como un SDL_EVENT_USER con .code == int(ShellAction).
 enum class ShellAction {
     kTogglePetVisibility,   // Show/Hide del pet — NO es quit (block brief §17)
-    kOpenCollection,        // abre/enfoca el Product UI (block brief §14)
+    // Abre/enfoca el Product UI (Collection · Shop · Settings). Antes
+    // `kOpenCollection`: el nombre quedó estrecho cuando la ventana ganó
+    // Shop (Block 07) y Settings (Block 08), y Block 11A fijó que
+    // invocarlo con la ventana ya abierta restaura LA MISMA ventana y su
+    // sección actual — no siempre "Collection". Renombrado en Block 11B
+    // junto con la etiqueta visible "Open Nimvlets…". Ver
+    // docs/PRODUCT_UI.md §4/§4.1/§9 y DEC-141.
+    kOpenProductUi,
     kToggleLockPosition,    // bloquea/desbloquea el arrastre del pet (block brief §16)
     kSetSizeSmall,
     kSetSizeMedium,

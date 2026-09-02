@@ -75,7 +75,10 @@ enum class StringKey {
     // Menú rápido
     kShowNimvlet,      // "Show Nimvlet" / "Mostrar Nimvlet"
     kHideNimvlet,      // "Hide Nimvlet" / "Ocultar Nimvlet"
-    kCollectionMenuItem,  // "Collection…" / "Colección…"
+    // Block 11B: el item que abre/enfoca el Product UI. La ventana ya
+    // contiene Collection · Shop · Settings y "Collection…" quedó
+    // estrecho — ver docs/PRODUCT_UI.md §4/§9. "Nimvlets" no se traduce.
+    kOpenNimvletsMenuItem,  // "Open Nimvlets…" / "Abrir Nimvlets…"
     kSize,             // "Size" / "Tamaño"
     kSizeSmall,        // "Small" / "Pequeño"
     kSizeMedium,       // "Medium" / "Mediano"
@@ -94,6 +97,21 @@ enum class StringKey {
     kLockPositionHint,   // frase corta bajo el control de lock
     kOn,               // "On" / "Activado"
     kOff,              // "Off" / "Desactivado"
+
+    // Companion — controles de visibilidad y de recuperación de posición
+    // (Block 11B). Viven SOLO en Settings; el menú rápido conserva su
+    // Show/Hide, no gana "Reset position" (Settings es la superficie
+    // completa, el menú un subconjunto — brief §1/§14). "Nimvlet" no se
+    // traduce. Ver docs/PRODUCT_UI.md §20.
+    kVisibility,        // "Visibility" / "Visibilidad" — fila de Companion
+    kVisibilityShown,   // "Shown" / "Visible"
+    kVisibilityHidden,  // "Hidden" / "Oculto"
+    kPosition,          // "Position" / "Posición" — fila de Companion
+    kResetPosition,     // "Reset position" / "Restablecer posición"
+    // Línea corta y quieta cuando el backend no puede colocar una
+    // ventana toplevel en una posición absoluta (Wayland — brief §9). Sin
+    // drama: es un límite del window system, no un error.
+    kPositionUnavailable,  // "Position can't be reset on this system" / "..."
 
     // Onboarding de primer arranque (Block 09A). Los nombres propios
     // (Nimvlet, Artu, Rato, Rin Rin, Frin) NUNCA se traducen; "Male"/

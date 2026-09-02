@@ -33,9 +33,12 @@ using nimvlets::productui::ClampSettingsScroll;
 using nimvlets::productui::SettingsLayout;
 using nimvlets::productui::SettingsLayoutInput;
 using nimvlets::productui::SettingsRow;
+using nimvlets::productui::SettingsRowKind;
 using nimvlets::productui::SettingsSegment;
 using nimvlets::productui::GlobalClickAction;
 using nimvlets::productui::ParseGlobalClickAction;
+using nimvlets::productui::SettingsCommand;
+using nimvlets::productui::ParseSettingsCommand;
 using nimvlets::productui::SettingsNoticeButton;
 
 namespace nimvlets::tests {
@@ -187,20 +190,16 @@ bool TestSettingsHeaderShowsCanonicalWallet() {
 }
 
 // Orden de tabulación: nav (3) y luego las filas de arriba hacia abajo.
-// Block 11A agrega "row:clickcounting" entre lock y language; con el
-// estado por defecto (plataforma sin capacidad, modo local) ese grupo no
-// aporta ningún botón de aviso al anillo de foco.
+// Block 11B añade "row:visibility" al inicio de Companion y "row:position"
+// tras "row:lock" (disponible en macOS/Windows/X11 -> en el anillo).
+// Block 11A intercala "row:clickcounting" entre lock/position y language;
+// con el estado por defecto (modo local) ese grupo no aporta botones.
 bool TestFocusOrderIsNavThenRows() {
     const SettingsLayout l = Layout(Preferences{});
-    NIMVLETS_CHECK(l.focusOrder.size() == 8);
-    NIMVLETS_CHECK(l.focusOrder[0] == "nav:collection");
-    NIMVLETS_CHECK(l.focusOrder[1] == "nav:shop");
-    NIMVLETS_CHECK(l.focusOrder[2] == "nav:settings");
-    NIMVLETS_CHECK(l.focusOrder[3] == "row:size");
-    NIMVLETS_CHECK(l.focusOrder[4] == "row:opacity");
-    NIMVLETS_CHECK(l.focusOrder[5] == "row:lock");
-    NIMVLETS_CHECK(l.focusOrder[6] == "row:clickcounting");
-    NIMVLETS_CHECK(l.focusOrder[7] == "row:language");
+    const std::vector<std::string> expected = {
+        "nav:collection", "nav:shop",     "nav:settings",     "row:visibility", "row:size",
+        "row:opacity",    "row:lock",     "row:position",     "row:clickcounting", "row:language"};
+    NIMVLETS_CHECK(l.focusOrder == expected);
     return true;
 }
 
@@ -336,14 +335,35 @@ bool TestHitTestReturnsSegmentAndNavIds() {
     return true;
 }
 
-// --- Layout: cabe sin scroll, sin solapes ----------------------
+// --- Layout: compuesto a tamaño por defecto, sin solapes ----------
 
-bool TestFitsWithoutScrollBothLanguages() {
-    NIMVLETS_CHECK(Layout(Preferences{}).contentHeight <= 560.0f + 1.0f);
-    Preferences es;
-    es.language = Language::kEs;
-    es.lockPosition = true;
-    NIMVLETS_CHECK(Layout(es).contentHeight <= 560.0f + 1.0f);
+// Block 11B: Companion pasó de 3 a 5 filas (Visibility + Position). A
+// 800x560 el contenido ahora pasa un poco de largo y la vista scrollea
+// — permitido explícitamente por el brief §21 (no se encoge nada para
+// forzarlo a una pantalla) — pero se mantiene compuesto y acotado, y el
+// scroll cubre EXACTO el excedente (nada se pierde). El techo de 720
+// caza cualquier cosa que se dispare.
+bool TestCompanionGroupComposedAtDefaultSize() {
+    for (const Language lang : {Language::kEn, Language::kEs}) {
+        for (const bool lock : {false, true}) {
+            Preferences p;
+            p.language = lang;
+            p.lockPosition = lock;
+            const SettingsLayout l = Layout(p);  // 800x560, backend con capacidad
+            NIMVLETS_CHECK(l.contentHeight > 560.0f);
+            NIMVLETS_CHECK(l.contentHeight <= 720.0f);
+            const float overflow = l.contentHeight - 560.0f;
+            NIMVLETS_CHECK(ClampSettingsScroll(9999.0f, l.contentHeight, 560.0f) == overflow);
+            NIMVLETS_CHECK(ClampSettingsScroll(-1.0f, l.contentHeight, 560.0f) == 0.0f);
+            // La fila Position va DESPUÉS de Lock y su botón no pisa la
+            // columna de label.
+            const SettingsRow* pos = l.FindRowKind(SettingsRowKind::kPosition);
+            const SettingsRow* lockRow = l.FindRow(PreferenceField::kLockPosition);
+            NIMVLETS_CHECK(pos != nullptr && lockRow != nullptr);
+            NIMVLETS_CHECK(pos->labelAnchor.y >= lockRow->labelAnchor.Bottom());
+            NIMVLETS_CHECK(pos->segments.front().rect.x >= pos->labelAnchor.Right());
+        }
+    }
     return true;
 }
 
@@ -447,9 +467,10 @@ bool TestInteractionGroupHasClickCountingRow() {
     NIMVLETS_CHECK(row->segments[1].focusId == "opt:clickcounting:anywhere");
     NIMVLETS_CHECK(SelectedSegment(*row)->focusId == "opt:clickcounting:nimvlet_only");
 
-    // "Companion" intacto, y el grupo de idioma sigue último.
+    // "Companion" sigue primero (ahora con 5 filas: Visibility, Size,
+    // Opacity, Lock, Position — Block 11B), y el grupo de idioma último.
     NIMVLETS_CHECK(l.groups[0].title == "Companion");
-    NIMVLETS_CHECK(l.groups[0].rows.size() == 3);
+    NIMVLETS_CHECK(l.groups[0].rows.size() == 5);
     NIMVLETS_CHECK(l.groups[2].title == "Language");
 
     // Con la preferencia en "anywhere", el seleccionado cambia.
@@ -635,8 +656,9 @@ bool TestNoticeButtonsFollowTheirRowInFocusOrder() {
         /*explanationVisible=*/true);
 
     const std::vector<std::string> expected = {
-        "nav:collection", "nav:shop", "nav:settings", "row:size",     "row:opacity",
-        "row:lock",       "row:clickcounting", "gc:notnow", "gc:continue", "row:language"};
+        "nav:collection",    "nav:shop",    "nav:settings", "row:visibility", "row:size",
+        "row:opacity",       "row:lock",    "row:position", "row:clickcounting", "gc:notnow",
+        "gc:continue",       "row:language"};
     NIMVLETS_CHECK(l.focusOrder == expected);
     return true;
 }
@@ -728,19 +750,20 @@ bool TestInteractionGroupSurvivesResize() {
 }
 
 // Altura de contenido a tamaño por defecto (800x560). Block 08 fijó que
-// Settings entraba sin scroll; Block 11A agrega un grupo, así que este
-// test documenta el resultado REAL en vez de dar por hecho el anterior:
+// Settings entraba sin scroll; Block 11A agregó un grupo y Block 11B dos
+// filas más en Companion, así que este test documenta el resultado REAL:
 //
-//   - estado por DEFECTO del producto (modo local, sin aviso): sigue
-//     entrando sin scroll, en EN y ES;
-//   - con un aviso desplegado (explicación / estado del permiso) el
-//     contenido pasa de largo y la vista scrollea — que es exactamente
-//     para lo que existe ClampSettingsScroll, y por qué el aviso es
-//     condicional en vez de permanente.
-bool TestDefaultStateStillFitsWithoutScroll() {
+//   - estado por DEFECTO del producto (modo local, sin aviso): el
+//     contenido pasa apenas de largo (5 filas en Companion) y la vista
+//     scrollea — permitido por el brief §21;
+//   - abrir la explicación del conteo global lo hace crecer todavía más;
+//   - en ambos casos ClampSettingsScroll acota el scroll al excedente
+//     exacto, y el default sin aviso queda dentro del techo razonable.
+bool TestDefaultStateScrollBudget() {
     const GlobalClickStatus supported =
         Status(GlobalClickCapability::kSupportedNeedsPermission, GlobalClickPermission::kNotGranted);
 
+    float defaultHeight = 0.0f;
     for (const Language lang : {Language::kEn, Language::kEs}) {
         Preferences p;
         p.language = lang;
@@ -749,28 +772,194 @@ bool TestDefaultStateStillFitsWithoutScroll() {
         in.globalClick = ResolveGlobalClickUiState(ClickCountingMode::kNimvletOnly, supported);
         const SettingsLayout l = BuildSettingsLayout(in);
         NIMVLETS_CHECK(!ClickCountingRow(l)->notice.present);
-        NIMVLETS_CHECK(l.contentHeight <= 560.0f);
+        NIMVLETS_CHECK(l.contentHeight > 560.0f);   // 5 filas en Companion -> scroll
+        NIMVLETS_CHECK(l.contentHeight <= 720.0f);  // pero acotado
+        const float overflow = l.contentHeight - 560.0f;
+        NIMVLETS_CHECK(ClampSettingsScroll(9999.0f, l.contentHeight, 560.0f) == overflow);
+        NIMVLETS_CHECK(ClampSettingsScroll(-50.0f, l.contentHeight, 560.0f) == 0.0f);
+        defaultHeight = l.contentHeight;
     }
 
-    // Con la explicación abierta, hay más contenido que ventana -> scroll.
+    // Con la explicación abierta, todavía MÁS contenido -> más scroll.
     Preferences p;
     SettingsLayoutInput in;
     in.prefs = p;
     in.globalClick = ResolveGlobalClickUiState(ClickCountingMode::kNimvletOnly, supported);
     in.globalClickExplanationVisible = true;
     const SettingsLayout scrolled = BuildSettingsLayout(in);
-    NIMVLETS_CHECK(scrolled.contentHeight > 560.0f);
-    // Y el scroll está acotado a ese excedente exacto (nada se pierde).
+    NIMVLETS_CHECK(scrolled.contentHeight > defaultHeight);
     const float maxScroll = scrolled.contentHeight - 560.0f;
     NIMVLETS_CHECK(ClampSettingsScroll(9999.0f, scrolled.contentHeight, 560.0f) == maxScroll);
     NIMVLETS_CHECK(ClampSettingsScroll(-50.0f, scrolled.contentHeight, 560.0f) == 0.0f);
     return true;
 }
 
+// --- Block 11B: Visibility y Position (Companion) ------------------
+
+SettingsLayout LayoutCompanion(
+    bool petShown, bool positionResetAvailable, Language lang = Language::kEn) {
+    Preferences p;
+    p.language = lang;
+    SettingsLayoutInput in;
+    in.prefs = p;
+    in.petShown = petShown;
+    in.positionResetAvailable = positionResetAvailable;
+    return BuildSettingsLayout(in);
+}
+
+bool TestSettingsCommandTokensParse() {
+    NIMVLETS_CHECK(ParseSettingsCommand("cmd:show") == SettingsCommand::kShowPet);
+    NIMVLETS_CHECK(ParseSettingsCommand("cmd:hide") == SettingsCommand::kHidePet);
+    NIMVLETS_CHECK(ParseSettingsCommand("cmd:resetpos") == SettingsCommand::kResetPosition);
+    NIMVLETS_CHECK(ParseSettingsCommand("row:visibility") == SettingsCommand::kNone);
+    NIMVLETS_CHECK(ParseSettingsCommand("opt:size:large") == SettingsCommand::kNone);
+    NIMVLETS_CHECK(ParseSettingsCommand("gc:continue") == SettingsCommand::kNone);
+    NIMVLETS_CHECK(ParseSettingsCommand("") == SettingsCommand::kNone);
+    return true;
+}
+
+// La fila Visibility existe en Companion (primera), con dos segmentos, y
+// el marcado sigue el estado de RUNTIME (petShown), no una preferencia.
+bool TestVisibilityRowFollowsRuntimeState() {
+    for (const bool shown : {true, false}) {
+        const SettingsLayout l = LayoutCompanion(shown, /*positionResetAvailable=*/true);
+        const SettingsRow* row = l.FindRowKind(SettingsRowKind::kVisibility);
+        NIMVLETS_CHECK(row != nullptr);
+        NIMVLETS_CHECK(row->kind == SettingsRowKind::kVisibility);
+        NIMVLETS_CHECK(row->focusId == "row:visibility");
+        NIMVLETS_CHECK(row->label == "Visibility");
+        NIMVLETS_CHECK(row->segments.size() == 2);
+        NIMVLETS_CHECK(row->segments[0].label == "Shown");
+        NIMVLETS_CHECK(row->segments[0].focusId == "cmd:show");
+        NIMVLETS_CHECK(row->segments[1].label == "Hidden");
+        NIMVLETS_CHECK(row->segments[1].focusId == "cmd:hide");
+        // Exactamente uno marcado, el que corresponde a petShown.
+        const SettingsSegment* sel = SelectedSegment(*row);
+        NIMVLETS_CHECK(sel != nullptr);
+        NIMVLETS_CHECK(sel->focusId == (shown ? "cmd:show" : "cmd:hide"));
+        // Los dos segmentos son accionables (visibilidad siempre se puede
+        // cambiar — no hay capacidad de plataforma que la limite).
+        NIMVLETS_CHECK(row->segments[0].enabled && row->segments[1].enabled);
+        // Hit-test devuelve el comando exacto.
+        NIMVLETS_CHECK(l.HitTest(row->segments[0].rect.CenterX(), row->segments[0].rect.CenterY()) ==
+                       "cmd:show");
+        NIMVLETS_CHECK(l.HitTest(row->segments[1].rect.CenterX(), row->segments[1].rect.CenterY()) ==
+                       "cmd:hide");
+        // Es la PRIMERA fila del grupo Companion, antes de Size.
+        NIMVLETS_CHECK(l.groups[0].rows.front().kind == SettingsRowKind::kVisibility);
+        // No tiene hint (se explica sola).
+        NIMVLETS_CHECK(row->hint.empty());
+    }
+    return true;
+}
+
+// "Reset position" disponible (macOS / Windows / X11): un botón
+// accionable, en el hit-test y en el anillo de foco, sin línea de aviso.
+bool TestPositionRowAvailable() {
+    const SettingsLayout l = LayoutCompanion(/*petShown=*/true, /*positionResetAvailable=*/true);
+    const SettingsRow* row = l.FindRowKind(SettingsRowKind::kPosition);
+    NIMVLETS_CHECK(row != nullptr);
+    NIMVLETS_CHECK(row->label == "Position");
+    NIMVLETS_CHECK(row->focusId == "row:position");
+    NIMVLETS_CHECK(row->segments.size() == 1);
+    NIMVLETS_CHECK(row->segments[0].label == "Reset position");
+    NIMVLETS_CHECK(row->segments[0].focusId == "cmd:resetpos");
+    NIMVLETS_CHECK(row->segments[0].enabled);
+    NIMVLETS_CHECK(!row->segments[0].selected);  // es una ACCIÓN, no un toggle
+    NIMVLETS_CHECK(row->hint.empty());           // sin drama cuando SÍ se puede
+    // Hit-test y foco.
+    NIMVLETS_CHECK(l.HitTest(row->segments[0].rect.CenterX(), row->segments[0].rect.CenterY()) ==
+                   "cmd:resetpos");
+    bool inOrder = false;
+    for (const std::string& id : l.focusOrder) {
+        inOrder = inOrder || id == "row:position";
+    }
+    NIMVLETS_CHECK(inOrder);
+    // Va después de Lock Position.
+    const SettingsRow* lockRow = l.FindRow(PreferenceField::kLockPosition);
+    NIMVLETS_CHECK(lockRow != nullptr && row->labelAnchor.y >= lockRow->labelAnchor.Bottom());
+    return true;
+}
+
+// Wayland / sin capacidad (brief §9): "Reset position" se DIBUJA apagado
+// para que la línea corta tenga a qué referirse, pero queda fuera del
+// hit-test y del anillo de foco. Sin alarma — es un límite del sistema.
+bool TestPositionRowUnavailableIsDisabledAndOutOfReach() {
+    const SettingsLayout l = LayoutCompanion(/*petShown=*/true, /*positionResetAvailable=*/false);
+    const SettingsRow* row = l.FindRowKind(SettingsRowKind::kPosition);
+    NIMVLETS_CHECK(row != nullptr);
+    NIMVLETS_CHECK(row->segments.size() == 1);
+    NIMVLETS_CHECK(!row->segments[0].enabled);  // dibujado, pero apagado
+    NIMVLETS_CHECK(row->hint == std::string(Localized(StringKey::kPositionUnavailable, Language::kEn)));
+
+    // El hit-test NUNCA devuelve el segmento apagado, aunque el punto
+    // caiga exactamente encima.
+    NIMVLETS_CHECK(l.HitTest(row->segments[0].rect.CenterX(), row->segments[0].rect.CenterY()).empty());
+    // Ni "cmd:resetpos" ni "row:position" están en el orden de foco.
+    for (const std::string& id : l.focusOrder) {
+        NIMVLETS_CHECK(id != "row:position");
+        NIMVLETS_CHECK(id != "cmd:resetpos");
+    }
+    // Y Visibility sigue perfectamente usable en el mismo sistema.
+    const SettingsRow* vis = l.FindRowKind(SettingsRowKind::kVisibility);
+    NIMVLETS_CHECK(vis != nullptr && vis->segments[0].enabled && vis->segments[1].enabled);
+    return true;
+}
+
+// EN / ES de las dos filas nuevas, incluida la línea de "no disponible".
+bool TestCompanionRecoveryRowsLocalized() {
+    const SettingsLayout en = LayoutCompanion(true, false, Language::kEn);
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kVisibility)->label == "Visibility");
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kVisibility)->segments[0].label == "Shown");
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kVisibility)->segments[1].label == "Hidden");
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kPosition)->label == "Position");
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kPosition)->segments[0].label == "Reset position");
+    NIMVLETS_CHECK(en.FindRowKind(SettingsRowKind::kPosition)->hint ==
+                   "Position can't be reset on this system.");
+
+    const SettingsLayout es = LayoutCompanion(true, false, Language::kEs);
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kVisibility)->label == "Visibilidad");
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kVisibility)->segments[0].label == "Visible");
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kVisibility)->segments[1].label == "Oculto");
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kPosition)->label == "Posición");
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kPosition)->segments[0].label == "Restablecer posición");
+    NIMVLETS_CHECK(es.FindRowKind(SettingsRowKind::kPosition)->hint ==
+                   "La posición no se puede restablecer en este sistema.");
+    return true;
+}
+
+// Fuente de verdad única (brief §22): para un MISMO estado de
+// visibilidad, el segmento marcado en Settings y la etiqueta Show/Hide
+// del menú rápido nombran el mismo hecho. Los dos derivan de un solo
+// bool (SpikeApp::petHidden_ / ShellState::petHidden).
+bool TestVisibilityAndQuickMenuAgree() {
+    for (const bool petShown : {true, false}) {
+        const SettingsLayout l = LayoutCompanion(petShown, /*positionResetAvailable=*/true);
+        const SettingsSegment* sel = SelectedSegment(*l.FindRowKind(SettingsRowKind::kVisibility));
+        NIMVLETS_CHECK(sel != nullptr);
+
+        ShellState s;
+        s.petHidden = !petShown;
+        const std::string menuLabel =
+            nimvlets::platform::BuildQuickMenuModel(s).items[2].label;  // el item Show/Hide
+
+        // Settings "Shown" marcado  <=>  el menú ofrece "Hide Nimvlet".
+        // Settings "Hidden" marcado <=>  el menú ofrece "Show Nimvlet".
+        if (sel->focusId == "cmd:show") {
+            NIMVLETS_CHECK(menuLabel == "Hide Nimvlet");
+        } else {
+            NIMVLETS_CHECK(sel->focusId == "cmd:hide");
+            NIMVLETS_CHECK(menuLabel == "Show Nimvlet");
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 void RegisterSettingsLayoutTests(testing::TestRunner& runner) {
-    runner.Add("SettingsLayout/DefaultStateStillFitsWithoutScroll", TestDefaultStateStillFitsWithoutScroll);
+    runner.Add("SettingsLayout/DefaultStateScrollBudget", TestDefaultStateScrollBudget);
+    runner.Add("SettingsLayout/CompanionGroupComposedAtDefaultSize", TestCompanionGroupComposedAtDefaultSize);
     runner.Add("SettingsLayout/InteractionGroupHasClickCountingRow", TestInteractionGroupHasClickCountingRow);
     runner.Add("SettingsLayout/LocalModeShowsNoNotice", TestLocalModeShowsNoNotice);
     runner.Add("SettingsLayout/UnavailablePlatformDisablesAnywhereAndSaysSo",
@@ -795,9 +984,15 @@ void RegisterSettingsLayoutTests(testing::TestRunner& runner) {
     runner.Add("SettingsLayout/LabelsLocalized", TestLabelsLocalized);
     runner.Add("SettingsLayout/OnlyLockAndClickCountingRowsHaveHint", TestOnlyLockAndClickCountingRowsHaveHint);
     runner.Add("SettingsLayout/HitTestReturnsSegmentAndNavIds", TestHitTestReturnsSegmentAndNavIds);
-    runner.Add("SettingsLayout/FitsWithoutScrollBothLanguages", TestFitsWithoutScrollBothLanguages);
     runner.Add("SettingsLayout/NoOverlapWithinRows", TestNoOverlapWithinRows);
     runner.Add("SettingsLayout/SettingsAndQuickMenuAgreeOnSelection", TestSettingsAndQuickMenuAgreeOnSelection);
+    runner.Add("SettingsLayout/SettingsCommandTokensParse", TestSettingsCommandTokensParse);
+    runner.Add("SettingsLayout/VisibilityRowFollowsRuntimeState", TestVisibilityRowFollowsRuntimeState);
+    runner.Add("SettingsLayout/PositionRowAvailable", TestPositionRowAvailable);
+    runner.Add("SettingsLayout/PositionRowUnavailableIsDisabledAndOutOfReach",
+               TestPositionRowUnavailableIsDisabledAndOutOfReach);
+    runner.Add("SettingsLayout/CompanionRecoveryRowsLocalized", TestCompanionRecoveryRowsLocalized);
+    runner.Add("SettingsLayout/VisibilityAndQuickMenuAgree", TestVisibilityAndQuickMenuAgree);
 }
 
 }  // namespace nimvlets::tests

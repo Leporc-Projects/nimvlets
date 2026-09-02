@@ -183,7 +183,7 @@ private:
 
     // Abre (o enfoca, si ya está abierta) la ventana de Collection y le
     // empuja el modelo/preview/balance actuales. NO abre nada al
-    // arranque — solo desde el menú rápido (ShellAction::kOpenCollection).
+    // arranque — solo desde el menú rápido (ShellAction::kOpenProductUi).
     void OpenProductWindow();
 
     // Reconstruye los modelos de la Collection y el Shop a partir del
@@ -218,6 +218,41 @@ private:
     // Enruta un SettingsChange (venido de la sección Settings) al Apply*
     // que corresponde a su `field`.
     void ApplyPreferenceChange(const productui::SettingsChange& change);
+
+    // --- Block 11B: controles TRANSITORIOS de Companion --------------
+    //
+    // Visibilidad y "Reset position" NO son preferencias persistidas
+    // (brief §4): no van a appState_, no bumpean el schema, no marcan
+    // dirty. Pero sí tienen su ruta canónica, análoga a los Apply* de
+    // Block 08: tanto el menú rápido (Show/Hide) como Settings entran por
+    // el MISMO punto, y el estado se re-empuja a Settings para que las
+    // dos superficies nunca diverjan.
+
+    // EL ÚNICO punto de mutación de la visibilidad del pet. `hidden`
+    // gobierna SDL_HideWindow / SDL_ShowWindow (+ redraw), el título del
+    // menú ("Show Nimvlet" / "Hide Nimvlet") y el segmento marcado en
+    // Settings. NUNCA persiste nada (esconder != salir, el pet arranca
+    // visible en cada lanzamiento — brief §4). No-op durante el
+    // onboarding (no hay pet elegido todavía).
+    void ApplyPetVisibility(bool hidden);
+
+    // La acción de recuperación de Settings (brief §6-§8). Coloca la
+    // ventana del pet en la posición SEGURA canónica —centrada, acotada—
+    // del display que contiene el Product UI, y persiste esa posición por
+    // la MISMA ruta que el fin de un drag (appState_.lastWindowPosition +
+    // MarkDirty). Funciona con el pet oculto y con Lock Position activo
+    // (es un reset EXPLÍCITO). No-op honesto (log, sin crash) en un
+    // backend que no puede colocar toplevels (Wayland).
+    void ResetPetPositionToSafeDefault();
+
+    // Enruta un productui::SettingsCommand (Shown / Hidden / Reset
+    // position) al método canónico correspondiente.
+    void HandleSettingsCommand(productui::SettingsCommand command);
+
+    // Empuja el estado runtime de Companion (visibilidad actual +
+    // capacidad de "Reset position" de este backend) a la sección
+    // Settings si el Product UI está abierto (no-op si no).
+    void PushCompanionStateToProductWindow();
 
     // Preferencias EFECTIVAS de esta sesión como valor de core (idioma
     // incluido — puede diferir de appState_.language si el owner nunca

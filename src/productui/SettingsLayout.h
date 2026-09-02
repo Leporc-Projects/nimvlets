@@ -69,6 +69,36 @@ enum class GlobalClickAction {
 // es uno.
 GlobalClickAction ParseGlobalClickAction(const std::string& focusId);
 
+// --- Controles TRANSITORIOS de Companion (Block 11B) ---------------
+//
+// Visibilidad (Shown/Hidden) y "Reset position" NO son preferencias
+// persistidas: no van a core::Preferences, no bumpean el schema de
+// AppState (brief §4). Por eso NO son un core::PreferenceField ni un
+// SettingsChange — son un canal aparte, hermano de GlobalClickAction:
+// SettingsView emite un SettingsCommand y src/app lo enruta a la ruta
+// canónica correspondiente (SpikeApp::ApplyPetVisibility /
+// ResetPetPositionToSafeDefault). Ver docs/PRODUCT_UI.md §20.
+enum class SettingsCommand {
+    kNone,
+    kShowPet,        // fila Visibility -> "Shown"
+    kHidePet,        // fila Visibility -> "Hidden"
+    kResetPosition,  // fila Position  -> "Reset position"
+};
+
+// Traduce un focusId de comando ("cmd:show" / "cmd:hide" /
+// "cmd:resetpos"). Devuelve kNone si no es uno.
+SettingsCommand ParseSettingsCommand(const std::string& focusId);
+
+// De qué trata una fila. Las filas de Companion/Interaction/Language que
+// mutan una PREFERENCIA persistida son kPreference (y llevan un
+// core::PreferenceField real); las dos filas transitorias de Block 11B
+// no. FindRow(PreferenceField) solo mira las kPreference.
+enum class SettingsRowKind {
+    kPreference,
+    kVisibility,  // [ Shown ] [ Hidden ] — emite un SettingsCommand
+    kPosition,    // [ Reset position ]   — emite kResetPosition (o queda apagada)
+};
+
 struct SettingsNoticeButton {
     std::string label;    // ya localizado
     UiRect rect;
@@ -96,11 +126,12 @@ struct SettingsNotice {
 };
 
 struct SettingsRow {
-    core::PreferenceField field = core::PreferenceField::kSize;
+    SettingsRowKind kind = SettingsRowKind::kPreference;
+    core::PreferenceField field = core::PreferenceField::kSize;  // solo si kind == kPreference
     std::string label;      // "Size" / "Opacity" / "Lock position" / "Language" (localizado)
     UiRect labelAnchor;     // ancla IZQUIERDA del texto de la fila
     std::vector<SettingsSegment> segments;
-    std::string focusId;    // "row:<field>" — el punto de foco de teclado
+    std::string focusId;    // "row:<field>" / "row:visibility" / "row:position" — el punto de foco de teclado
     UiRect focusRect;       // anillo de foco alrededor del grupo de segmentos
     std::string hint;       // frase corta bajo la fila ("" salvo Lock position / Click counting)
     UiRect hintAnchor;      // ancla IZQUIERDA del hint (.w = ancho de envoltura)
@@ -130,12 +161,17 @@ struct SettingsLayout {
     float contentHeight = 0.0f;
 
     // focusId accionable en (x, y): una pestaña de nav, el segmento
-    // exacto ("opt:<field>:<value>"), o un botón de aviso ("gc:..."). ""
-    // si nada. Un segmento con `enabled == false` NUNCA se devuelve.
+    // exacto ("opt:<field>:<value>" o "cmd:show" / "cmd:hide" /
+    // "cmd:resetpos"), o un botón de aviso ("gc:..."). "" si nada. Un
+    // segmento con `enabled == false` NUNCA se devuelve.
     std::string HitTest(float x, float y) const;
 
-    // La fila de `field`, o nullptr.
+    // La fila de PREFERENCIA de `field` (kind == kPreference), o nullptr.
     const SettingsRow* FindRow(core::PreferenceField field) const;
+
+    // La primera fila de `kind` (para las transitorias de Block 11B:
+    // kVisibility / kPosition), o nullptr.
+    const SettingsRow* FindRowKind(SettingsRowKind kind) const;
 };
 
 struct SettingsLayoutInput {
@@ -143,6 +179,17 @@ struct SettingsLayoutInput {
     float viewportH = 560.0f;
     float scrollY = 0.0f;
     core::Preferences prefs;  // idioma y modo de conteo incluidos
+    // Estado runtime de Companion, TRANSITORIO (Block 11B): lo empuja
+    // src/app junto con las preferencias. NO se persiste.
+    //   petShown              — la ventana del pet está visible ahora
+    //                           (== !SpikeApp::petHidden_).
+    //   positionResetAvailable — este backend puede colocar una toplevel
+    //                            en absoluto (macOS / Windows / X11 sí,
+    //                            Wayland no — brief §9). Cuando es false,
+    //                            "Reset position" se dibuja apagado y
+    //                            queda fuera del hit-test y del foco.
+    bool petShown = true;
+    bool positionResetAvailable = true;
     // Estado GENÉRICO del monitor de clics globales, ya derivado de la
     // capacidad/permiso por platform::ResolveGlobalClickUiState. Su
     // default (kUnavailable) es el correcto para cualquier host sin

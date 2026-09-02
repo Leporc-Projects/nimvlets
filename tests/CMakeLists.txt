@@ -80,6 +80,8 @@ add_executable(nimvlets_tests
   ProductWindowStateTest.cpp
   SettingsLayoutTest.h
   SettingsLayoutTest.cpp
+  SettingsCompanionTest.h
+  SettingsCompanionTest.cpp
   OnboardingPolicyTest.h
   OnboardingPolicyTest.cpp
   OnboardingLayoutTest.h
