@@ -45,6 +45,18 @@ supersedes one in `docs/DECISION_LOG.md`:
   is free. See `docs/PRD_V1.md` and `docs/DECISION_LOG.md`.
 - The click counter is never a permanent desktop overlay; it only
   appears inside product UI once that UI exists.
+- **Settings (the Product UI section) is the complete configuration
+  surface; the native quick menu is a deliberately small convenience
+  subset.** Settings may contain configuration the quick menu does not
+  (Block 11A's global-click mode, Block 11B's visibility + position
+  recovery); do not try to keep the two identical. See
+  `docs/PRODUCT_UI.md` §20 and DEC-141.
+- **Pet visibility (Show/Hide) is transient session state, never
+  persisted.** Hiding ≠ quitting; the pet always starts visible on
+  launch. The quick menu's Show/Hide and Settings' Visibility control
+  both mutate it through one canonical app-level path
+  (`SpikeApp::ApplyPetVisibility`), analogous to the Block 08 preference
+  path but with no AppState write and no schema bump.
 
 ## 3. Architecture and dependency direction
 
@@ -381,6 +393,6 @@ retroactive rewrite of untouched Block 01/02 content:
 | `docs/NIDIR_CONTENT.md` | Real asset source convention, import/normalization/mirror pipeline, and the directional content model (Block 04.2). |
 | `docs/BUNNY_CONTENT.md` | Bunny's migration to real production art, canonical-direction inversion, and the QA-driven downscale-quality/70-30-hover/rest-of-size corrections (Block 04.3). |
 | `docs/FRIN_CONTENT.md` | Frin's real male/female import and the named-state behavior graph (seated/lying transitions) it introduced (Block 05). |
-| `docs/PRODUCT_UI.md` | Product shell: the Collection window (hero + gallery composition, per-pet accent hero stage, two visual planes, soft accented action button), the **Shop** section + the **Settings** section + `Collection · Shop · Settings` text navigation, the click **wallet** (spendable, atomic purchase transaction, immediate persist), **variant-capable entitlements** (`catalog::PetEntitlement`), inline purchase confirmation, the **single canonical preference path** shared by the quick menu and Settings (`core::Preferences` + `SpikeApp::Apply*`, DEC-130), lightweight compiled previews (`.nvprev`), Retina text path, native quick menu, size/opacity/lock/hide controls, EN/ES localization + editorial contract, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope, and the **Interaction** group — the opt-in global click-counting preference that lives only in Settings (Block 06 / 06.1 / 06.2 / 07 / 08 / 11A). |
+| `docs/PRODUCT_UI.md` | Product shell: the Collection window (hero + gallery composition, per-pet accent hero stage, two visual planes, soft accented action button), the **Shop** section + the **Settings** section + `Collection · Shop · Settings` text navigation, the click **wallet** (spendable, atomic purchase transaction, immediate persist), **variant-capable entitlements** (`catalog::PetEntitlement`), inline purchase confirmation, the **single canonical preference path** shared by the quick menu and Settings (`core::Preferences` + `SpikeApp::Apply*`, DEC-130), lightweight compiled previews (`.nvprev`), Retina text path, native quick menu (`Open Nimvlets…`), size/opacity/lock/hide controls, EN/ES localization + editorial contract, Pet Runtime vs Product UI vs System Shell, lifecycle, performance model, platform scope, the **Interaction** group (opt-in global click-counting, Settings-only, Block 11A), and the **Companion** transient controls — Visibility + "Reset position" recovery via the canonical `ApplyPetVisibility` / `ResetPetPositionToSafeDefault` paths (Block 11B / DEC-141) (Block 06 / 06.1 / 06.2 / 07 / 08 / 11A / 11B). |
 | `docs/GLOBAL_CLICK_MODE.md` | The opt-in system-wide primary-click counting mode: requested vs effective mode, double-count prevention, the macOS Input Monitoring event tap, the platform support matrix, and the privacy audit (Block 11A). |
 | `docs/ONBOARDING.md` | First-run onboarding architecture (Block 09A, **not enabled for production yet**): the persisted `OnboardingLifecycle` (AppState schema v5) + migration of existing users as legacy-complete, the data-driven starter roster (`catalog::StarterRole`, catalog schema v4), the pure `catalog::OnboardingPolicy` (selection eval, exact Frin-variant grant, atomic idempotent completion transaction, zero starting balance), the event-driven 44-second session-dwell secret reveal, the production content-readiness gate, the DEV-only `NIMVLETS_DEV_ONBOARDING` harness, the Block 09B boundary (DEC-131 / DEC-132 / DEC-133 / DEC-134), and **§15/§16 — the Block 10 hidden STARTER SHOP** (`catalog::StarterShopModel` / `StarterPurchasePolicy`, `lifecycle == kCompleted` gate, secret non-disclosure rule, exact-variant purchase, contextual Shop submode; DEC-137). |

@@ -263,6 +263,13 @@ booleano viejo. Resultado neto:
 reaccionando únicamente a estas dos consultas de capacidad, exactamente
 como antes de este bloque.
 
+**Block 11B** agregó una tercera consulta con la misma forma:
+`platform::AbsoluteWindowPositioningSupported()` (macOS/Windows `true`;
+Linux delega en `LinuxBackendSupportsPositionRestore()`, la tabla pura ya
+citada en §3.3). Settings la usa para deshabilitar "Reset position" en
+Wayland (§6) -- sin `#ifdef`, sin una tabla nueva de `LinuxBackendPolicy`
+(reusa `SupportsPositionRestore`).
+
 ## 5. Comportamiento X11
 
 Con esta SDL pineada, X11 alcanza **paridad completa** con macOS en
@@ -304,6 +311,21 @@ ocultadas con un hack:
   cuándo no pudo aplicar una posición guardada, citando
   `SDL_GetError()` -- nunca falla, nunca crashea, y nunca finge
   silenciosamente que funcionó.
+
+  **Block 11B -- "Reset position" de Settings.** La acción de recuperación
+  de Settings (`docs/PRODUCT_UI.md` §20.7) también depende de colocar una
+  toplevel en absoluto, así que Wayland tampoco puede. En vez de fingir,
+  Settings la **deshabilita**: el botón `[ Reset position ]` se dibuja
+  apagado -- fuera del hit-test y del anillo de foco, el mismo patrón que
+  el segmento "Anywhere" sin capacidad del conteo global -- con la línea
+  corta y sin alarma *"Position can't be reset on this system."* La
+  decisión sale de `platform::AbsoluteWindowPositioningSupported()`, una
+  extensión nueva del seam compartido `TransparentWindowSupport.h` que en
+  Linux delega en la tabla pura y ya unit-testeada
+  `LinuxBackendSupportsPositionRestore()` (X11 `true` / Wayland `false`,
+  citada contra `Wayland_SetWindowPosition` en §3.3). El resto de Settings
+  (Visibility, Size, Opacity, Lock, Language, Click counting) sigue
+  funcional en Wayland. Ver DEC-141.
 - **Sin click-through real a la app de abajo.** Ver §3.2 para la
   evidencia completa. En la práctica: un click sobre un pixel
   transparente dentro del rectángulo de la ventana **no llega** a lo

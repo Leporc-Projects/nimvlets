@@ -27,8 +27,15 @@ Persistido, con significado real en el runtime hoy:
   (todavía no existe selección de variante — ver
   `content::PetDefinition::variantGroup`, también schema-only).
 - **Last window position** (`AppState::lastWindowPosition`) — se
-  actualiza cada vez que termina un drag; se usa para reabrir la
-  ventana donde el usuario la dejó (ver §7).
+  actualiza cada vez que termina un drag y, desde **Block 11B**, cuando
+  el owner invoca la acción **"Reset position"** de Settings
+  (`SpikeApp::ResetPetPositionToSafeDefault`, `docs/PRODUCT_UI.md` §20.7):
+  las dos rutas escriben el MISMO campo y marcan el MISMO debounce, sin
+  camino de persistencia propio. El destino del reset es
+  `core::SafePetPlacement(...)` — centrado y acotado al display que
+  contiene el Product UI — no una coordenada nueva inventada. Se usa para
+  reabrir la ventana donde quedó (ver §7). Sin bump de schema: es el
+  campo de siempre.
 
 **Agregado en Block 06 (schema v2), Block 06.1 (schema v3) y Block 07
 (schema v4) — ver §3:**
@@ -362,14 +369,19 @@ también despierta cuando hay un flush pendiente por vencer.
 | **Compra del Starter Shop oculto (Block 10)** | `EvaluateStarterPurchase` (puro, canal DISTINTO — re-checa lifecycle == kCompleted + rol de starter + regla del secreto); si es `kSuccess`, el MISMO `SpikeApp::ApplyPurchasedState` que el Shop público (balance -= precio, `ownedEntitlements` += la VARIANTE EXACTA, flush inmediato). El pet activo NO cambia (no auto-activa — DEC-137). Sin bump de schema. |
 | **Preferencia cambiada (Block 08 — menú rápido *o* sección Settings)** | `SpikeApp::Apply{Size,Opacity,Lock,UiLanguage}` (la ÚNICA ruta, DEC-130) escribe UN campo de `appState_` (`sizeChoice` / `opacityPercent` / `lockPosition` / `language`, con la normalización de siempre) y marca el scheduler como dirty. Usa el **debounce normal de ~2s** — NO se flushea de inmediato (una preferencia no es propiedad; perder ~2s de un cambio de tamaño es trivial). **Sin cambio de schema**: los cuatro campos ya existen desde v2/v3. La economía (`clickBalance`, `ownedEntitlements`, `ownershipSeeded`) y el pet activo no se tocan. |
 | Fin de drag | `appState_.lastWindowPosition` se setea a la posición final de la ventana; se marca el scheduler como dirty. |
+| **"Reset position" de Settings (Block 11B)** | `SpikeApp::ResetPetPositionToSafeDefault` mueve la ventana del pet a `core::SafePetPlacement(...)` (centrado + acotado al display que contiene el Product UI) y escribe `appState_.lastWindowPosition` + marca dirty por la **MISMA ruta que el fin de un drag** — sin camino propio, sin flush inmediato, sin bump de schema. Funciona con el pet oculto y con Lock Position ON (Lock solo gatea el inicio de un drag). En Wayland es un no-op honesto (el botón está apagado — ver abajo). |
 | Despertar del event loop, deadline de flush alcanzado | `FlushPersistedState()` — no hace nada salvo que esté realmente dirty. |
 | Shutdown limpio | `FlushPersistedState()` incondicionalmente (ignora el deadline; sigue sin hacer nada si no hay nada dirty). |
 
-**Sin validación de límites de pantalla/monitor.** Una posición de
-ventana guardada se restaura exactamente como se guardó, aunque la
-configuración de pantalla haya cambiado desde entonces (se desconectó
-un monitor, cambió la resolución). No se intenta en este bloque — ver
-las limitaciones del informe de Block 03.
+**Sin validación de límites de pantalla/monitor al RESTAURAR.** Una
+posición de ventana guardada se restaura al arrancar exactamente como se
+guardó, aunque la configuración de pantalla haya cambiado desde entonces
+(se desconectó un monitor, cambió la resolución). No se re-acota en ese
+camino. Para cuando eso deja el pet mal ubicado o fuera de pantalla,
+Block 11B agrega la acción **"Reset position"** de Settings, que SÍ acota
+al display que contiene el Product UI (`core::SafePetPlacement`) —
+recuperación explícita del owner, no una validación automática al
+arrancar.
 
 **Linux/Wayland (Block 04.1) no puede aplicar la posición guardada en
 absoluto** — no es una limitación de validación de límites, es que el

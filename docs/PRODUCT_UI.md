@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C / 10)
+# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C / 10 / 11A / 11B)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -86,7 +86,8 @@ Dentro de alcance:
 - **switching de pet en vivo** desde la Collection, sin reiniciar;
 - el **click balance** visible SOLO dentro del Product UI;
 - un **menú rápido nativo** en macOS (`NSStatusItem`): pet actual,
-  Show/Hide, Collection…, Size ▸, Opacity ▸, Lock Position, Quit;
+  Show/Hide, Open Nimvlets…, Size ▸, Opacity ▸, Lock Position, Quit
+  *(el ítem se llamaba `Collection…` hasta Block 11B — ver §4.1/§9)*;
 - **Show/Hide** del pet, **Lock Position**, **Size** (small/medium/
   large), **Opacity** (100/85/70/55 %), todos persistidos salvo la
   visibilidad;
@@ -191,7 +192,7 @@ se limpia (los bitmaps son específicos de la escala).
 
 | Evento | Efecto |
 |---|---|
-| `ShellAction::kOpenCollection` (menú "Collection…") | `ProductWindow::Open()` crea ventana + renderer + caches + vista, siembra el modelo/preview/balance, y activa la app (`platform::BringApplicationToForeground`). Si ya está abierta: solo la trae al frente. Si está **minimizada**: la restaura y la trae al frente — la MISMA ventana, la MISMA sección (§4.1). |
+| `ShellAction::kOpenProductUi` (menú "Open Nimvlets…") | `ProductWindow::Open()` crea ventana + renderer + caches + vista, siembra el modelo/preview/balance, y activa la app (`platform::BringApplicationToForeground`). Si ya está abierta: solo la trae al frente. Si está **minimizada**: la restaura y la trae al frente — la MISMA ventana, la MISMA sección (§4.1). *(Se llamaba `kOpenCollection` / "Collection…" hasta Block 11B; el string y el enum se corrigieron para nombrar la verdad — la ventana ya trae `Collection · Shop · Settings` y esta acción no siempre abre "Collection". La semántica NO cambió — ver DEC-141.)* |
 | El owner minimiza la ventana (botón amarillo nativo) | La ventana se va al Dock. Mientras esté ahí **no se dibuja ni se presenta nada**; lo que quede sucio o pendiente se pinta una sola vez al restaurarla. El runtime del pet, el wallet y las preferencias siguen exactamente igual. |
 | El owner cierra la ventana (botón rojo) | `ProductWindow::Close()`: destruye renderer, texturas y caches; `view_` vuelve a su estado inicial. **NO** termina la app, **NO** resetea el pet activo, **NO** resetea el balance, **NO** detiene el runtime del pet (brief §18). |
 | Reabrir | Reconstruye todo. La vista arranca en la Collection sin detalle abierto, con el modelo/balance actuales. Barato y correcto — no se mantiene un renderer pesado oculto (brief §18). |
@@ -203,7 +204,12 @@ Verificado contra el binario real: `NIMVLETS_DEV_COLLECTION_CYCLES=8`
 hace 8 pares open/close seguidos — el pet sigue activo, el renderer del
 pet sigue vivo, shutdown limpio, sin crecimiento de RSS (§ perf).
 
-### 4.1 "Collection…" SIEMPRE recupera la ventana (Block 11A, corrección de QA del owner)
+### 4.1 "Open Nimvlets…" SIEMPRE recupera la ventana (Block 11A, corrección de QA del owner; renombrado en Block 11B)
+
+> El ítem del menú se llamaba `Collection…` hasta Block 11B; el resto de
+> esta sección usa el nombre viejo por fidelidad histórica. La corrección
+> de QA y su semántica son exactamente las mismas — solo cambió el
+> string visible (y el enum interno `kOpenProductUi`). Ver DEC-141.
 
 El owner minimizó el Product UI con el botón amarillo nativo y después
 eligió `Collection…` en el menú rápido: **la ventana no volvía**.
@@ -523,7 +529,7 @@ trabajo futuro — NO se finge una implementación, brief §24).
 Bunny                    <- header, deshabilitado (nombre del pet activo, NO traducido)
 --------
 Hide Nimvlet             <- o "Show Nimvlet" según el estado  (Ocultar/Mostrar Nimvlet)
-Collection…                                                    (Colección…)
+Open Nimvlets…                                                 (Abrir Nimvlets…)   <- Block 11B (antes "Collection…")
 --------
 Size      ▸  Small · Medium · Large      (checkable, exactamente uno)   (Tamaño · Pequeño/Mediano/Grande)
 Opacity   ▸  100% · 85% · 70% · 55%      (checkable — los % no se traducen)   (Opacidad)
@@ -534,7 +540,13 @@ Quit Nimvlets                                                  (Salir de Nimvlet
 ```
 
 Entre paréntesis, la etiqueta en español. `Language ▸` es la única
-expansión de estructura de 06.1; el resto es re-etiquetado.
+expansión de estructura de 06.1; el resto es re-etiquetado. **Block 11B**
+renombró `Collection… → Open Nimvlets…` (`StringKey::kOpenNimvletsMenuItem`,
+`ShellAction::kOpenProductUi`): la ventana ya trae `Collection · Shop ·
+Settings` y la acción no siempre abre "Collection". El menú **no gana**
+los controles que Block 11B agrega solo a Settings (Visibility, "Reset
+position") — sigue siendo un subconjunto de conveniencia deliberadamente
+chico (§20, DEC-141).
 
 El `NSMenu` real se construye a partir de `platform::
 BuildQuickMenuModel(ShellState)` — un modelo PURO que
@@ -575,6 +587,19 @@ final, se reemplaza esa función por una carga de recurso. Sin emoji
 La visibilidad **no se persiste**: al relanzar la app el pet siempre
 arranca visible. Esconder ≠ salir (brief §17). `HandleShellAction`
 para `kTogglePetVisibility` nunca toca la variable `running`.
+
+**Block 11B: una sola ruta canónica para la visibilidad.** El toggle
+Show/Hide del menú rápido y la fila **Visibility** de Settings
+(`[ Shown ] [ Hidden ]`, §20) entran los dos por
+`SpikeApp::ApplyPetVisibility(bool hidden)` — el ÚNICO punto de mutación,
+análogo a los `Apply*` de preferencias (DEC-130) pero **sin** tocar
+`appState_` ni el debounce de persistencia: la visibilidad es estado de
+sesión, no una preferencia (sin campo nuevo, sin bump de schema).
+`ApplyPetVisibility` re-empuja el estado a Settings
+(`PushCompanionStateToProductWindow` → `SettingsView::SetCompanionRuntime`),
+así que las dos superficies siempre reflejan el mismo `petHidden_` y no
+pueden divergir. Guard de onboarding: no-op mientras el gate de primer
+arranque está activo (no hay pet elegido). Ver DEC-141.
 
 ## 11. Modelo de performance
 
@@ -1109,20 +1134,33 @@ vuelve a Collection — no se recuerda la última sección.
 
 ### 20.1 Qué expone
 
-EXACTAMENTE las cuatro preferencias que Block 06/07 ya persisten, sin
-ninguna nueva:
+> **Superseded parcialmente.** Block 08 abrió con "EXACTAMENTE las cuatro
+> preferencias, sin ninguna nueva, ni Hide/Show". Block 11A agregó el
+> grupo **Interaction** (§22) y Block 11B añadió a **Companion** dos
+> controles TRANSITORIOS —Visibility y "Reset position" (§20.7)— por
+> decisión de producto explícita: Settings es la superficie de
+> configuración **completa**; el menú rápido es un subconjunto de
+> conveniencia (DEC-141). El resto de §20 sigue vigente tal cual.
+
+Preferencias PERSISTIDAS (una sola ruta canónica, §20.2):
 
 | Preferencia | Valores | Efecto de runtime |
 |---|---|---|
 | **Size** | Small 0.80 · Medium 1.00 · Large 1.15 | `ApplyPetWindowMetrics` (igual que un switch de pet) |
 | **Opacity** | 100 · 85 · 70 · 55 % | `SDL_SetWindowOpacity` |
 | **Lock position** | On / Off | gate de inicio de drag (`core::PetDragAllowed`) |
+| **Click counting** | Nimvlet only / Anywhere | opt-in del conteo global (Block 11A, §22) |
 | **Language** | English / Español (endónimos) | relabela menú + las tres secciones, sin reiniciar |
 
-No hay slider de opacidad, ni tamaños intermedios, ni Hide/Show, ni Quit,
-ni acciones de Collection: Settings son **preferencias**, no un segundo
-menú del sistema (brief §4/§5). Sin filas placeholder de features
-futuras.
+Controles TRANSITORIOS (no se persisten, sin bump de schema — §20.7):
+
+| Control | Valores | Efecto de runtime |
+|---|---|---|
+| **Visibility** | Shown / Hidden | `SpikeApp::ApplyPetVisibility` (misma ruta que el Show/Hide del menú) |
+| **Position** | `[ Reset position ]` | `SpikeApp::ResetPetPositionToSafeDefault` (colocación segura + persiste por la ruta del fin-de-drag) |
+
+Sigue SIN slider de opacidad, sin tamaños intermedios, sin Quit, sin
+acciones de Collection, sin filas placeholder de features futuras.
 
 ### 20.2 Una sola ruta canónica de preferencias (DEC-130)
 
@@ -1212,6 +1250,61 @@ falta.
 > —la primera de las preferencias que este párrafo anticipaba— sin
 > cambiar la arquitectura: un `PreferenceField::kClickCounting`, una
 > fila, y un quinto `Apply*`. Ver §22.
+
+### 20.7 Companion: Visibility y "Reset position" — controles TRANSITORIOS (Block 11B)
+
+Block 11B completa la superficie funcional de Companion con dos controles
+que **no son preferencias persistidas** — no van a `core::Preferences`,
+no bumpean el schema de AppState (sigue en v6), no marcan dirty:
+
+**Visibility `[ Shown ] [ Hidden ]`** (primera fila de Companion). Cambia
+la visibilidad real del pet en el acto; el Product UI sigue visible con
+el pet oculto; no cambia pet activo, propiedad ni balance. La ruta
+canónica es `SpikeApp::ApplyPetVisibility(bool hidden)`, compartida con
+el toggle Show/Hide del menú rápido (§10): las dos superficies derivan
+del **mismo** `petHidden_` (`SettingsView::SetCompanionRuntime` lo
+re-empuja) y no pueden divergir. Al reiniciar la app el pet vuelve
+visible — esconder ≠ salir, contrato de Block 06.
+
+**Position `[ Reset position ]`** (última fila de Companion). Una
+ACCIÓN de recuperación, no un toggle. `SpikeApp::ResetPetPositionToSafeDefault()`:
+1. resuelve el **display que contiene la ventana del Product UI**
+   (`SDL_GetWindowFromID(WindowId())` → `SDL_GetDisplayForWindow` →
+   `SDL_GetDisplayBounds`);
+2. calcula el destino con la pieza pura `core::SafePetPlacement(display,
+   petW, petH)` — **centrado** (idéntico a `SDL_WINDOWPOS_CENTERED`, el
+   default de arranque), **acotado** al display, anclando el borde
+   sup-izq si el pet es más grande que la pantalla. Sin coordenadas de
+   escritorio hard-codeadas;
+3. `SDL_SetWindowPosition` sobre la ventana del pet (chequea el retorno
+   real);
+4. persiste por la **MISMA** ruta que el fin de un drag
+   (`appState_.lastWindowPosition` + `MarkDirty`) y re-resuelve la
+   dirección una vez.
+Es **quieta**: sin diálogo, sin toast, sin animación, sin coordenadas ni
+IDs de monitor a la vista, sin permisos nuevos. **Lock Position NO la
+bloquea** (`core::PetDragAllowed` solo gatea el *inicio de un drag*), y
+funciona con el pet **oculto**.
+
+En un backend que no puede colocar una toplevel en absoluto
+(`platform::AbsoluteWindowPositioningSupported()` → Wayland `false`, ver
+`docs/LINUX_PLATFORM.md` §6) el botón se **dibuja apagado** —fuera del
+hit-test y del anillo de foco, el mismo patrón que el segmento "Anywhere"
+sin capacidad de §22.3— con la línea corta "Position can't be reset on
+this system." Todo lo demás de Settings sigue funcional.
+
+**Canal aparte de `SettingsChange`.** `SettingsView` emite un
+`productui::SettingsCommand` (`kShowPet` / `kHidePet` / `kResetPosition`)
+— hermano de `GlobalClickAction`, no un `PreferenceField` — precisamente
+porque no muta ninguna preferencia. src/app lo enruta con
+`HandleSettingsCommand`.
+
+Tamaño: Companion pasó de 3 a 5 filas; a 800×560 el contenido pasa un
+poco de largo y la vista **scrollea** (`ClampSettingsScroll` acota el
+excedente exacto) — el brief §21 lo permite explícitamente, no se encoge
+nada para forzarlo a una pantalla. Fijado en
+`tests/SettingsLayoutTest.cpp` y `tests/SettingsCompanionTest.cpp`. Ver
+DEC-141.
 
 ## 21. El SHOP OCULTO DE STARTERS — submodo contextual del Shop (Block 10)
 

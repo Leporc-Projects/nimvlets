@@ -5,7 +5,25 @@ transparent window shows one creature on your desktop; drag it around,
 click it to earn clicks (the only currency), spend clicks to unlock more
 creatures permanently.
 
-Este repositorio está en **Block 11A — Modo de conteo de clics GLOBAL,
+Este repositorio está en **Block 11B — Completar Settings + controles de
+recuperación** (Settings pasa a ser la superficie de configuración
+**completa**; el menú rápido queda como un subconjunto de conveniencia,
+deliberadamente chico — DEC-141). El grupo **Companion** de Settings gana
+dos controles TRANSITORIOS, no persistidos: **Visibility**
+`[ Shown ] [ Hidden ]`, que cambia la visibilidad real del pet por la
+MISMA ruta canónica que el Show/Hide del menú (`SpikeApp::ApplyPetVisibility`
+— sin bump de schema, esconder ≠ salir, el pet arranca visible en cada
+lanzamiento), y **Position** `[ Reset position ]`, una acción quieta de
+recuperación que devuelve una ventana fuera de pantalla a la colocación
+SEGURA canónica (centrada + acotada, idéntica al default de arranque) del
+display que contiene el Product UI, persistiendo por la MISMA ruta que el
+fin de un drag — funciona con el pet oculto y con Lock Position ON, y en
+Wayland se dibuja apagada en vez de fingir (`xdg-shell` no coloca
+toplevels). El ítem del menú rápido `Collection…` pasa a **`Open
+Nimvlets…`**: la ventana ya trae `Collection · Shop · Settings` y la
+acción restaura la MISMA ventana y su sección (semántica de Block 11A
+intacta). Ver [`docs/PRODUCT_UI.md`](docs/PRODUCT_UI.md) §20.7 y DEC-141.
+Construido sobre **Block 11A — Modo de conteo de clics GLOBAL,
 opt-in** (una preferencia de **Settings** —y solo de Settings— que deja
 contar pulsaciones del botón primario en **cualquier** parte del
 sistema, no solo sobre el Nimvlet: `Click counting [ Nimvlet only ]
@@ -313,11 +331,18 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
 #   (necesita NIMVLETS_DEV_SHOP_PET: solo existe con un personaje elegido).
 # NIMVLETS_DEV_PREFS=small,70,lock,es   -> aplica preferencias por la MISMA
 #   ruta canónica que el menú rápido (SpikeApp::Apply*). Tokens:
-#   small|medium|large, 100|85|70|55, lock|unlock, en|es. Sirve para
-#   capturar un estado no-default de Settings y como smoke en vivo de que
-#   esa ruta produce el AppState/runtime esperado.
+#   small|medium|large, 100|85|70|55, lock|unlock, en|es, y (Block 11B,
+#   visibilidad TRANSITORIA por SpikeApp::ApplyPetVisibility) shown|hidden.
+#   Sirve para capturar un estado no-default de Settings y como smoke en
+#   vivo de que esa ruta produce el AppState/runtime esperado.
 # NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity -> foco de teclado sobre una fila
-#   de Settings (row:size|row:opacity|row:lock|row:clickcounting|row:language).
+#   de Settings (row:visibility|row:size|row:opacity|row:lock|row:position|
+#   row:clickcounting|row:language).
+# NIMVLETS_DEV_RESET_POSITION=1         -> Block 11B: invoca "Reset position"
+#   por la MISMA ruta canónica (SpikeApp::ResetPetPositionToSafeDefault),
+#   sin un click real. Mueve la ventana del pet al destino SEGURO del
+#   display que contiene el Product UI y marca lastWindowPosition dirty.
+#   Necesita NIMVLETS_DEV_OPEN_COLLECTION.
 # NIMVLETS_DEV_UI_NAV_SMOKE=1           -> smoke NO interactivo de que las
 #   tres pestañas (Collection · Shop · Settings) son ALCANZABLES con un
 #   click desde cualquier sección (mismo camino que un click del owner:
@@ -355,6 +380,39 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa3 NIMVLETS_DEV_HIDE_PET=1 \
   NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=settings \
   NIMVLETS_DEV_PREFS=small,70,lock \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/settings.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# --- Companion: visibilidad + "Reset position" (Block 11B) -----------
+# A. Settings con el pet oculto (fila Visibility -> "Hidden"), ES, con el
+#    botón "Reset position" enfocado. Confirma la sincronización
+#    ApplyPetVisibility -> Settings y el anillo de foco de la fila nueva.
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_11b_a NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=settings NIMVLETS_DEV_PREFS=hidden,es \
+  NIMVLETS_DEV_SETTINGS_FOCUS=row:position \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/settings_11b_es.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+# D. "Reset position" en vivo: mueve la ventana del pet al destino seguro
+#    de su display y persiste por la ruta del fin-de-drag (buscar el log
+#    "Reset position -> pet moved to the safe default ...").
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_11b_d NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=settings NIMVLETS_DEV_RESET_POSITION=1 \
+  ./build/macos-debug/src/app/nimvlets_spike
+# E. Reset con Lock Position ON: la posición cambia igual (Lock solo
+#    gatea el inicio de un drag, no un reset explícito del owner).
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_11b_e NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=settings NIMVLETS_DEV_PREFS=lock \
+  NIMVLETS_DEV_RESET_POSITION=1 \
+  ./build/macos-debug/src/app/nimvlets_spike
+# F. hide -> reset -> show sigue siendo seguro (el pet oculto también
+#    puede recibir un reset de posición):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_11b_f NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=settings NIMVLETS_DEV_PREFS=hidden \
+  NIMVLETS_DEV_RESET_POSITION=1 \
+  ./build/macos-debug/src/app/nimvlets_spike
+# G. minimizar el Product UI y recuperarlo con "Open Nimvlets…" (misma
+#    ventana, misma sección) — el smoke en vivo de Block 11A cubre las
+#    tres secciones:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_11b_g NIMVLETS_DEV_RESTORE_SMOKE=1 \
   ./build/macos-debug/src/app/nimvlets_spike
 
 # --- Onboarding de primer arranque (Block 09A, SOLO-DEV) --------------
@@ -483,7 +541,8 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_live_g NIMVLETS_DEV_HIDE_PET=1 \
   NIMVLETS_DEV_CLICK_COUNTING=anywhere NIMVLETS_DEV_WALLET_LIVE_SMOKE=1 \
   ./build/macos-debug/src/app/nimvlets_spike
 
-# "Collection…" recupera la ventana minimizada, sin duplicarla:
+# "Open Nimvlets…" recupera la ventana minimizada, sin duplicarla (el
+# ítem se llamaba "Collection…" hasta Block 11B; la semántica no cambió):
 NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_restore NIMVLETS_DEV_HIDE_PET=1 \
   NIMVLETS_DEV_RESTORE_SMOKE=1 ./build/macos-debug/src/app/nimvlets_spike
 

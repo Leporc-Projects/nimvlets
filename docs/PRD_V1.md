@@ -1,7 +1,7 @@
 # Nimvlets — PRD v1 (current)
 
 Status: living document, reflects the product as decided **now**
-(2026-08-19, Block 05). Superseded points are marked in
+(2026-09-02, through Block 11B). Superseded points are marked in
 `docs/DECISION_LOG.md`, not deleted here — this file always describes
 current intent, not history.
 
@@ -46,7 +46,7 @@ creatures.
   - **Sweetie** — not yet populated with real art.
 - No final audio or branding exists yet.
 
-## 4. Starter onboarding (product decision — not yet implemented)
+## 4. Starter onboarding (architecture built; production flow not enabled)
 
 On first launch, the player is offered a choice of three starters:
 Artu, Rato, or Rin Rin. If the choice screen goes unanswered for 44
@@ -59,17 +59,24 @@ female) appears for the secret starter is not decided — see
 `pet_id` with two `variant_id`s so that decision doesn't require an
 engine change either way.
 
-After picking a starter, a later, currently-unbuilt hidden area of the
-Shop will let the player acquire starters they didn't originally pick.
-The exact persistence/reappearance semantics for Frin (e.g., whether
-missing the 44-second window is a one-time event or repeats) are **not
-decided** and will be specified in a future block — do not invent this.
+After picking a starter, a hidden area of the Shop lets the player
+acquire starters they didn't originally pick. The exact persistence/
+reappearance semantics for Frin (e.g., whether missing the 44-second
+window is a one-time event or repeats) are **not decided** and will be
+specified in a future block — do not invent this.
 
-This entire flow is **not implemented** as of this block; it's
-recorded here as product intent so it isn't lost, and so nothing in
-the codebase accidentally contradicts it. No onboarding/shop UI exists
-yet — pets are only reachable via the `NIMVLETS_DEV_SELECT_PET`/
-`NIMVLETS_DEV_SWITCH_TEST_COUNT` dev-only mechanisms (see README.md).
+**Status.** The first-run architecture exists since **Block 09A**
+(`docs/ONBOARDING.md`): the persisted `OnboardingLifecycle` (AppState
+v5), the data-driven starter roster, the pure `catalog::OnboardingPolicy`
+(exact Frin-variant grant, atomic completion, balance 0), the event-
+driven 44-second secret reveal, and a production **content-readiness
+gate**. The contextual **hidden Starter Shop** submode was built in
+**Block 10** (`catalog::StarterShopModel` / `StarterPurchasePolicy`,
+DEC-137). The **production onboarding flow is NOT enabled**: it stays
+gated behind real Artu/Rato/Rin Rin content that does not exist yet, so
+existing users are unaffected and new users still fall through to the dev
+seed. Both paths are exercised only via the DEV harness
+(`NIMVLETS_DEV_ONBOARDING`, `NIMVLETS_DEV_STARTER_*` — see README.md).
 
 ## 5. Economy
 
@@ -102,22 +109,47 @@ and the hidden starter shop the other — neither is implemented here, and
 **Frin is not listed in the normal Shop**. Provisional QA prices: Bunny
 120, Nidir 300. See `docs/PRODUCT_UI.md` §7–§13 and DEC-123..DEC-127.
 
-## 6. Global click mode (future, opt-in — not implemented)
+## 6. Global click mode (opt-in — implemented on macOS since Block 11A)
 
-A future, fully **opt-in** mode may count clicks anywhere on the
-system, not just on the Nimvlet itself. When it exists, it must:
+A fully **opt-in** mode counts primary mouse clicks anywhere on the
+system, not just on the Nimvlet itself. Authorized and built in **Block
+11A** (`docs/GLOBAL_CLICK_MODE.md`, DEC-139/DEC-140); it was a prohibited
+future feature from Block 01 through Block 10.
 
-- clearly explain what OS permission it needs and exactly what it
-  observes, before requesting anything;
-- be mouse-only — never keyboard;
-- never do screen capture or content/text inspection;
-- never track which app is focused/named;
-- never store coordinate or click-history data — only increment a
-  counter.
+Current status by platform:
 
-This is not implemented, and no permission for it is requested, in
-Block 01 or any block before one that explicitly authorizes it. See
-`docs/PRIVACY_SECURITY.md`.
+- **macOS: implemented and owner-verified in vivo.** Uses a listen-only
+  `CGEventTap` with a mask of exactly `kCGEventLeftMouseDown` behind the
+  **Input Monitoring** permission (never Accessibility, never Screen
+  Recording). The owner ran the physical checklist on real hardware:
+  5 primary clicks outside → +5 exactly; a click on the Nimvlet → +1 (no
+  double count); right-click / scroll / keyboard → +0; a global drag
+  → +1. `docs/PLATFORM_SPIKE.md` §13 records the PASS.
+- **Windows: unavailable / not runtime-verified.** No implementation this
+  project has run on real hardware.
+- **Linux: unavailable.** X11/Wayland global primary-click observation is
+  not implemented (`docs/LINUX_PLATFORM.md` §14). Wayland additionally
+  has no protocol path for it.
+
+Permanent constraints (now contracts, not future conditions):
+
+- **OFF by default** for new and migrated users alike. The permission is
+  requested from exactly **one** call site, only after an explicit owner
+  action in **Settings** that showed a first-party explanation first —
+  never at startup, never from onboarding / Shop / Collection / the quick
+  menu.
+- Mouse-only — **never keyboard**. Never right/middle button, scroll, or
+  motion.
+- Never screen capture or content/text inspection; never track which app
+  is focused or named.
+- **Never store** coordinates, timestamps, or click history — the only
+  functional output is "+1 to the click balance". Only the owner's *mode
+  preference* is persisted (AppState v6).
+
+The Settings explanation also anticipates that the OS may describe the
+permission far more broadly than what Nimvlets does (macOS presents Input
+Monitoring in keyboard/keystroke terms). See `docs/PRIVACY_SECURITY.md`
+§H and `AGENTS.md` §14.
 
 ## 7. Fullscreen presence (future, configurable — not implemented)
 

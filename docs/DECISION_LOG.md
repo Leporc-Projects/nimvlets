@@ -5846,3 +5846,120 @@ pedido vs. efectivo con fallback seguro a local, la regla de no doble
 conteo, AppState v6 y la frontera congelada de migración de Frin, el
 runtime del pet, el contenido de Bunny/Nidir/Frin, onboarding, el Starter
 Shop oculto, la política de compra, y el catálogo de producción.
+
+### DEC-141 — Block 11B: Settings es la superficie de configuración COMPLETA; visibilidad transitoria por ruta canónica; "Reset position" (colocación segura, sin coordenadas inventadas); el ítem del menú pasa a "Open Nimvlets…"
+
+**Fecha:** 2026-09-02 · **Bloque:** 11B · **Estado:** vigente ·
+**Depende de** DEC-130 (ruta canónica de preferencias / sección Settings),
+DEC-138/DEC-140 (cabecera compartida / wallet canónico / restauración de
+la ventana). **NO** toca la arquitectura de Global Click de Block 11A
+(DEC-139/DEC-140 intactos), ni persistencia (sin bump de schema — sigue
+en v6), ni el runtime del pet, ni el contenido. **NO** es la pasada
+visual futura del universo Nimvlets.
+
+**Contexto.** Block 11A dejó Settings con `Companion / Interaction /
+Language` y el wallet en vivo, pero la superficie funcional estaba
+incompleta: no había forma de mostrar/ocultar el pet desde Settings, ni
+de recuperar una ventana que quedó fuera de pantalla tras un cambio de
+monitores. Este bloque completa esa superficie **actual** (no la
+rediseña).
+
+**1. Settings es la configuración COMPLETA; el menú rápido es un
+subconjunto de conveniencia.** Regla de producto permanente (ahora en
+`AGENTS.md` §2): el menú de la barra se queda deliberadamente chico y
+rápido (pet, Show/Hide, Open Nimvlets…, Size, Opacity, Lock, Language,
+Quit); Settings puede —y debe— tener funcionalidad que el menú no tiene.
+`Interaction` (Block 11A) fue el primer caso; Block 11B suma Visibility y
+"Reset position" **solo** en Settings. `tests/QuickMenuModelTest.cpp`
+(`QuickMenuStaysASmallSubsetOfSettings`) fija que ninguna etiqueta del
+menú menciona esos controles y que el conjunto de submenús sigue siendo
+`Size / Opacity / Language`.
+
+**2. Visibility en Companion, TRANSITORIA, por la ruta canónica.** Una
+fila `[ Shown ] [ Hidden ]` como primera de Companion. Cambia la
+visibilidad real del pet en el acto (`SDL_HideWindow`/`SDL_ShowWindow`);
+el Product UI sigue visible con el pet oculto; no cambia pet activo,
+propiedad ni balance. **No se persiste** (contrato preexistente de
+Block 06 §10: esconder ≠ salir, el pet arranca visible en cada
+lanzamiento — sin campo nuevo en AppState, sin bump de schema). Hay UN
+solo punto de mutación, `SpikeApp::ApplyPetVisibility(bool hidden)`,
+análogo a los `Apply*` de DEC-130: tanto el toggle Show/Hide del menú
+rápido como la fila de Settings entran por ahí, y ese punto re-empuja el
+estado a Settings (`PushCompanionStateToProductWindow`) — las dos
+superficies derivan del **mismo** bool (`petHidden_`), así que no pueden
+divergir. `SettingsView` emite un `productui::SettingsCommand`
+(Shown/Hidden/Reset) — un canal aparte de `SettingsChange`, hermano de
+`GlobalClickAction` — porque NO es una preferencia persistida y no debe
+tocar `core::Preferences` / `core::PreferenceField`.
+
+**3. "Reset position": colocación SEGURA canónica, sin coordenadas
+inventadas.** Fila `Position [ Reset position ]` en Companion, una ACCIÓN
+(no un toggle persistido). Semántica de `SpikeApp::ResetPetPositionToSafeDefault()`:
+1. determina el display que **contiene la ventana del Product UI**
+   (`SDL_GetWindowFromID(productWindow_.WindowId())` → `SDL_GetDisplayForWindow`
+   → `SDL_GetDisplayBounds`);
+2. calcula el destino con la pieza **pura** `core::SafePetPlacement(display,
+   petW, petH)` — **centrado** (idéntico a `SDL_WINDOWPOS_CENTERED`, el
+   default de arranque cuando no hay posición guardada), **acotado** para
+   que el rectángulo entero quede dentro del display, y anclando el borde
+   sup-izq si el pet es más grande que el display. `petW/petH` =
+   `EffectiveCanvasWidth()/Height()` (respeta la escala de tamaño). No
+   hay ninguna constante de escritorio hard-codeada;
+3. `SDL_SetWindowPosition(window_, …)` sobre la ventana del pet
+   (chequeando el valor de retorno real, igual que la restauración de
+   `Init()`);
+4. persiste por la **MISMA** ruta que el fin de un drag
+   (`appState_.lastWindowPosition` + `persistenceScheduler_.MarkDirty`),
+   y re-resuelve la dirección una vez (`UpdateDirectionFromWindowPosition`).
+La acción es **quieta**: sin diálogo, sin toast, sin animación, sin
+mostrar coordenadas ni IDs de monitor, sin permisos nuevos. **Lock
+Position NO la bloquea** (`core::PetDragAllowed` solo gatea el *inicio de
+un drag*; un reset explícito del owner es otra cosa), y funciona con el
+pet **oculto** (la ventana existe).
+
+**4. Wayland: honestidad, no un hack.** `xdg-shell` no permite que un
+cliente pida una posición absoluta para una `xdg_toplevel` (ver
+`docs/LINUX_PLATFORM.md` §3.3/§6). Se añade `platform::AbsoluteWindowPositioningSupported()`
+al seam compartido `TransparentWindowSupport.h` — macOS/Windows `true`,
+Linux delega en la tabla pura ya unit-testeada
+`LinuxBackendSupportsPositionRestore()` (X11 `true`, Wayland `false`). En
+un backend sin capacidad, Settings **dibuja "Reset position" apagado**
+(fuera del hit-test y del anillo de foco — el mismo patrón que el
+segmento "Anywhere" sin capacidad de Block 11A) con una línea corta y sin
+alarma ("Position can't be reset on this system."), y
+`ResetPetPositionToSafeDefault()` es un no-op con log si igual se lo
+invoca. Todo lo demás de Settings sigue funcional. Las limitaciones
+documentadas de Wayland **no cambian**.
+
+**5. `Open Nimvlets…` — corrección de verdad de producto.** El ítem del
+menú rápido decía `Collection…`, pero la ventana ya contiene
+`Collection · Shop · Settings` desde Blocks 07/08, y Block 11A (DEC-140)
+fijó que invocarlo con la ventana ya abierta restaura **LA MISMA**
+ventana y su **sección actual** — no "Collection". El string visible pasa
+a **"Open Nimvlets…" / "Abrir Nimvlets…"**. El refactor interno era
+acotado y mecánico, así que también se renombró `ShellAction::kOpenCollection
+→ kOpenProductUi` y `StringKey::kCollectionMenuItem → kOpenNimvletsMenuItem`
+(~7 sitios de código + tests). La **semántica** de abrir/enfocar/restaurar
+NO cambia: sigue exactamente el contrato de DEC-140 (cerrada → crear en
+Collection; visible → traer al frente; minimizada → restaurar la misma
+ventana y sección; nunca una segunda ventana, nunca un reset de estado).
+
+**Verificación.** macOS (Release, arm64): capturas de framebuffer del
+grupo Companion en EN y ES (Visibility, Position, y "Reset position" con
+foco de teclado), y el smoke DEV `NIMVLETS_DEV_RESET_POSITION=1` mueve la
+ventana del pet al destino seguro de su display y marca
+`lastWindowPosition` dirty por la ruta de siempre. Los tres smokes en
+vivo de Block 11A (`NIMVLETS_DEV_WALLET_LIVE_SMOKE`,
+`NIMVLETS_DEV_RESTORE_SMOKE`, `NIMVLETS_DEV_UI_NAV_SMOKE`) siguen PASS.
+**Windows/Linux: NOT TESTED** — solo build/CI, como el resto del Product
+UI (ver `docs/PLATFORM_SPIKE.md` §12). El owner puede verificar la fila
+Visibility, "Reset position" (incluido estando Lock ON y el pet oculto) y
+la etiqueta `Open Nimvlets…` en vivo en macOS.
+
+**Congelado sin tocar:** Global Click de Block 11A entero (AppState v6,
+modo pedido vs. efectivo, Input Monitoring, no doble conteo, sin prompt
+al arrancar); la restauración de la ventana minimizada y el wallet
+canónico en vivo (DEC-138/DEC-140); Collection owned-only (DEC-136); Shop
+browse-first (DEC-135); el Starter Shop oculto (DEC-137/DEC-138);
+onboarding (DEC-131..DEC-134); la política de compra; el catálogo de
+producción; el contenido de Nidir/Frin.

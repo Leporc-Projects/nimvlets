@@ -578,7 +578,8 @@ Desde la raíz del repo, Release recomendado. Usar
 
 1. **Menú de la barra**: aparece el icono monocromo de Nimvlets arriba
    a la derecha. Abrirlo: header con el nombre del pet, "Hide Nimvlet",
-   "Collection…", "Size ▸" (Small/Medium/Large, uno marcado),
+   "Open Nimvlets…" *(se llamaba "Collection…" hasta Block 11B)*,
+   "Size ▸" (Small/Medium/Large, uno marcado),
    "Opacity ▸" (100/85/70/55 %), "Lock Position" (checkable),
    "Quit Nimvlets".
 2. **Collection…**: abre una ventana normal ~760×540. Grid: Bunny
@@ -843,3 +844,50 @@ ni X11 para esta feature (brief §16/§17): los adapters reportan
 `kUnavailable` honestamente y el diseño investigado queda documentado en
 `docs/GLOBAL_CLICK_MODE.md` §12. Que compilen en CI no es una
 afirmación de comportamiento.
+
+## 14. Settings: visibilidad + "Reset position" (Block 11B)
+
+Diseño en `docs/PRODUCT_UI.md` §20.7. Acá, el estado por plataforma con
+la disciplina PASS / NOT TESTED de AGENTS.md §4.
+
+### 14.1 Estado por plataforma
+
+| Item | macOS | Windows | Linux/X11 | Linux/Wayland |
+|---|---|---|---|---|
+| Fila **Visibility** cambia la visibilidad real del pet | **PASS** — smoke DEV + captura EN/ES | NOT TESTED (compila) | NOT TESTED (compila) | NOT TESTED (compila) |
+| Sincronización menú rápido ⇆ Settings (una sola ruta `ApplyPetVisibility`) | **PASS** — `tests/SettingsCompanionTest.cpp` + captura con `NIMVLETS_DEV_PREFS=hidden` | (cubierto por tests puros) | (idem) | (idem) |
+| Visibilidad **NO** persiste | **PASS** — `tests/SettingsCompanionTest.cpp`; sin campo en AppState (v6 sin bump) | (tests puros) | (idem) | (idem) |
+| `platform::AbsoluteWindowPositioningSupported()` | `true` | `true` | `true` | **`false`** (xdg-shell) |
+| **Reset position** mueve la ventana + persiste por la ruta del fin-de-drag | **PASS** — `NIMVLETS_DEV_RESET_POSITION=1` mueve al destino seguro del display del Product UI y marca `lastWindowPosition` dirty; el owner puede verificarlo en vivo | NOT TESTED | NOT TESTED | **N/A** — botón apagado (ver abajo) |
+| Reset con **Lock Position ON** y con el **pet oculto** | **PASS** — `tests/SettingsCompanionTest.cpp`; Lock solo gatea el inicio de un drag, no un reset explícito | NOT TESTED | NOT TESTED | N/A |
+| Wayland: "Reset position" apagado + línea "Position can't be reset on this system." | n/a | n/a | n/a | **NOT TESTED** (no se corrió; `LinuxBackendSupportsPositionRestore(kWayland)==false` fijado por test puro) |
+| Etiqueta del menú `Open Nimvlets…` / `Abrir Nimvlets…` (antes `Collection…`) | **PASS** — `QuickMenuModelTest` + captura | (tests puros) | (idem) | (idem) |
+| Semántica open/visible/minimizada (§4.1) tras el renombre | **PASS** — `NIMVLETS_DEV_RESTORE_SMOKE=1` sigue PASS en Collection/Shop/Settings | NOT TESTED | NOT TESTED | NOT TESTED |
+
+### 14.2 Lo verificado en vivo (macOS 26.6, arm64, Release)
+
+- `NIMVLETS_DEV_PREFS=hidden` → *"pet window hidden (… visibility is
+  session state, not persisted)"*, y la fila **Visibility** de Settings
+  marca "Hidden" (la ruta `ApplyPetVisibility → PushCompanionStateToProductWindow`).
+- `NIMVLETS_DEV_RESET_POSITION=1` → *"Reset position -> pet moved to the
+  safe default of its Product UI display (persisted via the usual
+  position path)"*; `UpdateDirectionFromWindowPosition` se re-evalúa una
+  vez tras el movimiento.
+- Capturas de framebuffer del grupo **Companion** en EN y ES: las 5
+  filas (Visibility, Size, Opacity, Lock, Position) compuestas, sin
+  solape ni recorte; "Reset position" con anillo de foco de teclado; el
+  contenido pasa un poco de 560pt y la vista scrollea (brief §21).
+- Regresiones sin cambio: `NIMVLETS_DEV_WALLET_LIVE_SMOKE` Collection/
+  Shop/Settings PASS, `NIMVLETS_DEV_RESTORE_SMOKE` PASS en las tres
+  secciones, `NIMVLETS_DEV_UI_NAV_SMOKE` 6/6, `nimvlets_macos_text_check`
+  y `nimvlets_macos_clickthrough_check` PASS.
+
+### 14.3 Windows / Linux — NOT RUNTIME VERIFIED
+
+No hay código nativo nuevo: `AbsoluteWindowPositioningSupported()` sigue
+el seam compartido (`macOS/Windows → true`; Linux delega en la tabla
+pura `LinuxBackendSupportsPositionRestore()`, X11 `true` / Wayland
+`false`, cada valor citado contra la fuente pineada de SDL en
+`docs/LINUX_PLATFORM.md`). El movimiento real y el estado apagado de
+Wayland **no** se corrieron con una persona mirando — que compilen en CI
+no lo afirma.
