@@ -191,7 +191,8 @@ se limpia (los bitmaps son específicos de la escala).
 
 | Evento | Efecto |
 |---|---|
-| `ShellAction::kOpenCollection` (menú "Collection…") | `ProductWindow::Open()` crea ventana + renderer + caches + vista, siembra el modelo/preview/balance, y activa la app (`platform::BringApplicationToForeground`). Si ya está abierta: solo la trae al frente. |
+| `ShellAction::kOpenCollection` (menú "Collection…") | `ProductWindow::Open()` crea ventana + renderer + caches + vista, siembra el modelo/preview/balance, y activa la app (`platform::BringApplicationToForeground`). Si ya está abierta: solo la trae al frente. Si está **minimizada**: la restaura y la trae al frente — la MISMA ventana, la MISMA sección (§4.1). |
+| El owner minimiza la ventana (botón amarillo nativo) | La ventana se va al Dock. Mientras esté ahí **no se dibuja ni se presenta nada**; lo que quede sucio o pendiente se pinta una sola vez al restaurarla. El runtime del pet, el wallet y las preferencias siguen exactamente igual. |
 | El owner cierra la ventana (botón rojo) | `ProductWindow::Close()`: destruye renderer, texturas y caches; `view_` vuelve a su estado inicial. **NO** termina la app, **NO** resetea el pet activo, **NO** resetea el balance, **NO** detiene el runtime del pet (brief §18). |
 | Reabrir | Reconstruye todo. La vista arranca en la Collection sin detalle abierto, con el modelo/balance actuales. Barato y correcto — no se mantiene un renderer pesado oculto (brief §18). |
 | Un click en el pet mientras la Collection está abierta | El balance visible en la Collection se actualiza en vivo (brief §13). |
@@ -201,6 +202,64 @@ se limpia (los bitmaps son específicos de la escala).
 Verificado contra el binario real: `NIMVLETS_DEV_COLLECTION_CYCLES=8`
 hace 8 pares open/close seguidos — el pet sigue activo, el renderer del
 pet sigue vivo, shutdown limpio, sin crecimiento de RSS (§ perf).
+
+### 4.1 "Collection…" SIEMPRE recupera la ventana (Block 11A, corrección de QA del owner)
+
+El owner minimizó el Product UI con el botón amarillo nativo y después
+eligió `Collection…` en el menú rápido: **la ventana no volvía**.
+
+La causa, leída en la fuente de la SDL pineada (AGENTS.md §4), es que
+`FocusWindow()` hacía solo `BringApplicationToForeground()` +
+`SDL_ShowWindow` + `SDL_RaiseWindow`, y **ninguna de las dos llamadas de
+SDL toca una ventana minimizada**:
+
+- `SDL_ShowWindow` corta al principio (`SDL_video.c`) porque una ventana
+  minimizada **no** tiene `SDL_WINDOW_HIDDEN` — no está oculta, está en
+  el Dock;
+- `Cocoa_RaiseWindow` se salta su cuerpo entero mientras
+  `[nswindow isMiniaturized]`.
+
+Así que la app se activaba y la ventana se quedaba donde estaba.
+
+La corrección es **cross-platform y de SDL**, sin nada nativo nuevo:
+`ProductWindow::FocusWindow()` consulta la política pura
+`productui::ResolveWindowPresentStep(exists, minimized)` y, en el caso
+`kRestoreThenRaise`, llama **`SDL_RestoreWindow`** antes de mostrar y
+subir (`deminiaturize:` en macOS, `SW_RESTORE` en Win32, el equivalente
+del backend en Linux). No hizo falta ningún `#ifdef` ni ningún AppKit
+propio.
+
+Contrato, tal cual:
+
+| Estado previo | Qué pasa |
+|---|---|
+| No existe / cerrada | Se **crea** normalmente (arranca en Collection). |
+| Visible | Se **trae al frente**. Contrato preexistente intacto. |
+| Minimizada | Se **restaura la MISMA ventana** y se trae al frente. |
+
+En los dos últimos casos **no se crea una segunda ventana** y **no se
+resetea nada**: ni el pet activo, ni el wallet, ni la sección visible,
+ni el estado del Shop, ni las preferencias, ni el lifecycle de
+onboarding. Si el owner minimizó estando en **Settings** o en el
+**Shop**, vuelve a esa sección — no se lo empuja a Collection.
+
+El `SDL_RestoreWindow` se pide **una sola vez por minimización** (latch
+`restoreRequested_`, rearmado por los eventos reales
+`SDL_EVENT_WINDOW_MINIMIZED` / `SDL_EVENT_WINDOW_RESTORED`). No es
+cosmético: un solo `Collection…` pasa por `FocusWindow()` dos veces
+(`Open()` y el cierre de `SpikeApp::OpenProductWindow()`), y la segunda
+llegaría cuando AppKit ya deminiaturizó pero la flag de SDL sigue
+puesta — camino en el que `Cocoa_RestoreWindow` cae en su rama de
+`zoom:` y le **sacaría el maximizado** a la ventana del owner.
+
+Cobertura: `tests/ProductWindowStateTest.cpp` fija el contrato de los
+tres estados y el "ninguna rama crea una segunda ventana / resetea la
+sección"; y el smoke EN VIVO `NIMVLETS_DEV_RESTORE_SMOKE=1` lo prueba
+contra la ventana real —minimizar de verdad, esperar el evento del
+window server, invocar el MISMO camino del menú rápido, y comprobar el
+mismo `SDL_WindowID` y la misma sección— desde Collection, Shop y
+Settings. Ningún test puro puede probar esa parte, y no se pretende que
+lo haga.
 
 ## 5. Modelo de propiedad
 
@@ -852,8 +911,9 @@ y `ShopView` guardaban cada uno una copia (empujada por
 Block 08. Resultado: con 500 clics reales, Collection y Shop mostraban
 "500 clicks" y Settings "0 clicks".
 
-Ahora **`ProductWindow` posee el único `clickBalance_`** (lo fija
-`SetModels`) y `DrawFrame()` lo pasa a `Render()` de la sección visible
+Ahora **`ProductWindow` posee el único wallet mostrado** (lo fija
+`SetClickBalance`, al que `SetModels` delega — ver §17.2) y
+`DrawFrame()` lo pasa a `Render()` de la sección visible
 — las CUATRO. El balance YA NO viaja con el modelo (`*View::SetModel`
 pierde el parámetro; cada `Render(...)` gana un `clickBalance` trailing,
 que el compilador obliga a pasar). El texto se formatea UNA vez en la
@@ -863,6 +923,77 @@ capa PURA: `BuildSectionHeaderLayout(..., clickBalance)` produce
 idioma — todo el texto ya viene localizado en `header`). Mismo espíritu
 que la ruta canónica de preferencias de Block 08 (DEC-130): una fuente
 de verdad, todas las secciones consumen la MISMA. Sin bump de schema.
+
+### 17.2 …y un cambio de wallet INVALIDA la sección visible (Block 11A, corrección de QA del owner — DEC-140)
+
+Block 10 arregló *qué número* muestra cada sección. Faltaba *cuándo se
+vuelve a dibujar*. El owner lo encontró con clics físicos:
+
+> Con el Product UI abierto en **Settings** y el conteo en "Nimvlet
+> only", clickear el Nimvlet subía el balance real, pero la cabecera de
+> Settings seguía mostrando el número viejo. Salir de la sección y
+> volver mostraba el valor correcto. Con "Anywhere", en cambio, los
+> clics físicos de afuera SÍ refrescaban Settings al instante.
+
+**Causa exacta.** `SetModels` asignaba el balance y llamaba a
+`view_.SetModel(...)` / `shopView_.SetModel(...)` /
+`starterShopView_.SetModel(...)`, y **cada uno de esos `SetModel` marca
+su vista como sucia**. Settings no recibe ningún modelo (no tiene): nada
+la ensuciaba, y `RenderIfNeeded()` —que dibuja solo si hay
+`pendingExpose_` o si la vista **activa** está sucia— salía sin hacer
+nada. Es decir: Collection y Shop se salvaban **de rebote**, no porque
+existiera una ruta de notificación.
+
+Y la asimetría con "Anywhere" era igual de accidental: clickear en otra
+app le saca el foco de teclado a nuestra ventana, macOS repinta su
+chrome y llega un `SDL_EVENT_WINDOW_EXPOSED` → `pendingExpose_` → el
+frame se redibuja y **de paso** toma el balance nuevo. Un clic sobre el
+pet no cambia la ventana clave (la ventana del pet no es enfocable), así
+que no llegaba ningún evento y no pasaba nada.
+
+**La corrección: el cambio de valor ES la invalidación.** El `uint64_t`
+suelto pasó a ser `productui::WalletDisplay` (puro, en
+`nimvlets_productui_core`), y `ProductWindow::SetClickBalance` es el
+único lugar que lo escribe:
+
+```cpp
+if (!wallet_.Set(clickBalance)) return;  // mismo número: nada que hacer
+pendingExpose_ = true;                   // cambió: repintar lo visible
+```
+
+El balance vive en la cabecera **compartida**, así que la invalidación
+no puede depender de la sección — y ahora no depende. `SetModels`
+delega en `SetClickBalance`, de modo que **toda** escritura del wallet
+mostrado pasa por ahí.
+
+Del lado de la app no hizo falta tocar nada: `SpikeApp::HandleCountedClick`
+ya era el único punto de mutación, y su forma sigue siendo la misma para
+las dos fuentes —clic local sobre el Nimvlet y clic primario reenviado
+por el monitor global—:
+
+```
+HandleCountedClick(source)
+  -> política pura: ¿esta fuente cuenta en el modo EFECTIVO?
+  -> ++appState_.clickBalance
+  -> persistenceScheduler_.MarkDirty(now)      // el MISMO debounce, sin flush
+  -> PushModelsToProductWindow()               // -> SetClickBalance -> invalida
+```
+
+Se mantiene el push de modelos completo (y no solo el número) a
+propósito: el balance también cambia la **asequibilidad** del Shop, así
+que un clic que cruza un precio tiene que poder pasar una tarjeta de
+"too expensive" a comprable en vivo. Lo que **no** ocurre es ningún
+trabajo extra: cero texturas reconstruidas, cero reaperturas de ventana,
+cero polling, cero renderizado continuo, y **un** frame por clic
+contado, solo si el número cambió. Con la ventana minimizada no se
+dibuja nada en absoluto (§4.1).
+
+Cobertura: `tests/ProductWindowStateTest.cpp` (modelo puro del camino
+canónico, con la escena exacta del owner) y el smoke EN VIVO
+`NIMVLETS_DEV_WALLET_LIVE_SMOKE=1`, que contra la ventana real
+comprueba, sección por sección, que un clic contado produce un frame
+nuevo y que la otra fuente no suma nada. Ese smoke **falla** con el
+código anterior a esta corrección, exactamente en `Settings`.
 
 ## 18. Wallet + transacción de compra
 
@@ -1282,6 +1413,16 @@ la explicación de privacidad previa al permiso, o el estado del monitor,
 o un reintento. En el estado por defecto del producto (modo local) **no
 se dibuja nada de eso**: estado de permiso que el owner no pidió es
 ruido, no información.
+
+Tras la QA física del owner, esa explicación **anticipa la redacción
+amplia del sistema operativo** (macOS presenta Input Monitoring en
+términos de teclado/pulsaciones de teclas) y aclara que esa redacción
+describe la categoría del permiso, no lo que hace Nimvlets; el
+recordatorio corto de alcance se repite en los dos estados en los que el
+owner tiene la entrada del permiso delante en Ajustes del Sistema
+("falta el permiso" y "Active"). No hay modal nuevo, no se fuerza nada
+en cada arranque, y la composición del grupo no cambia. El texto exacto
+y su justificación están en `docs/GLOBAL_CLICK_MODE.md` §5.1.
 
 ### 22.2 El menú rápido NO gana esto (decisión de producto)
 

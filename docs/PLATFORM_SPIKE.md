@@ -754,7 +754,10 @@ plataforma con la disciplina PASS / NOT TESTED de AGENTS.md §4.
 | Arranque sin prompt con `anywhere` persistido | **PASS** | n/a | n/a | n/a |
 | Prevención de doble conteo (app-level) | **PASS** | n/a | n/a | n/a |
 | Persistencia v6 del modo | **PASS** | (compila) | (compila) | (compila) |
-| **Pulsación FÍSICA del escritorio contada** | **NOT TESTED** — requiere un humano; ver §13.3 | n/a | n/a | n/a |
+| **Pulsación FÍSICA del escritorio contada** | **PASS** — QA física del owner; ver §13.3 | n/a | n/a | n/a |
+| Refresco EN VIVO del wallet con Settings visible | **PASS** — ver §13.4 | n/a | n/a | n/a |
+| `Collection…` restaura la ventana minimizada | **PASS** — ver §13.4 | NOT TESTED | NOT TESTED | NOT TESTED |
+| Identidad de la app en el permiso (release firmado) | **NOT TESTED** — ver §13.5 | n/a | n/a | n/a |
 | Settings muestra "Not available on this system" | n/a | **NOT TESTED** (no se corrió) | **NOT TESTED** | **NOT TESTED** |
 
 ### 13.2 Lo verificado en vivo (macOS 26.6, arm64, Debug + Release)
@@ -783,16 +786,57 @@ invisible del Starter Shop sigue abriendo con ofertas legítimas y siendo
 no-op sin ellas; compra del Shop público (Nidir a 300) intacta;
 `nimvlets_macos_text_check` y `nimvlets_macos_clickthrough_check` PASS.
 
-### 13.3 El hueco honesto
+### 13.3 El hueco honesto — **CERRADO por QA física del owner**
 
-**No se verificó que una pulsación FÍSICA real del botón primario en el
-escritorio llegue al tap y sume 1.** Sintetizar un clic requeriría
-`CGEventPost` / permiso de *post event* (o Accessibility) — APIs que
-este producto tiene prohibidas y que el guard de privacidad rechaza. Lo
-que sí quedó probado es todo lo que rodea a ese paso: el permiso, la
-creación del tap, el hilo, el reenvío al hilo principal, la política de
-conteo, la persistencia y el apagado. El paso restante es QA manual del
-owner — la checklist está en `docs/GLOBAL_CLICK_MODE.md` §16.
+Al cierre del pase de implementación quedaba un hueco: *no se había
+verificado que una pulsación FÍSICA real del botón primario llegara al
+tap y sumara 1.* Sintetizar un clic requeriría `CGEventPost` / permiso
+de *post event* (o Accessibility) — APIs que este producto tiene
+prohibidas y que el guard de privacidad rechaza; el paso solo podía
+cerrarlo una persona.
+
+**El owner corrió la checklist completa a mano en macOS: PASS.** Con
+clics físicos reales — modo local: fuera **+0**, sobre el Nimvlet
+**+1**; "Anywhere": 5 clics físicos afuera → **+5** exactos, 1 clic
+físico sobre el Nimvlet → **+1** exacto con su animación, arrastre →
+**+1**, clic derecho **+0**, scroll **+0**, teclado **+0**; volver a
+"Nimvlet only" corta el conteo de afuera en el acto sin perder el del
+pet; y el reinicio deja preferencia y permiso coherentes.
+
+**macOS, ruta del CGEventTap: PASS (verificado por el owner sobre
+hardware real, no inferido.)** Ver `docs/GLOBAL_CLICK_MODE.md` §16.1.
+
+### 13.4 Correcciones que salieron de esa QA (Block 11A, pase final)
+
+La misma sesión encontró dos defectos **fuera** del monitor, los dos ya
+corregidos y verificados en vivo (DEC-140):
+
+| Defecto | Verificación |
+|---|---|
+| Con **Settings** visible, un clic contado sobre el Nimvlet subía el balance pero la cabecera no se repintaba hasta cambiar de sección (con "Anywhere" el repintado llegaba de rebote, por el `EXPOSED` que dispara clickear en otra app). | `NIMVLETS_DEV_WALLET_LIVE_SMOKE=1` → **Collection / Shop / Settings PASS** en modo local y, con el permiso concedido, también en modo global (`effective mode: global`). Contra el código anterior el mismo smoke da **Settings FAIL** (`repainted-live=no`). |
+| La ventana **minimizada** con el botón amarillo nativo no volvía al elegir `Collection…`. | `NIMVLETS_DEV_RESTORE_SMOKE=1` → **PASS** para *closed→opens*, *visible→same window forward*, y *minimized→restored* desde Collection, Shop y Settings (mismo `SDL_WindowID`, misma sección). Contra el código anterior: **FAIL** en los tres. |
+
+También se re-corrió lo de siempre sin cambios: `NIMVLETS_DEV_UI_NAV_SMOKE`
+6/6, `NIMVLETS_DEV_COLLECTION_CYCLES=8` limpio, doble conteo con el
+monitor REALMENTE activo (4 clics del pet → **+0**, 6 globales → **+6**),
+`nimvlets_macos_text_check` y `nimvlets_macos_clickthrough_check` PASS,
+Debug + Release + universal2 (`x86_64 arm64`).
+
+### 13.5 Identidad de la app en el permiso: **NOT VERIFIED en release**
+
+En el run de DESARROLLO, macOS listó **"Antigravity IDE"** —el proceso
+responsable que lanzó la terminal— en Monitorización de entrada, en vez
+de "Nimvlets". Consistente con la topología actual: se ejecuta un Mach-O
+suelto, firmado ad-hoc, **sin bundle** (`Info.plist=not bound`; el CMake
+no usa `MACOSX_BUNDLE`), o sea sin ninguna identidad de app que TCC
+pudiera mostrar. No es un bug de identidad y no se cambió nada del build
+para maquillarlo (empaquetado/firma están fuera de alcance).
+
+**Estado: NOT TESTED.** La QA de release debe repetir el flujo completo
+del permiso desde el `Nimvlets.app` real y firmado, y confirmar que
+macOS identifica a **Nimvlets** en el diálogo y en Ajustes del Sistema.
+Hasta que eso se corra, la identidad del permiso en release no se
+declara correcta. Ver `docs/PRIVACY_SECURITY.md` §H.2.
 
 **Windows y Linux: NOT RUNTIME VERIFIED.** No se escribió código Win32
 ni X11 para esta feature (brief §16/§17): los adapters reportan

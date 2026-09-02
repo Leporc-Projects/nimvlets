@@ -258,8 +258,45 @@ SDL.
 **Verificado por tests, no solo escrito.** `tools/test_asset_pipeline.py`
 (`PrivacyInvariantTest`) chequea contra la fuente real que el event tap
 y las APIs de permiso viven en un único archivo, que el tap es
-listen-only, que su máscara es exactamente `kCGEventLeftMouseDown`, que
-el callback no lee coordenadas/flags/timestamp/proceso destino, que el
-pedido de permiso ocurre una sola vez, que el callback de reenvío no
-tiene parámetros de datos, y que `AppState` no persiste nada más que el
-modo. El guard mide **código**, no comentarios.
+listen-only, que su máscara es exactamente `kCGEventLeftMouseDown` **y
+que hay un solo `CGEventMaskBit(`** —ni una máscara OR-eada ni un
+segundo evento colado, ni `kCGEventMaskForAllEvents`—, que el callback
+no lee coordenadas/flags/timestamp/proceso destino, que el pedido de
+permiso ocurre una sola vez, que el callback de reenvío no tiene
+parámetros de datos, y que `AppState` no persiste nada más que el modo.
+El guard mide **código**, no comentarios.
+
+### H.1 La redacción de macOS es AMPLIA; nuestra máscara no
+
+En la QA física del owner, macOS pidió el permiso con una redacción del
+estilo *"would like to receive keystrokes from any application"*, y
+Ajustes del Sistema describe Monitorización de entrada en términos de
+teclado. **Eso no amplía nada de lo de arriba.** Es el texto de la
+categoría de TCC completa: Apple no ofrece una variante "solo mouse", no
+podemos cambiar su redacción, y no insinuamos que podamos. Lo que acota
+el alcance real es el código —una máscara de un solo evento, listen-only,
+un callback sin payload—, y eso es lo que los guards fijan.
+
+La explicación de primera parte que Nimvlets muestra **antes** de pedir
+el permiso ahora dice justamente eso, para que el owner no se encuentre
+la discrepancia sin contexto; y el recordatorio de alcance se repite en
+los estados en los que la entrada del permiso está viva en Ajustes del
+Sistema. Ver `docs/GLOBAL_CLICK_MODE.md` §5.1.
+
+### H.2 Identidad de la app en el permiso — DEV vs RELEASE
+
+En DESARROLLO el binario es un Mach-O suelto, firmado ad-hoc y **sin
+ningún bundle** (`Info.plist=not bound`, sin `MACOSX_BUNDLE` en el
+CMake), así que TCC atribuye el permiso al **proceso responsable** — la
+app que lanzó la terminal desde la que se ejecutó. Por eso el owner vio
+**"Antigravity IDE"** y no "Nimvlets" en la lista de Monitorización de
+entrada. Es consistente con la topología actual, no un bug de identidad:
+no hay identidad de app que pudiera estar mal.
+
+**La identidad del permiso en RELEASE no está verificada, y no se
+declara verificada.** Cuando exista un `Nimvlets.app` real y firmado,
+hay que repetir el flujo completo desde ese bundle y confirmar que macOS
+identifica a Nimvlets en el diálogo y en Ajustes del Sistema. Este
+bloque no arma firma/empaquetado, no toca bases de datos de TCC, no usa
+`tccutil` ni `sudo`. Ver `docs/GLOBAL_CLICK_MODE.md` §5.2 y
+`docs/PLATFORM_SPIKE.md`.

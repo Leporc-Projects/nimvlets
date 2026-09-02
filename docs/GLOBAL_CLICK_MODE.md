@@ -149,6 +149,70 @@ si esa fuente cuenta, hace `++clickBalance` + `MarkDirty` (el mismo
 debounce de siempre) + refresco del wallet canónico del Product UI. No
 hay un segundo wallet, ni contadores por fuente, ni `source` persistido.
 
+### 5.1 La redacción AMPLIA del OS vs. nuestra máscara de eventos
+
+En la QA física del owner (Block 11A), macOS mostró el diálogo del
+permiso con una redacción del estilo *"would like to receive keystrokes
+from any application"*, y Ajustes del Sistema describe **Monitorización
+de entrada** en términos de teclado. Es razonable que alarme: Nimvlets
+promete exactamente lo contrario.
+
+Lo que hay que entender —y lo que la copy ahora dice— es que **esa
+redacción es de la categoría de TCC entera, no una descripción de esta
+app**. Apple define una sola categoría para "leer input a bajo nivel"; no
+existe una variante "solo mouse" que podamos pedir en su lugar, y no
+tenemos ninguna forma de cambiar el texto de Apple. Tampoco lo
+insinuamos.
+
+**Lo que sí acota el alcance es nuestro código**, y es verificable línea
+por línea:
+
+| Afirmación | Dónde se ve |
+|---|---|
+| Un solo tipo de evento en la máscara | `CGEventMaskBit(kCGEventLeftMouseDown)` — un único `CGEventMaskBit(` en todo `src/` |
+| Listen-only, nunca modifica el input | `kCGEventTapOptionListenOnly` |
+| Ningún evento de teclado observado | `kCGEventKeyDown` / `kCGEventKeyUp` / `kCGEventFlagsChanged` no aparecen en `src/` (fuera de comentarios) |
+| El callback no lee nada del evento salvo su tipo | sin `CGEventGetLocation` / `…IntegerValueField` / `…Flags` / `…Timestamp` |
+| Nunca Accessibility ni Screen Recording | `AXIsProcessTrusted` / `AXUIElement` / `CGRequestScreenCaptureAccess` prohibidos en todo `src/` |
+
+Los cinco los fija `PrivacyInvariantTest` en `tools/test_asset_pipeline.py`
+contra la fuente real (§14), incluido el chequeo, agregado en esta
+corrección, de que hay **exactamente un** `CGEventMaskBit(` — o sea, ni
+una máscara OR-eada ni un segundo evento colado.
+
+Además de la explicación previa al permiso, el recordatorio de alcance
+("Nimvlets listens only for primary mouse presses, whatever the system
+permission is called.") se repite en los dos estados en los que el owner
+tiene la entrada del permiso delante en Ajustes del Sistema: **falta el
+permiso** y **Active**. No hay ningún modal nuevo, ni nada que se
+muestre en cada arranque.
+
+### 5.2 Atribución del permiso en DESARROLLO — "Antigravity IDE"
+
+En el run de DESARROLLO del owner, la lista de Monitorización de entrada
+mostró **"Antigravity IDE"** en vez de "Nimvlets". Investigado, y es
+**consistente con la topología actual de build/ejecución**, no un bug de
+identidad:
+
+- Lo que se ejecuta es un **Mach-O suelto**
+  (`build/macos-debug/src/app/nimvlets_spike`), no un `.app`.
+- Está firmado **ad-hoc / linker-signed** (`Signature=adhoc`,
+  `flags=0x20002(adhoc,linker-signed)`), con `Info.plist=not bound`.
+- **No existe ningún bundle**: el CMake no usa `MACOSX_BUNDLE`, no hay
+  `Info.plist`, no hay bundle id. No hay, literalmente, una identidad de
+  app que TCC pueda mostrar.
+- TCC atribuye entonces el permiso al **proceso responsable**: la app
+  que lanzó el ejecutable — la terminal del IDE del owner.
+
+**Consecuencia, dicha sin adornos: la identidad del permiso en RELEASE
+NO está verificada.** Es un requisito de QA de un bloque futuro, cuando
+exista un `Nimvlets.app` real, firmado, con su propio bundle id: hay que
+repetir el flujo completo del permiso desde ese bundle y confirmar que
+macOS identifica a **Nimvlets** en el diálogo y en Ajustes del Sistema.
+Este bloque no arma infraestructura de firma/empaquetado para cambiar
+esa captura de DEV (fuera de alcance), no toca bases de datos de TCC y
+no usa `tccutil` ni `sudo`.
+
 ## 6. macOS — la implementación real
 
 `src/platform/macos/GlobalClickMonitor.mm`.
@@ -229,10 +293,14 @@ Elegir "Anywhere" **no** pide el permiso de inmediato. La política pura
 La explicación dice qué se necesita y, sobre todo, qué **no** se observa:
 
 > To count clicks outside Nimvlets, your system needs Input Monitoring.
-> Nimvlets only counts primary mouse presses — never keys, pointer
-> positions, apps, or screen content.
+> Your system may describe that permission broadly — even as keyboard or
+> keystroke access; that wording covers the whole permission, not what
+> Nimvlets does. Nimvlets only counts primary mouse presses — never
+> keys, pointer positions, apps, or screen content.
 >
 > [ Not now ]  [ Continue ]
+
+La segunda frase se agregó tras la QA física del owner — ver §5.1.
 
 `Esc` equivale a "Not now" (descarta la explicación antes de poder
 cerrar la ventana).
@@ -268,8 +336,8 @@ que `src/productui` no tenga ninguna rama por plataforma (§10).
 | Situación | Segmento "Anywhere" | Línea de estado | Acción |
 |---|---|---|---|
 | Modo local, plataforma capaz | elegible | *(ninguna)* | — |
-| Anywhere, monitor corriendo | elegible | **Active** + nota de arrastre | — |
-| Anywhere, falta permiso | elegible | **{permiso} permission needed** + cómo concederlo | Check again |
+| Anywhere, monitor corriendo | elegible | **Active** + alcance solo-mouse + nota de arrastre | — |
+| Anywhere, falta permiso | elegible | **{permiso} permission needed** + cómo concederlo + alcance solo-mouse | Check again |
 | Anywhere, permiso ok pero no arrancó | elegible | **Could not start** | Check again |
 | Plataforma sin capacidad | **apagado** (se dibuja, no se puede elegir) | **Not available on this system** | — |
 
@@ -434,10 +502,23 @@ propiedad intactos; y la constante sigue congelada en 4.
 **Settings** (`tests/SettingsLayoutTest.cpp`): el grupo Interaction y su
 fila; sin aviso en modo local; segmento apagado + estado en una
 plataforma sin capacidad (y el hit-test nunca lo devuelve); explicación
-con sus dos botones y el permiso nombrado; estado "falta permiso" con
-"Check again"; "Active" + nota de arrastre; orden de foco con los
-botones justo después de su fila; EN/ES completo; resize; y que el
-estado por defecto sigue entrando sin scroll en 800×560.
+con sus dos botones, el permiso nombrado **y la frase que anticipa la
+redacción amplia del OS** (§5.1); estado "falta permiso" con "Check
+again" y el recordatorio de alcance; "Active" con el recordatorio de
+alcance **antes** de la nota de arrastre; que el párrafo más largo entra
+entero en las líneas reservadas —en EN y en ES— sin cortarse con "…";
+orden de foco con los botones justo después de su fila; EN/ES completo;
+resize; y que el estado por defecto sigue entrando sin scroll en
+800×560.
+
+**Wallet en vivo** (`tests/ProductWindowStateTest.cpp`): la regresión
+exacta de la QA del owner — con Settings visible, un clic contado deja
+el balance canónico Y un repintado pendiente sin cambiar de sección; la
+paridad local/global por el mismo camino; que ninguna sección se
+comporta distinto; que un clic **no** contado no toca nada (ni wallet,
+ni persistencia, ni repintado); un repintado por clic contado, ni uno
+más; y el contrato de presentación de la ventana (cerrada / visible /
+minimizada). Ver docs/PRODUCT_UI.md §22.
 
 **Menú rápido** (`tests/QuickMenuModelTest.cpp`): el menú **no** gana
 "Click counting" — regresión explícita de la decisión de producto.
@@ -458,7 +539,10 @@ más específico**. Ahora fija que:
 - el tap es `kCGEventTapOptionListenOnly` y nunca
   `kCGEventTapOptionDefault`;
 - la máscara es exactamente `CGEventMaskBit(kCGEventLeftMouseDown)` —
-  el guard falla si aparece cualquier otro tipo de evento;
+  el guard falla si aparece cualquier otro tipo de evento — y hay
+  **exactamente un** `CGEventMaskBit(` en el archivo, así que tampoco se
+  puede colar un segundo evento OR-eado ni `kCGEventMaskForAllEvents`
+  (chequeo agregado en la corrección de QA del owner, §5.1);
 - el callback no lee coordenadas, flags, timestamp, proceso destino ni
   número de botón;
 - el pedido de permiso ocurre en **un solo call site**;
@@ -486,6 +570,13 @@ Ver `docs/PERFORMANCE_BUDGETS.md` para las cifras completas. En resumen:
 - El callback nativo no provoca ningún redibujo salvo el del wallet tras
   un clic real, y **no agrega ningún término** al cálculo de `waitMs`
   del event loop.
+- Un clic contado invalida **un solo frame** de la sección visible, y
+  solo si el número cambió (`productui::WalletDisplay`). Con el Product
+  UI cerrado no invalida nada; con la ventana **minimizada** no se
+  dibuja ni se presenta nada — lo pendiente queda pendiente y se pinta
+  una vez al restaurarla. Sin eso, "Anywhere" habría pintado un frame
+  por cada clic del sistema contra una ventana en el Dock (corrección de
+  QA del owner — docs/PRODUCT_UI.md §22).
 
 ## 16. QA manual del owner (macOS)
 
@@ -538,6 +629,40 @@ Accessibility), que este producto tiene prohibido. Pasos para el owner:
 
 No hace falta —y no se debe— automatizar Ajustes del Sistema, tocar
 bases de datos de TCC, ni usar `sudo`.
+
+### 16.1 Resultado: PASS físico del owner (macOS)
+
+El owner corrió el guion completo de arriba a mano, con clics físicos
+reales. **Resultado: PASS.** Verificado con sus propias manos:
+
+- modo local: clics físicos fuera → **+0**; clic directo sobre el
+  Nimvlet → **+1**;
+- "Anywhere" activo: **5** clics primarios físicos fuera de Nimvlets →
+  exactamente **+5**; **1** clic físico sobre el Nimvlet → exactamente
+  **+1**, con la animación de click intacta;
+- arrastre físico → exactamente **+1**; clic derecho → **+0**; scroll →
+  **+0**; teclado → **+0**;
+- volver a "Nimvlet only" → los clics de afuera dejan de contar en el
+  acto, los del pet siguen contando;
+- reinicio: preferencia y permiso coherentes.
+
+O sea: el camino real del `CGEventTap` de macOS está **verificado por el
+owner**, no inferido. Las dos correcciones que salieron de esa sesión
+(refresco en vivo del wallet, y recuperación de la ventana minimizada)
+están en docs/PRODUCT_UI.md §22 y en DEC-140.
+
+### 16.2 Smokes automatizados en vivo (DEV)
+
+Dos hooks solo-DEV cubren, contra la ventana real, lo que un test puro
+de `tests/` no puede probar. Ver README.md:
+
+```bash
+# Un clic contado refresca el wallet YA, en las tres secciones, y la
+# otra fuente no suma (no doble conteo). Con el permiso concedido,
+# NIMVLETS_DEV_CLICK_COUNTING=anywhere corre la mitad GLOBAL.
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_qa NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_WALLET_LIVE_SMOKE=1 ./build/macos-debug/src/app/nimvlets_spike
+```
 
 ## 17. Fuera de alcance (no implementado, a propósito)
 

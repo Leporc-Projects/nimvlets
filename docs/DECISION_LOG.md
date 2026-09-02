@@ -5723,14 +5723,126 @@ onboarding DEV (`lifecycle=completed`), hotspot invisible del Starter
 Shop, compra del Shop público (Nidir a 300), Collection owned-only,
 EN/ES completo.
 
-**Hueco honesto.** No se verificó que una pulsación **física** real del
-escritorio llegue al tap y sume 1: sintetizar un clic exigiría
-`CGEventPost` / permiso de *post event* o Accessibility, prohibidos acá.
-Todo lo que rodea a ese paso quedó probado. La checklist de QA manual
-del owner está en `docs/GLOBAL_CLICK_MODE.md` §16.
+**Hueco honesto — CERRADO.** Al escribir esta entrada no se había
+verificado que una pulsación **física** real del escritorio llegara al
+tap y sumara 1: sintetizar un clic exigiría `CGEventPost` / permiso de
+*post event* o Accessibility, prohibidos acá, así que solo podía
+cerrarlo una persona. **El owner corrió la checklist completa a mano en
+macOS y dio PASS** — ver DEC-140, `docs/GLOBAL_CLICK_MODE.md` §16.1 y
+`docs/PLATFORM_SPIKE.md` §13.3.
 
 **Congelado sin tocar:** Nidir (control dorado), la deuda `lie_to_sit`
 de Frin, el contenido de Bunny/Nidir/Frin, el timing de hover, el
 scheduling ambient, la precedencia de animaciones, onboarding de
 producción, la política de compra/elegibilidad, el Starter Shop oculto,
 la Collection owned-only, el catálogo de producción, y Block 09B.
+
+### DEC-140 — QA física del owner en macOS: el conteo global queda VERIFICADO; el wallet se refresca en vivo por una sola ruta; `Collection…` restaura la ventana minimizada; la redacción amplia de Input Monitoring se explica en primera persona
+
+**Fecha:** 2026-09-01 · **Bloque:** 11A (pase final de corrección de QA) ·
+**Estado:** vigente · **Complementa:** DEC-139 (no lo supersede: ninguna
+decisión de arquitectura, privacidad o permiso cambia).
+
+**Contexto.** DEC-139 dejó un hueco explícito: nadie había clickeado
+físicamente. El owner corrió la checklist entera sobre hardware real y
+encontró tres cosas — una confirmación y dos defectos, ninguno en el
+monitor mismo.
+
+**1. El camino físico del `CGEventTap` de macOS: PASS.** Modo local:
+clics físicos afuera **+0**, clic directo sobre el Nimvlet **+1**.
+"Anywhere": 5 clics primarios físicos afuera → **+5** exactos; 1 clic
+físico sobre el Nimvlet → **+1** exacto, con su animación intacta;
+arrastre físico → **+1**; clic derecho **+0**; scroll **+0**; teclado
+**+0**. Cambiar a "Nimvlet only" corta el conteo de afuera en el acto y
+conserva el del pet; el reinicio deja preferencia y permiso coherentes.
+`docs/PLATFORM_SPIKE.md` §13 pasa de NOT TESTED a **PASS** en esa fila.
+**El monitor global no se rediseñó ni se tocó** en este pase: misma
+semántica de primary-mouse-down, sin teclado, sin coordenadas, sin
+historial, sin Accessibility.
+
+**2. El wallet no se refrescaba en vivo con Settings visible.** Con el
+Product UI en **Settings** y conteo local, un clic sobre el Nimvlet
+subía `AppState::clickBalance` pero la cabecera seguía mostrando el
+número viejo hasta cambiar de sección; con "Anywhere" parecía funcionar.
+
+*Causa real:* no era conteo, ni persistencia, ni formateo, sino
+**invalidación**. `ProductWindow::SetModels` asignaba el balance mostrado
+y, de paso, ensuciaba Collection / Shop porque cada `*View::SetModel`
+marca su vista sucia. Settings **no recibe ningún modelo**, así que nada
+la ensuciaba y `RenderIfNeeded()` —que dibuja solo con `pendingExpose_` o
+con la vista **activa** sucia— no hacía nada. La "liveness" de "Anywhere"
+era igual de accidental: clickear en otra app le quita el foco a nuestra
+ventana, macOS repinta su chrome, llega un `SDL_EVENT_WINDOW_EXPOSED`, y
+el frame se redibuja tomando de rebote el balance nuevo.
+
+*Corrección canónica:* el cambio de valor **es** la invalidación. El
+`uint64_t` suelto pasó a ser `productui::WalletDisplay` (puro), y
+`ProductWindow::SetClickBalance` —el único escritor, al que `SetModels`
+delega— marca `pendingExpose_` **si y solo si** el número cambió. El
+balance vive en la cabecera compartida, así que la invalidación es
+independiente de la sección, por construcción. No se agregó ningún wallet
+por sección, ninguna variable de balance en Settings, ningún polling, ni
+se tocó `SpikeApp::HandleCountedClick`: local y global siguen convergiendo
+en el MISMO punto de mutación y el MISMO debounce de persistencia. Un
+clic contado = un frame, solo si el número cambió; con la ventana
+minimizada no se dibuja nada.
+
+**3. La ventana minimizada no volvía desde `Collection…`.** `FocusWindow()`
+hacía `BringApplicationToForeground` + `SDL_ShowWindow` + `SDL_RaiseWindow`,
+y **ninguna de las dos llamadas de SDL toca una ventana minimizada**:
+`SDL_ShowWindow` corta porque una ventana minimizada no es
+`SDL_WINDOW_HIDDEN`, y `Cocoa_RaiseWindow` se salta su cuerpo mientras
+`[nswindow isMiniaturized]` (leído en la fuente de la SDL pineada,
+AGENTS.md §4).
+
+*Corrección:* **cross-platform, con SDL, sin nada nativo nuevo** —
+`SDL_RestoreWindow` antes de mostrar/subir, decidido por la política pura
+`productui::ResolveWindowPresentStep(exists, minimized)`: cerrada → crear,
+visible → traer al frente (contrato preexistente intacto), minimizada →
+**restaurar LA MISMA ventana**. Nunca se crea una segunda ventana ni se
+resetea pet activo / wallet / sección / Shop / preferencias / onboarding;
+si el owner minimizó en Settings o en el Shop, vuelve a esa sección. El
+restore se pide **una vez por minimización** (latch rearmado por los
+eventos reales `WINDOW_MINIMIZED` / `WINDOW_RESTORED`), porque un solo
+`Collection…` pasa por `FocusWindow()` dos veces y la segunda podría caer
+en la rama `zoom:` de `Cocoa_RestoreWindow` y desmaximizar la ventana.
+
+**4. La redacción amplia de macOS, dicha por nosotros primero.** El
+diálogo real dice algo del estilo *"would like to receive keystrokes from
+any application"* y Ajustes del Sistema describe Input Monitoring en
+términos de teclado. **Eso no autoriza nada**: la máscara sigue siendo
+`CGEventMaskBit(kCGEventLeftMouseDown)` y sólo eso, listen-only, sin
+teclado, sin Accessibility, sin Screen Recording — re-auditado, y el guard
+de Python ahora además exige **un solo** `CGEventMaskBit(` en el archivo.
+Lo que cambió es la **copy**: la explicación previa al permiso anticipa
+que el sistema puede describirlo de forma amplia, aclara que esa redacción
+cubre la categoría entera del permiso y no lo que Nimvlets hace, y repite
+el alcance real. Se dice de forma genérica ("tu sistema" + `{permission}`),
+sin ramas por plataforma, sin pretender control sobre el texto de Apple y
+sin insinuar que podamos pedir una categoría más chica. El recordatorio
+corto se repite en los dos estados en los que la entrada del permiso está
+viva en Ajustes del Sistema. Sin modal nuevo y sin nada forzado en cada
+arranque.
+
+**5. Atribución del permiso en DEV: "Antigravity IDE".** En desarrollo
+macOS listó al IDE del owner en vez de a Nimvlets. Investigado: el binario
+es un Mach-O suelto, ad-hoc/linker-signed, **sin bundle**
+(`Info.plist=not bound`, sin `MACOSX_BUNDLE` en el CMake), así que TCC
+atribuye el permiso al **proceso responsable** — la app que lanzó la
+terminal. Consistente con la topología actual, **no** un bug de identidad
+(no hay identidad que pueda estar mal). No se cambió nada del build para
+maquillar la captura, no se tocó TCC, ni `tccutil`, ni `sudo`.
+**La identidad del permiso en RELEASE queda NOT TESTED** y es requisito
+de QA de un bloque futuro con un `Nimvlets.app` real y firmado.
+
+**Alcance de Settings.** El grupo `Companion / Interaction / Language`
+queda como está: este pase solo corrigió el wallet en vivo y la copy del
+permiso. El rediseño visual grande de Settings sigue siendo trabajo
+separado.
+
+**Congelado sin tocar:** el monitor global y su ciclo de vida, el permiso
+(preflight / request / un solo call site / sin prompt al arrancar), modo
+pedido vs. efectivo con fallback seguro a local, la regla de no doble
+conteo, AppState v6 y la frontera congelada de migración de Frin, el
+runtime del pet, el contenido de Bunny/Nidir/Frin, onboarding, el Starter
+Shop oculto, la política de compra, y el catálogo de producción.

@@ -437,6 +437,12 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
 #   que un evento global no suma en modo local, y que en modo global
 #   activo cada evento suma exactamente 1). Loguea el balance antes/después.
 #
+# NIMVLETS_DEV_GLOBAL_CLICK_EXPLAIN=1 -> muestra la explicación de
+#   PRIMERA PARTE tal cual, para revisar la copy EN/ES aunque el permiso
+#   del OS ya esté concedido en esta máquina. SOLO enciende el panel: no
+#   pide ningún permiso ni cambia la preferencia. Necesita
+#   NIMVLETS_DEV_OPEN_COLLECTION + NIMVLETS_DEV_SECTION=settings.
+#
 #   Ejemplo — la regresión de doble conteo, sin tocar el estado real:
 #     NIMVLETS_DEV_APPDATA_DIR=/tmp/nv NIMVLETS_DEV_HIDE_PET=1 \
 #     NIMVLETS_DEV_CLICK_TEST_COUNT=4 NIMVLETS_DEV_GLOBAL_CLICKS=6 \
@@ -449,6 +455,44 @@ NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_ob3 NIMVLETS_DEV_ONBOARDING=1 \
 #   hover (revela el precio). NIMVLETS_DEV_STARTER_CONFIRM=1 -> abre la
 #   confirmación. NIMVLETS_DEV_STARTER_FOCUS=<focusId> -> foco de teclado
 #   ("starter:back", "starteritem:frin/male", "get", …).
+
+# --- Smokes EN VIVO de Block 11A (corrección de QA del owner) --------
+# Los dos corren contra la ventana REAL del Product UI y salen solos con
+# código 0 (todo PASS) o 2. Usalos con NIMVLETS_DEV_APPDATA_DIR aislado:
+# el primero SUMA clics al wallet.
+#
+# NIMVLETS_DEV_WALLET_LIVE_SMOKE=1 -> por cada sección (Collection, Shop,
+#   Settings): deja el frame limpio, cuenta UN clic por el camino
+#   canónico, y verifica que la ventana REPINTA en el acto y que la otra
+#   fuente de clic no suma nada (no doble conteo). Con el permiso de
+#   Input Monitoring concedido, agregá NIMVLETS_DEV_CLICK_COUNTING=anywhere
+#   para correr la mitad GLOBAL (el log dice qué modo efectivo corrió).
+#   Este smoke FALLA en Settings con el código anterior a la corrección.
+# NIMVLETS_DEV_RESTORE_SMOKE=1 -> cerrada->abre, visible->la misma ventana
+#   al frente, y minimizada->restaurada desde Collection, Shop y Settings
+#   (mismo SDL_WindowID, misma sección). Minimiza de verdad y espera al
+#   window server, así que necesita una sesión gráfica.
+
+# Refresco en vivo del wallet, las tres secciones:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_live NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_WALLET_LIVE_SMOKE=1 ./build/macos-debug/src/app/nimvlets_spike
+
+# Lo mismo, pero contando por el monitor GLOBAL (requiere el permiso ya
+# concedido; si no lo está, el smoke corre igual en modo local y lo dice):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_live_g NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_CLICK_COUNTING=anywhere NIMVLETS_DEV_WALLET_LIVE_SMOKE=1 \
+  ./build/macos-debug/src/app/nimvlets_spike
+
+# "Collection…" recupera la ventana minimizada, sin duplicarla:
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_restore NIMVLETS_DEV_HIDE_PET=1 \
+  NIMVLETS_DEV_RESTORE_SMOKE=1 ./build/macos-debug/src/app/nimvlets_spike
+
+# La explicación previa al permiso, EN y ES (revisión de copy):
+NIMVLETS_DEV_APPDATA_DIR=/tmp/nv_gx NIMVLETS_DEV_LANGUAGE=es \
+  NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 \
+  NIMVLETS_DEV_SECTION=settings NIMVLETS_DEV_GLOBAL_CLICK_EXPLAIN=1 \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/settings_explain_es.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
 
 # El Starter Shop tras elegir Frin hembra, ABIERTO POR EL HOTSPOT
 # INVISIBLE de la esquina inf-der (oferta frin/male + 3 dev normales):
