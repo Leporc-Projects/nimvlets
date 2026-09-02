@@ -16,6 +16,7 @@ add_library(nimvlets_productui_core STATIC
   UiGeometry.h
   UiColor.h
   TextLayout.h
+  ProductWindowState.h
   FocusList.h
   FocusList.cpp
   Format.h

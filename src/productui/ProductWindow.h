@@ -16,6 +16,7 @@
 #include "productui/CollectionView.h"
 #include "productui/OnboardingView.h"
 #include "productui/SectionNav.h"
+#include "productui/ProductWindowState.h"
 #include "productui/SettingsView.h"
 #include "productui/ShopView.h"
 #include "productui/StarterShopView.h"
@@ -76,7 +77,10 @@ class ProductWindow {
     // Destruye todos los recursos. Seguro llamar aunque ya esté cerrada.
     void Close();
 
-    // Trae la ventana al frente y le da foco de teclado.
+    // Trae la ventana al frente y le da foco de teclado. Si el owner la
+    // MINIMIZÓ con el botón nativo, la restaura primero: sin eso
+    // "Collection…" no la recuperaba (corrección de QA del owner, Block
+    // 11A — ver ResolveWindowPresentStep en ProductWindowState.h).
     void FocusWindow();
 
     std::uint32_t WindowId() const;
@@ -91,6 +95,13 @@ class ProductWindow {
         const catalog::ShopModel& shop,
         const catalog::StarterShopModel& starterShop,
         std::uint64_t clickBalance);
+
+    // El balance CANÓNICO, solo. Es el punto por el que SetModels asigna
+    // el wallet mostrado — no hay ninguna otra escritura de `wallet_` —,
+    // así que cualquier clic contado, venga del Nimvlet o del monitor
+    // global, invalida la sección visible por el MISMO camino. No-op si
+    // está cerrada o si el número no cambió.
+    void SetClickBalance(std::uint64_t clickBalance);
 
     // Idioma de TODO el texto de las tres secciones. Cambiarlo redibuja
     // de inmediato, sin reiniciar (block brief 06 §5 / 08 §17). No-op si
@@ -150,8 +161,14 @@ class ProductWindow {
     ProductWindowEvent HandleEvent(const SDL_Event& event);
 
     // Redibuja si la vista está sucia o hay un EXPOSED pendiente. Barato
-    // y no-op si no hay nada que hacer.
-    void RenderIfNeeded();
+    // y no-op si no hay nada que hacer. Devuelve true SI dibujó un frame
+    // — el loop principal lo ignora; lo usan los smokes de QA para
+    // probar que un clic contado refresca la ventana de verdad.
+    //
+    // Mientras la ventana está MINIMIZADA no dibuja nada y conserva lo
+    // pendiente: sin esto, con "Anywhere" activo cada clic del sistema
+    // pintaría y presentaría un frame que nadie puede ver.
+    bool RenderIfNeeded();
 
     // Solo-DEV (QA / capturas): fuerza un redibujo y vuelca el
     // framebuffer del renderer de la Collection a un BMP en
@@ -232,6 +249,13 @@ class ProductWindow {
     // Solo-DEV (QA / capturas del onboarding): revela el secreto sin
     // esperar 44 s, o fuerza una etapa (kBrowse / kFrinVariant / kConfirm
     // con un `focusId` de candidato a confirmar).
+    // Solo-DEV (QA del ciclo de vida, Block 11A): minimiza / consulta el
+    // estado real de la ventana nativa y la sección visible, para el
+    // smoke de "minimizada -> Collection… -> vuelve LA MISMA ventana".
+    void MinimizeForQA();
+    bool IsMinimized() const;
+    ProductSection CurrentSection() const { return section_; }
+
     void RevealOnboardingSecretForQA() { onboardingView_.RevealSecretForQA(); }
     void SetOnboardingStageForQA(OnboardingStage stage, const std::string& focusId) {
         onboardingView_.SetStageForQA(stage, focusId);
@@ -265,17 +289,28 @@ class ProductWindow {
     float scale_ = 1.0f;
     bool pendingExpose_ = true;
 
+    // Ya se pidió SDL_RestoreWindow por ESTA minimización y todavía no
+    // llegó el SDL_EVENT_WINDOW_RESTORED. Sin este latch, un solo
+    // "Collection…" pediría el restore dos veces (Open() -> FocusWindow()
+    // y de nuevo al final de SpikeApp::OpenProductWindow), y la SEGUNDA
+    // llegaría cuando AppKit ya deminiaturizó pero la flag de SDL sigue
+    // puesta — camino en el que Cocoa_RestoreWindow cae en su rama de
+    // `zoom:` y le sacaría el maximizado a la ventana del owner.
+    bool restoreRequested_ = false;
+
     // Idioma actual del texto de la UI — lo registra SetLanguage (que ya
     // lo reenvía a cada vista). Lo consumen ClickNavTabForQA y DrawFrame.
     core::Language language_ = core::Language::kEn;
 
     // **Balance de clics MOSTRADO — autoridad ÚNICA** (corrección de QA
-    // del owner, Block 10). Lo fija SetModels; DrawFrame() lo pasa a
-    // Render() de la sección visible (Collection / Shop / Starter Shop /
-    // Settings). Ninguna sección tiene un wallet propio: antes Settings
+    // del owner, Block 10). Lo fija SetClickBalance; DrawFrame() lo pasa
+    // a Render() de la sección visible (Collection / Shop / Starter Shop
+    // / Settings). Ninguna sección tiene un wallet propio: antes Settings
     // dibujaba "0 clicks" hard-codeado mientras las otras mostraban el
-    // valor real. Ver docs/PRODUCT_UI.md §17.
-    std::uint64_t clickBalance_ = 0;
+    // valor real. Block 11A lo convirtió en WalletDisplay para que el
+    // cambio de valor SEA la invalidación (ver ProductWindowState.h).
+    // Ver docs/PRODUCT_UI.md §17.
+    WalletDisplay wallet_;
 };
 
 }  // namespace nimvlets::productui

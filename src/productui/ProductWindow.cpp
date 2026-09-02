@@ -31,6 +31,10 @@ ProductWindow::~ProductWindow() {
 
 bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     if (window_ != nullptr) {
+        // Ya existe: "Collection…" NUNCA crea una segunda ventana ni
+        // reinicia el pet activo / el wallet / la sección / el Shop /
+        // las preferencias. Solo la vuelve a poner delante del owner —
+        // restaurándola primero si estaba minimizada (FocusWindow).
         FocusWindow();
         return true;
     }
@@ -100,6 +104,8 @@ void ProductWindow::Close() {
         return;
     }
     DestroyResources();
+    restoreRequested_ = false;
+    wallet_ = WalletDisplay{};
     view_ = CollectionView{};
     shopView_ = ShopView{};
     starterShopView_ = StarterShopView{};
@@ -112,15 +118,43 @@ void ProductWindow::Close() {
 }
 
 void ProductWindow::FocusWindow() {
-    if (window_ == nullptr) {
+    const WindowPresentStep step = ResolveWindowPresentStep(window_ != nullptr, IsMinimized());
+    if (step == WindowPresentStep::kNone) {
         return;
     }
     // Nimvlets corre como accessory app para el pet; activar la app hace
     // que esta ventana normal reciba teclado y clicks de contenido sin
     // el "primer click solo activa" del sistema (block brief §6/§23).
     platform::BringApplicationToForeground();
+    if (step == WindowPresentStep::kRestoreThenRaise && !restoreRequested_) {
+        // El owner la minimizó con el botón amarillo nativo (corrección
+        // de QA del owner, Block 11A). Ni SDL_ShowWindow ni
+        // SDL_RaiseWindow la recuperan: el primero corta en
+        // SDL_video.c porque una ventana minimizada no tiene
+        // SDL_WINDOW_HIDDEN, y Cocoa_RaiseWindow se salta entero su
+        // cuerpo mientras `[nswindow isMiniaturized]` (fuente de la SDL
+        // pineada, AGENTS.md §4). SDL_RestoreWindow es la API
+        // CROSS-PLATFORM correcta —deminiaturize: en macOS, SW_RESTORE
+        // en Win32—, así que no hace falta nada nativo nuestro.
+        SDL_RestoreWindow(window_);
+        restoreRequested_ = true;
+        // Vuelve del Dock con el backbuffer indefinido: se garantiza un
+        // frame propio en vez de depender de que llegue un EXPOSED.
+        pendingExpose_ = true;
+        SDL_Log("nimvlets: Product UI window restored from minimized (same window, same section)");
+    }
     SDL_ShowWindow(window_);
     SDL_RaiseWindow(window_);
+}
+
+void ProductWindow::MinimizeForQA() {
+    if (window_ != nullptr) {
+        SDL_MinimizeWindow(window_);
+    }
+}
+
+bool ProductWindow::IsMinimized() const {
+    return window_ != nullptr && (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0;
 }
 
 std::uint32_t ProductWindow::WindowId() const {
@@ -156,7 +190,7 @@ void ProductWindow::SetModels(
     // Render() de la sección visible; ninguna sección elige su propio
     // valor. Antes Settings mostraba "0 clicks" porque nunca recibía el
     // balance.
-    clickBalance_ = clickBalance;
+    SetClickBalance(clickBalance);
     view_.SetModel(collection);
     shopView_.SetModel(shop);
     starterShopView_.SetModel(starterShop);
@@ -168,6 +202,29 @@ void ProductWindow::SetModels(
     // (se compró la última), NO se lo cierra: queda con su estado vacío
     // quieto + "← Shop" (brief §19). El propio layout lo dibuja como
     // kEmpty. Al volver al Shop público el hotspot ya no está armado.
+}
+
+void ProductWindow::SetClickBalance(std::uint64_t clickBalance) {
+    if (window_ == nullptr) {
+        return;
+    }
+    if (!wallet_.Set(clickBalance)) {
+        return;  // mismo número: no hay nada nuevo que mostrar
+    }
+    // **El eslabón que faltaba** (corrección de QA del owner, Block
+    // 11A). El balance se dibuja en la cabecera COMPARTIDA, no dentro de
+    // una vista, así que cambiarlo tiene que invalidar la sección
+    // visible sea cual sea: Collection y Shop se ensuciaban solas al
+    // recibir su modelo en SetModels, pero Settings no recibe ninguno y
+    // se quedaba con el número viejo hasta que otro evento —un expose,
+    // un hover— la ensuciara de casualidad. Por eso "Anywhere" parecía
+    // refrescar en vivo (clickear fuera cambia la ventana clave y
+    // dispara un EXPOSED) y un click sobre el Nimvlet no.
+    //
+    // Es UN redibujo del frame visible, y solo cuando el número cambió:
+    // nada de reconstruir texturas, reabrir la ventana, renderizar en
+    // continuo, ni tocar el debounce de persistencia.
+    pendingExpose_ = true;
 }
 
 void ProductWindow::SetLanguage(core::Language language) {
@@ -269,7 +326,7 @@ ProductSection ProductWindow::ClickNavTabForQA(ProductSection target) {
     SDL_GetWindowSize(window_, &logicalW, &logicalH);
     // 40 pt = el kMargin compartido por Collection / Shop / Settings.
     const SectionHeaderLayout header = BuildSectionHeaderLayout(
-        static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_, clickBalance_);
+        static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_, wallet_.Value());
     const SectionTab* tab = nullptr;
     for (const SectionTab& t : header.tabs) {
         if (t.section == target) {
@@ -320,6 +377,17 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
             case SDL_EVENT_WINDOW_EXPOSED:
             case SDL_EVENT_WINDOW_SHOWN:
                 pendingExpose_ = true;
+                break;
+            case SDL_EVENT_WINDOW_MINIMIZED:
+                // El owner la mandó al Dock (botón amarillo nativo).
+                // Mientras esté ahí no se dibuja nada; y se re-arma el
+                // latch para que el próximo "Collection…" pueda pedir un
+                // restore por ESTA minimización.
+                restoreRequested_ = false;
+                break;
+            case SDL_EVENT_WINDOW_RESTORED:
+                restoreRequested_ = false;
+                pendingExpose_ = true;  // volvió del Dock: un frame propio
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -565,6 +633,7 @@ void ProductWindow::DrawFrame() {
     // El balance CANÓNICO que ProductWindow posee — TODAS las secciones
     // lo reciben acá (corrección de QA del owner, Block 10). Onboarding
     // no dibuja cabecera de balance.
+    const std::uint64_t clickBalance = wallet_.Value();
     if (onboarding_) {
         // El onboarding usa el arte `.nvprev` de los candidatos (mismo
         // bundle liviano que la Collection) — NUNCA abre un `.nvpack`
@@ -572,17 +641,17 @@ void ProductWindow::DrawFrame() {
         onboardingView_.Render(painter, *text_, *previews_, w, h);
         onboardingView_.ClearDirty();
     } else if (section_ == ProductSection::kShop && starterShopSubmode_) {
-        starterShopView_.Render(painter, *text_, *previews_, w, h, clickBalance_);
+        starterShopView_.Render(painter, *text_, *previews_, w, h, clickBalance);
         starterShopView_.ClearDirty();
     } else if (section_ == ProductSection::kShop) {
-        shopView_.Render(painter, *text_, *previews_, w, h, clickBalance_);
+        shopView_.Render(painter, *text_, *previews_, w, h, clickBalance);
         shopView_.ClearDirty();
     } else if (section_ == ProductSection::kSettings) {
         // Settings no usa previews (no carga ningún `.nvpack` — brief §23).
-        settingsView_.Render(painter, *text_, w, h, clickBalance_);
+        settingsView_.Render(painter, *text_, w, h, clickBalance);
         settingsView_.ClearDirty();
     } else {
-        view_.Render(painter, *text_, *previews_, w, h, clickBalance_);
+        view_.Render(painter, *text_, *previews_, w, h, clickBalance);
         view_.ClearDirty();
     }
 }
@@ -611,16 +680,25 @@ bool ProductWindow::CaptureToBmpForQA(const std::string& path) {
     return ok;
 }
 
-void ProductWindow::RenderIfNeeded() {
+bool ProductWindow::RenderIfNeeded() {
     if (window_ == nullptr || renderer_ == nullptr) {
-        return;
+        return false;
     }
     if (!pendingExpose_ && !ActiveViewDirty()) {
-        return;
+        return false;
+    }
+    if (IsMinimized()) {
+        // Minimizada: no se dibuja NADA y lo pendiente queda pendiente
+        // (ni pendingExpose_ ni el dirty de la vista se limpian), así
+        // que al restaurarla se pinta una sola vez con el estado más
+        // nuevo. Sin esto, "Anywhere" pintaría y presentaría un frame
+        // por cada click del sistema contra una ventana en el Dock.
+        return false;
     }
     pendingExpose_ = false;
     DrawFrame();
     SDL_RenderPresent(renderer_);
+    return true;
 }
 
 }  // namespace nimvlets::productui
