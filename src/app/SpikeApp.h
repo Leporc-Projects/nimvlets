@@ -430,6 +430,17 @@ private:
     // NIMVLETS_DEV_HOVER_TEST_COUNT.
     void RunDevHoverSmokeTestIfRequested();
 
+    // --- Smokes EN VIVO de Block 11A (corrección de QA del owner) ---
+    //
+    // Los dos corren contra la ventana REAL del Product UI (SDL + window
+    // server), porque es justo lo que un test puro de tests/ no puede
+    // probar: que un clic contado repinte de verdad, y que una ventana
+    // minimizada por el botón nativo vuelva. Devuelven nullopt si su
+    // variable no está pedida; si lo está, cierran y apagan la app y
+    // devuelven el código de salida (0 = todo PASS). Ver README.md.
+    std::optional<int> RunDevWalletLiveSmokeIfRequested();
+    std::optional<int> RunDevRestoreSmokeIfRequested();
+
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
 

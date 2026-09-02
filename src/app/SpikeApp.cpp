@@ -2264,6 +2264,198 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
     }
 }
 
+// --- Smokes EN VIVO de Block 11A (corrección de QA del owner) -------
+
+std::optional<int> SpikeApp::RunDevWalletLiveSmokeIfRequested() {
+    const char* env = std::getenv("NIMVLETS_DEV_WALLET_LIVE_SMOKE");
+    if (env == nullptr || env[0] == '\0' || env[0] == '0') {
+        return std::nullopt;
+    }
+    SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_WALLET_LIVE_SMOKE");
+
+    // Se respeta NIMVLETS_DEV_CLICK_COUNTING también acá, por el MISMO
+    // camino canónico que un click del owner en Settings: así el smoke
+    // se puede correr contra un NIMVLETS_DEV_APPDATA_DIR limpio y aun
+    // así ejercitar la mitad "Anywhere" en una máquina donde el permiso
+    // del OS YA está concedido. No finge ningún permiso.
+    if (const char* cc = std::getenv("NIMVLETS_DEV_CLICK_COUNTING"); cc != nullptr && cc[0] != '\0') {
+        productui::SettingsChange change;
+        change.field = core::PreferenceField::kClickCounting;
+        change.clickCounting = core::ParseClickCountingMode(cc);
+        ApplyPreferenceChange(change);
+    }
+
+    OpenProductWindow();
+    if (!productWindow_.IsOpen()) {
+        SDL_Log("nimvlets: [wallet-live-smoke] FAIL — could not open the Product UI window");
+        Shutdown();
+        return 2;
+    }
+
+    // La fuente que DEBE contar en el modo EFECTIVO de este arranque, y
+    // la que NO. El smoke vale en los dos: sin el permiso del OS prueba
+    // "local cuenta / un evento global reenviado no se cuela", y con el
+    // modo global REALMENTE activo prueba la paridad al revés. No finge
+    // ningún permiso (brief §25).
+    const bool globalEffective =
+        CurrentEffectiveClickCounting() == core::EffectiveClickCounting::kGlobal;
+    const core::ClickSource counting =
+        globalEffective ? core::ClickSource::kGlobalMonitor : core::ClickSource::kLocalPet;
+    const core::ClickSource inert =
+        globalEffective ? core::ClickSource::kLocalPet : core::ClickSource::kGlobalMonitor;
+
+    struct SectionCase {
+        productui::ProductSection section;
+        const char* label;
+    };
+    static constexpr SectionCase kCases[] = {
+        {productui::ProductSection::kCollection, "Collection"},
+        {productui::ProductSection::kShop, "Shop"},
+        {productui::ProductSection::kSettings, "Settings"},
+    };
+
+    int failures = 0;
+    for (const SectionCase& c : kCases) {
+        productWindow_.ShowSectionForQA(c.section);
+        // Deja la sección DIBUJADA y quieta: a partir de acá, cualquier
+        // frame nuevo solo puede haberlo provocado el clic contado.
+        productWindow_.RenderIfNeeded();
+        const bool quiet = !productWindow_.RenderIfNeeded();
+
+        const double nowMs = static_cast<double>(SDL_GetTicks());
+        const std::uint64_t before = appState_.clickBalance;
+        HandleCountedClick(counting, nowMs);
+        const bool counted = appState_.clickBalance == before + 1;
+        // ESTE es el bug que reportó el owner: con Settings visible, el
+        // balance subía pero la ventana no repintaba, así que la
+        // cabecera seguía mostrando el número viejo hasta cambiar de
+        // sección.
+        const bool repainted = productWindow_.RenderIfNeeded();
+
+        // La otra fuente no puede sumar ni repintar (regla de no doble
+        // conteo, en el mismo smoke).
+        const std::uint64_t afterCounted = appState_.clickBalance;
+        HandleCountedClick(inert, nowMs);
+        const bool inertQuiet =
+            appState_.clickBalance == afterCounted && !productWindow_.RenderIfNeeded();
+
+        const bool ok = quiet && counted && repainted && inertQuiet;
+        failures += ok ? 0 : 1;
+        SDL_Log(
+            "nimvlets: [wallet-live-smoke] %-10s %s (idle-quiet=%s counted=%s repainted-live=%s "
+            "other-source-inert=%s)",
+            c.label, ok ? "PASS" : "FAIL", quiet ? "yes" : "no", counted ? "yes" : "no",
+            repainted ? "yes" : "no", inertQuiet ? "yes" : "no");
+    }
+
+    SDL_Log(
+        "nimvlets: [wallet-live-smoke] %s — effective mode: %s, counting source: %s, balance now %llu",
+        failures == 0 ? "LIVE WALLET REFRESH OK IN EVERY SECTION" : "STALE SECTION(S) FOUND",
+        globalEffective ? "global" : "local",
+        counting == core::ClickSource::kGlobalMonitor ? "global monitor" : "local pet",
+        static_cast<unsigned long long>(appState_.clickBalance));
+
+    productWindow_.Close();
+    Shutdown();
+    return failures == 0 ? 0 : 2;
+}
+
+std::optional<int> SpikeApp::RunDevRestoreSmokeIfRequested() {
+    const char* env = std::getenv("NIMVLETS_DEV_RESTORE_SMOKE");
+    if (env == nullptr || env[0] == '\0' || env[0] == '0') {
+        return std::nullopt;
+    }
+    SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_RESTORE_SMOKE");
+
+    // Bombea eventos REALES hasta que `pred` se cumpla o venza el
+    // timeout. Acá sí se espera de verdad: minimizar y restaurar son
+    // transiciones del window server (con animación), no aritmética
+    // nuestra — es exactamente la parte que ningún test puro puede
+    // probar (AGENTS.md §4).
+    auto pumpUntil = [this](auto&& pred, const int timeoutMs) {
+        bool running = true;
+        const std::uint64_t deadline = SDL_GetTicks() + static_cast<std::uint64_t>(timeoutMs);
+        while (SDL_GetTicks() < deadline) {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                HandleEvent(ev, running);
+            }
+            if (pred()) {
+                return true;
+            }
+            SDL_Delay(16);
+        }
+        return pred();
+    };
+
+    int failures = 0;
+    const auto check = [&failures](const char* label, const bool ok) {
+        failures += ok ? 0 : 1;
+        SDL_Log("nimvlets: [restore-smoke] %-34s %s", label, ok ? "PASS" : "FAIL");
+    };
+
+    // 1. CERRADA -> abre.
+    check("closed -> opens", !productWindow_.IsOpen());
+    OpenProductWindow();
+    if (!productWindow_.IsOpen()) {
+        SDL_Log("nimvlets: [restore-smoke] FAIL — could not open the Product UI window");
+        Shutdown();
+        return 2;
+    }
+    const std::uint32_t windowId = productWindow_.WindowId();
+    pumpUntil([] { return false; }, 250);
+
+    // 2. VISIBLE -> la trae al frente. NO crea una segunda ventana.
+    bool running = true;
+    HandleShellAction(static_cast<int>(platform::ShellAction::kOpenCollection), running);
+    pumpUntil([] { return false; }, 150);
+    check("visible -> same window forward",
+          productWindow_.IsOpen() && productWindow_.WindowId() == windowId);
+
+    // 3. MINIMIZADA -> vuelve LA MISMA ventana, en LA MISMA sección.
+    //    Se repite por sección porque el owner puede minimizar desde
+    //    cualquiera de las tres y esperar volver a esa (brief §8).
+    struct SectionCase {
+        productui::ProductSection section;
+        const char* label;
+    };
+    static constexpr SectionCase kCases[] = {
+        {productui::ProductSection::kCollection, "minimized -> restored (Collection)"},
+        {productui::ProductSection::kShop, "minimized -> restored (Shop)"},
+        {productui::ProductSection::kSettings, "minimized -> restored (Settings)"},
+    };
+    for (const SectionCase& c : kCases) {
+        productWindow_.ShowSectionForQA(c.section);
+        productWindow_.RenderIfNeeded();
+
+        productWindow_.MinimizeForQA();
+        const bool minimized = pumpUntil([this] { return productWindow_.IsMinimized(); }, 3000);
+
+        // EL camino del menú rápido, sin atajos: el mismo SDL_EVENT_USER
+        // que manda "Collection…" acaba acá.
+        HandleShellAction(static_cast<int>(platform::ShellAction::kOpenCollection), running);
+        const bool restored = pumpUntil([this] { return !productWindow_.IsMinimized(); }, 3000);
+
+        const bool sameWindow = productWindow_.IsOpen() && productWindow_.WindowId() == windowId;
+        const bool sectionKept = productWindow_.CurrentSection() == c.section;
+        // Y al volver del Dock repinta sola (pendingExpose_ quedó
+        // pendiente mientras estuvo minimizada).
+        const bool repainted = productWindow_.RenderIfNeeded();
+        check(c.label, minimized && restored && sameWindow && sectionKept && repainted);
+        if (!minimized) {
+            SDL_Log("nimvlets: [restore-smoke]   (the window never reported MINIMIZED — WM/session issue?)");
+        }
+    }
+
+    SDL_Log("nimvlets: [restore-smoke] %s",
+            failures == 0 ? "PRODUCT UI IS ALWAYS RECOVERABLE FROM 'Collection…'"
+                          : "UNRECOVERABLE / DUPLICATED / RESET STATE FOUND");
+
+    productWindow_.Close();
+    Shutdown();
+    return failures == 0 ? 0 : 2;
+}
+
 int SpikeApp::Run() {
     if (!Init()) {
         Shutdown();
@@ -2558,6 +2750,17 @@ int SpikeApp::Run() {
             SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_CLICK_COUNTING='%s'", cc);
             ApplyPreferenceChange(change);
         }
+        // NIMVLETS_DEV_GLOBAL_CLICK_EXPLAIN=1 — muestra la explicación de
+        // PRIMERA PARTE tal cual, para revisarla en EN/ES aunque el
+        // permiso del OS ya esté concedido en esta máquina (que es el
+        // caso tras la QA física del owner). Solo enciende el panel: no
+        // pide ningún permiso ni cambia la preferencia.
+        if (const char* gx = std::getenv("NIMVLETS_DEV_GLOBAL_CLICK_EXPLAIN");
+            gx != nullptr && gx[0] != '\0' && gx[0] != '0') {
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_GLOBAL_CLICK_EXPLAIN (panel only)");
+            globalClickExplanationVisible_ = true;
+            PushPreferencesToProductWindow();
+        }
         // NIMVLETS_DEV_GLOBAL_CLICK_ACTION=continue|notnow|recheck —
         // acciona un botón del flujo de permiso por su camino real.
         // OJO: "continue" SÍ llama al pedido nativo (puede mostrar el
@@ -2629,6 +2832,17 @@ int SpikeApp::Run() {
         productWindow_.Close();
         Shutdown();
         return failures == 0 ? 0 : 2;
+    }
+
+    // Solo-DEV (Block 11A, corrección de QA del owner): los dos smokes
+    // EN VIVO contra la ventana real — refresco inmediato del wallet
+    // ante un clic contado, y recuperación de la ventana minimizada
+    // desde "Collection…". Ver README.md.
+    if (const std::optional<int> code = RunDevWalletLiveSmokeIfRequested()) {
+        return *code;
+    }
+    if (const std::optional<int> code = RunDevRestoreSmokeIfRequested()) {
+        return *code;
     }
 
     // Mecanismo solo-DEV (Block 06): arranca con el pet oculto, para
