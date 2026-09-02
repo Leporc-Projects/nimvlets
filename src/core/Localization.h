@@ -129,6 +129,16 @@ enum class StringKey {
     // La explicación de PRIMERA PARTE que se muestra ANTES de pedir el
     // permiso (brief §8). Nombra qué se cuenta y, sobre todo, qué NO se
     // observa nunca. {permission} = el nombre del permiso del OS.
+    //
+    // Desde la QA física del owner (Block 11A) también anticipa que el
+    // OS puede describir ese permiso MUCHO más ampliamente de lo que
+    // Nimvlets hace: macOS lo presenta en términos de teclado/pulsaciones
+    // de teclas porque esa es la categoría de TCC entera, no una
+    // descripción de esta app. Se dice de forma genérica ("tu sistema"),
+    // sin nombrar la plataforma: la copy sigue sin ramas por OS, y no
+    // pretendemos controlar ni poder acotar la redacción de Apple — lo
+    // que la acota es nuestra máscara de eventos. Ver
+    // docs/GLOBAL_CLICK_MODE.md §5.
     kGlobalClickExplain,
     kGlobalClickContinue,       // "Continue" / "Continuar"
     kGlobalClickNotNow,         // "Not now" / "Ahora no"
@@ -144,6 +154,10 @@ enum class StringKey {
     // modo global una presión primaria cuenta una vez, aunque se
     // convierta en arrastre.
     kGlobalClickDragNote,
+    // Recordatorio corto de alcance, para los dos estados en los que el
+    // owner tiene el permiso del OS delante (falta concederlo / ya está
+    // activo) y va a leer la redacción amplia del sistema en Ajustes.
+    kGlobalClickMouseOnly,
 
     kCount,  // centinela — no es una clave real
 };

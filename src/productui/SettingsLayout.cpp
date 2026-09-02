@@ -53,7 +53,11 @@ constexpr float kNoticeButtonsGap = 10.0f;
 constexpr float kNoticeButtonH = 24.0f;
 constexpr float kNoticeButtonGap = 8.0f;
 constexpr float kNoticeButtonPadX = 14.0f;
-constexpr int kNoticeMaxLines = 4;
+// 6 desde Block 11A: la explicación previa al permiso ganó la frase que
+// anticipa la redacción AMPLIA del OS, y un párrafo de aviso que se
+// corta con "…" justo donde dice qué NO observamos sería peor que uno
+// largo. Solo lo alcanzan los cuerpos largos; los demás siguen en 1-2.
+constexpr int kNoticeMaxLines = 6;
 
 // Ancho aproximado por carácter — la vista mide fino y centra el texto;
 // alcanza para dimensionar el pill y el hit-test (mismo patrón que
@@ -209,17 +213,25 @@ float LayoutClickCountingNotice(
             case GlobalClickStatusLine::kActive:
                 notice.present = true;
                 notice.statusLabel = Localized(StringKey::kGlobalClickActive, lang);
-                // La semántica de drag solo importa cuando el conteo
-                // global está REALMENTE contando (brief §21).
-                notice.body = Localized(StringKey::kGlobalClickDragNote, lang);
+                // Mientras cuenta de verdad: primero el alcance —el
+                // owner tiene la entrada del permiso viva en Ajustes del
+                // Sistema, con la redacción amplia del OS— y después la
+                // semántica de drag, que solo importa acá (brief §21).
+                notice.body = std::string(Localized(StringKey::kGlobalClickMouseOnly, lang)) + " " +
+                              Localized(StringKey::kGlobalClickDragNote, lang);
                 break;
             case GlobalClickStatusLine::kPermissionRequired:
                 notice.present = true;
                 notice.statusLabel =
                     FormatWithPermission(StringKey::kGlobalClickPermissionNeeded, gc.permissionName, lang);
                 notice.statusIsAlert = true;
+                // Este es el momento EXACTO en que el owner va a leer
+                // la redacción del sistema (el diálogo de TCC ya pasó y
+                // está por abrir Ajustes), así que el recordatorio de
+                // alcance viaja con el hint.
                 notice.body =
-                    FormatWithPermission(StringKey::kGlobalClickGrantHint, gc.permissionName, lang);
+                    FormatWithPermission(StringKey::kGlobalClickGrantHint, gc.permissionName, lang) +
+                    " " + Localized(StringKey::kGlobalClickMouseOnly, lang);
                 break;
             case GlobalClickStatusLine::kUnavailable:
                 notice.present = true;

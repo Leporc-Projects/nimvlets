@@ -75,9 +75,15 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     /* kClickCountingHint */            {"Where a click has to happen for it to count.",
                                         "Dónde tiene que ocurrir un clic para que cuente."},
     /* kGlobalClickExplain */           {"To count clicks outside Nimvlets, your system needs {permission}. "
+                                        "Your system may describe that permission broadly \xE2\x80\x94 even as "
+                                        "keyboard or keystroke access; that wording covers the whole permission, "
+                                        "not what Nimvlets does. "
                                         "Nimvlets only counts primary mouse presses \xE2\x80\x94 never keys, "
                                         "pointer positions, apps, or screen content.",
                                         "Para contar clics fuera de Nimvlets, tu sistema necesita {permission}. "
+                                        "Puede que tu sistema describa ese permiso de forma muy amplia, incluso "
+                                        "como acceso al teclado: esa redacción abarca todo el permiso, no lo que "
+                                        "hace Nimvlets. "
                                         "Nimvlets solo cuenta pulsaciones del botón principal: nunca teclas, "
                                         "posiciones del puntero, apps ni el contenido de la pantalla."},
     /* kGlobalClickContinue */          {"Continue", "Continuar"},
@@ -93,6 +99,10 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
                                         "y vuelve a comprobar."},
     /* kGlobalClickDragNote */          {"A press counts once, even if it becomes a drag.",
                                         "Una pulsación cuenta una vez, aunque se convierta en un arrastre."},
+    /* kGlobalClickMouseOnly */         {"Nimvlets listens only for primary mouse presses, whatever the "
+                                        "system permission is called.",
+                                        "Nimvlets solo escucha pulsaciones del botón principal, se llame como "
+                                        "se llame el permiso del sistema."},
 };
 
 }  // namespace

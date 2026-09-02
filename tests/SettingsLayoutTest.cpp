@@ -526,6 +526,14 @@ bool TestExplanationShowsBothButtonsAndNamesThePermission() {
     NIMVLETS_CHECK(row->notice.body.find("{permission}") == std::string::npos);
     // Y dice explícitamente qué NO se observa.
     NIMVLETS_CHECK(row->notice.body.find("never keys") != std::string::npos);
+    // Corrección de QA del owner (Block 11A): el diálogo real de macOS
+    // habla de "keystrokes from any application" y Ajustes del Sistema
+    // describe Input Monitoring en términos de teclado. Se anticipa esa
+    // redacción AMPLIA acá, sin nombrar la plataforma (la copy sigue sin
+    // ramas por OS) y sin prometer que podamos cambiarla.
+    NIMVLETS_CHECK(row->notice.body.find("describe that permission broadly") != std::string::npos);
+    NIMVLETS_CHECK(row->notice.body.find("keyboard or keystroke access") != std::string::npos);
+    NIMVLETS_CHECK(row->notice.body.find("not what Nimvlets does") != std::string::npos);
 
     NIMVLETS_CHECK(row->notice.buttons.size() == 2);
     NIMVLETS_CHECK(HasButton(*row, "gc:notnow"));
@@ -558,6 +566,9 @@ bool TestPermissionNeededStateOffersCheckAgain() {
     NIMVLETS_CHECK(row->notice.statusIsAlert);
     NIMVLETS_CHECK(row->notice.body.find("Input Monitoring") != std::string::npos);
     NIMVLETS_CHECK(row->notice.body.find("System Settings") != std::string::npos);
+    // Es el momento exacto en que el owner va a leer la redacción amplia
+    // del sistema, así que el recordatorio de alcance viaja con el hint.
+    NIMVLETS_CHECK(row->notice.body.find("only for primary mouse presses") != std::string::npos);
     NIMVLETS_CHECK(row->notice.buttons.size() == 1);
     NIMVLETS_CHECK(HasButton(*row, "gc:recheck"));
     // La preferencia SIGUE en "anywhere" — no se auto-degrada.
@@ -578,7 +589,41 @@ bool TestActiveStateSaysActiveAndExplainsDragSemantics() {
     NIMVLETS_CHECK(row->notice.statusLabel == "Active");
     NIMVLETS_CHECK(!row->notice.statusIsAlert);
     NIMVLETS_CHECK(row->notice.body.find("counts once") != std::string::npos);
+    // Mientras cuenta de verdad, la entrada del permiso está viva en
+    // Ajustes del Sistema con la redacción amplia del OS: el alcance
+    // real se repite acá, primero.
+    NIMVLETS_CHECK(row->notice.body.find("only for primary mouse presses") != std::string::npos);
+    NIMVLETS_CHECK(
+        row->notice.body.find("only for primary mouse presses") < row->notice.body.find("counts once"));
     NIMVLETS_CHECK(row->notice.buttons.empty());  // anda: nada que reintentar
+    return true;
+}
+
+// El aviso más largo (la explicación previa al permiso, ya con la frase
+// sobre la redacción amplia del OS) sigue ENTERO dentro del ancho de
+// contenido y no se corta: kNoticeMaxLines tiene que alcanzarle.
+bool TestBroadWordingDisclosureFitsWithoutTruncation() {
+    for (const Language lang : {Language::kEn, Language::kEs}) {
+        const SettingsLayout l = LayoutWithGlobalClick(
+            ClickCountingMode::kNimvletOnly,
+            Status(GlobalClickCapability::kSupportedNeedsPermission,
+                   GlobalClickPermission::kNotGranted),
+            /*explanationVisible=*/true, lang);
+        const SettingsRow* row = ClickCountingRow(l);
+
+        NIMVLETS_CHECK(row->notice.present);
+        // El párrafo entra en las líneas que el layout reserva (si no, la
+        // vista lo cortaría con "…" justo donde dice qué NO miramos).
+        // 8.0f = el mismo kApproxCharW con el que SettingsLayout estima.
+        const float perLine = row->notice.bodyAnchor.w / 8.0f;
+        NIMVLETS_CHECK(static_cast<float>(row->notice.body.size()) <=
+                       perLine * static_cast<float>(row->notice.bodyLines));
+        // Y el bloque entero sigue dentro de la ventana, con los botones
+        // por debajo del texto.
+        NIMVLETS_CHECK(row->notice.bodyAnchor.Right() <= l.viewport.w);
+        NIMVLETS_CHECK(row->notice.buttons.front().rect.y >= row->notice.bodyAnchor.Bottom());
+        NIMVLETS_CHECK(l.contentHeight > row->notice.buttons.back().rect.Bottom());
+    }
     return true;
 }
 
@@ -621,6 +666,7 @@ bool TestInteractionGroupLocalized() {
     NIMVLETS_CHECK(esRow->segments[1].label == "En cualquier lugar");
     NIMVLETS_CHECK(esRow->notice.statusLabel == "Falta el permiso Input Monitoring");
     NIMVLETS_CHECK(esRow->notice.body.find("Ajustes del Sistema") != std::string::npos);
+    NIMVLETS_CHECK(esRow->notice.body.find("botón principal") != std::string::npos);
     NIMVLETS_CHECK(esRow->hint == std::string(Localized(StringKey::kClickCountingHint, Language::kEs)));
 
     // Botones y estados en los dos idiomas, siempre distintos entre sí.
@@ -735,6 +781,8 @@ void RegisterSettingsLayoutTests(testing::TestRunner& runner) {
                TestPermissionNeededStateOffersCheckAgain);
     runner.Add("SettingsLayout/ActiveStateSaysActiveAndExplainsDragSemantics",
                TestActiveStateSaysActiveAndExplainsDragSemantics);
+    runner.Add("SettingsLayout/BroadWordingDisclosureFitsWithoutTruncation",
+               TestBroadWordingDisclosureFitsWithoutTruncation);
     runner.Add("SettingsLayout/NoticeButtonsFollowTheirRowInFocusOrder",
                TestNoticeButtonsFollowTheirRowInFocusOrder);
     runner.Add("SettingsLayout/GlobalClickActionTokensParse", TestGlobalClickActionTokensParse);
