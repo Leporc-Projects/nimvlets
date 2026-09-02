@@ -108,6 +108,34 @@ void UiPainter::FillEllipse(const UiRect& r, UiColor color) {
     }
 }
 
+void UiPainter::FillDiamond(const UiRect& r, UiColor color) {
+    if (color.a == 0 || r.w <= 0.0f || r.h <= 0.0f) {
+        return;
+    }
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SetColor(renderer_, color);
+
+    const float px = r.x * scale_;
+    const float py = r.y * scale_;
+    const float pw = r.w * scale_;
+    const float ph = r.h * scale_;
+    const float cx = px + pw * 0.5f;
+    const int rows = static_cast<int>(std::lround(ph));
+
+    for (int i = 0; i < rows; ++i) {
+        // t: 0 en la punta superior, 1 en la inferior. k: 0 en las
+        // puntas, 1 en el ecuador -> semi-ancho lineal (rombo).
+        const float t = (static_cast<float>(i) + 0.5f) / ph;
+        const float k = 1.0f - std::fabs(2.0f * t - 1.0f);
+        const float halfSpan = 0.5f * pw * std::max(0.0f, k);
+        if (halfSpan <= 0.0f) {
+            continue;
+        }
+        const SDL_FRect span{cx - halfSpan, py + static_cast<float>(i), 2.0f * halfSpan, 1.0f};
+        SDL_RenderFillRect(renderer_, &span);
+    }
+}
+
 void UiPainter::StrokeRoundRect(const UiRect& r, float radius, float thickness, UiColor color) {
     if (color.a == 0 || r.w <= 0.0f || r.h <= 0.0f || thickness <= 0.0f) {
         return;

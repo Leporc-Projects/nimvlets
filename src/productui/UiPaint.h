@@ -38,6 +38,12 @@ class UiPainter {
     // del hero (Block 06.1 §10) — dibujada a alpha bajo.
     void FillEllipse(const UiRect& r, UiColor color);
 
+    // Rombo lleno (cuadrado rotado) inscrito en `r` — spans en espacio
+    // de PÍXELES, la misma ruta nítida que FillEllipse. Es la primitiva
+    // de las marcas ornamentales chicas de Block 12A (spark, marca de
+    // nav, rombo de divisor). Ver productui/Ornaments.h.
+    void FillDiamond(const UiRect& r, UiColor color);
+
     // Solo el CONTORNO de un round-rect, `thickness` puntos de grosor
     // hacia adentro. No rellena el interior (a diferencia de un fill).
     // Para anillos de foco y chips sin seleccionar.

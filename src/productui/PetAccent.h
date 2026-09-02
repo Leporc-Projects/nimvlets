@@ -6,37 +6,61 @@
 
 namespace nimvlets::productui {
 
-// Identidad de acento SUTIL por Nimvlet lógico (Block 06.1 §9). NO es
-// un tema completo: solo tiñe cosas chicas — la línea de foco/selección
-// del hero, el subrayado de la variante activa, y la forma orgánica muy
-// tenue detrás del arte del hero. El resto del Product UI NO cambia de
-// color por pet (brief §9: "Do NOT recolor the entire Product UI per
-// pet").
+// Identidad de acento por Nimvlet lógico. Empezó como un tinte SUTIL
+// (Block 06.1 §9) — la línea de foco/selección del hero, el subrayado
+// de la variante activa, la forma orgánica muy tenue detrás del arte.
+// Block 12A (DEC-143) la vuelve la ÚNICA identidad lógica por pet: un
+// registro de primera parte centralizado, en vez de `if (petId ==
+// "nidir")` desparramado por las vistas. Sigue sin recolorear el resto
+// del Product UI (brief §9: "Do NOT recolor the entire Product UI per
+// pet") — los tokens semánticos (productui::tokens) no cambian por pet.
 //
 // Pura, sin SDL — vive en nimvlets_productui_core para que
-// CollectionLayout la lleve y los tests la verifiquen.
+// CollectionLayout / ShopLayout la lleven y los tests la verifiquen.
+// Un id desconocido o sin identidad -> un neutro cálido seguro con
+// TODOS los campos poblados y legibles (nunca crashea, nunca deja
+// texto invisible — brief §10).
+
+// Estilo del hero-stage de un pet. Hoy solo distingue orgánico vs.
+// facetado (lo que `angularShape` ya decía); es la COSTURA por la que
+// un bloque futuro de mundo/hero puede pedir un tratamiento por pet sin
+// rediseñar el Product UI ni inventar un campo de catálogo para una
+// imagen que todavía no existe (brief §28).
+enum class HeroStageStyle {
+    kSoftOval,     // óvalo orgánico — Bunny, Frin, el neutro
+    kFacetedRound, // round-rect apenas más angular — Nidir (dragón)
+};
+
 struct PetAccent {
-    // Color de identidad, saturación media: para el trazo de foco (2pt)
-    // y el subrayado de la variante seleccionada.
+    // Color de identidad primario, saturación media: trazo de selección
+    // de variante, regla de acento bajo el nombre, punto de "On desktop".
     UiColor line;
 
-    // Versión pálida del mismo tono: para la(s) forma(s) del hero stage
-    // detrás del arte. La vista además la dibuja con alpha bajo — el
+    // Acento SECUNDARIO del pet (Block 12A): un tono complementario del
+    // mismo pet — el lóbulo secundario del hero stage, futuros toques de
+    // mundo. Restringido igual que `line`; nunca compite con el texto.
+    UiColor secondary;
+
+    // Versión pálida del tono primario: para la(s) forma(s) del hero
+    // stage detrás del arte. La vista la dibuja con alpha bajo — el
     // stage "apoya" el arte, nunca compite (brief §10/§11).
     UiColor shapeTint;
 
-    // Relleno tenue del botón de acción primario ("Use <pet>"): un tinte
-    // claro/medio del tono del pet (Block 06.2 §17 — el botón ya NO es
-    // casi-negro). Un poco más saturado que shapeTint.
+    // Relleno tenue del botón primario ("Use <pet>" / "Get <pet>"): un
+    // tinte claro/medio del tono del pet (Block 06.2 §17 — el botón ya
+    // NO es casi-negro). Un poco más saturado que shapeTint.
     UiColor softFill;
 
     // Versión oscura y legible del mismo tono: el texto (y borde) del
-    // botón de acción sobre `softFill`. Contraste >= ~5:1 con softFill.
+    // botón primario sobre `softFill`. Contraste >= ~4.5:1 con softFill
+    // (verificado en PetAccentTest vía productui::ContrastRatio); si un
+    // pet futuro no lo cumpliera, ButtonStyle lo clampa más oscuro.
     UiColor deepInk;
 
-    // Si la forma del hero es más orgánica (óvalo, `false`) o un poco
-    // más angular (round-rect de radio moderado, `true`). Bunny/Frin
-    // -> orgánica; Nidir -> más angular (brief §10).
+    // Estilo del hero stage (ver HeroStageStyle). `angularShape` se
+    // conserva como conveniencia (== heroStage == kFacetedRound) para
+    // no tocar las vistas que ya lo consultan.
+    HeroStageStyle heroStage = HeroStageStyle::kSoftOval;
     bool angularShape = false;
 };
 

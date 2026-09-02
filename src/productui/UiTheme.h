@@ -1,45 +1,42 @@
 #pragma once
 
 #include "productui/UiColor.h"
+#include "productui/VisualTokens.h"
 
 namespace nimvlets::productui {
 
-// Paleta base de Nimvlets Product UI — dirección visual ya decidida
-// (block brief 06 §2/§3): blanco cálido, casi-negro (no negro puro),
-// bordes discretos, sin gradientes, sin glassmorphism. Block 06.1 agrega
-// un acento SUTIL por-pet (productui::PetAccent). Block 06.2:
-//   - contraste del texto secundario subido (§10),
-//   - la Collection se lee como DOS planos: hero stage sobre el fondo
-//     cálido base, gallery sobre un neutro un pelín más profundo (§12),
-//   - el botón de acción primario ya NO es casi-negro: usa el softFill/
-//     deepInk del PetAccent del pet seleccionado (§17).
+// Los tokens semánticos (productui::tokens) viven en VisualTokens.h
+// (puro, nimvlets_productui_core). Este header los reexporta junto con
+// la escala tipográfica y los ALIAS de Block 06.
+
+// ------------------------------------------------------------
+//  Alias de compatibilidad: los nombres de Block 06, ahora definidos
+//  en términos de los tokens semánticos. Las vistas existentes
+//  compilan sin tocar nada; el código nuevo o modificado prefiere
+//  `tokens::` por claridad de intención.
+// ------------------------------------------------------------
 namespace theme {
 
-constexpr UiColor kBackground{0xF6, 0xF3, 0xEE, 0xFF};   // blanco hueso cálido — plano del hero
-constexpr UiColor kText{0x26, 0x22, 0x1E, 0xFF};         // casi-negro, no #000
-
-// Secundario / estado. Subido de #8C8578 (contraste 3.3:1 sobre el
-// fondo — el owner lo reportó demasiado pálido, Block 06.2 §10) a
-// #6E685C = ~5.0:1, ahora pasa WCAG AA para texto normal, sin volverse
-// casi-negro.
-constexpr UiColor kTextMuted{0x6E, 0x68, 0x5C, 0xFF};
-// Etiqueta de sección / separadores / "·". Subido de #B2AA9C (2.1:1) a
-// #8A8172 = ~3.5:1: sigue siendo un escalón claro por debajo de
-// kTextMuted (jerarquía intacta), pero legible.
-constexpr UiColor kTextFaint{0x8A, 0x81, 0x72, 0xFF};
-
-constexpr UiColor kHairline{0xE4, 0xDE, 0xD3, 0xFF};     // bordes discretos / divisor
-constexpr UiColor kHoverWash{0xEF, 0xEA, 0xE1, 0xFF};    // fondo sutil al pasar el mouse
-
-// Segundo plano: la zona de la gallery, un neutro cálido un poco más
-// profundo que kBackground — da profundidad sin convertir cada pet en
-// una card (Block 06.2 §12).
-constexpr UiColor kGalleryShelf{0xF0, 0xEB, 0xE1, 0xFF};
+constexpr UiColor kBackground = tokens::kCanvas;
+constexpr UiColor kText = tokens::kTextPrimary;
+constexpr UiColor kTextMuted = tokens::kTextSecondary;
+constexpr UiColor kTextFaint = tokens::kTextMuted;
+constexpr UiColor kHairline = tokens::kBorder;
+constexpr UiColor kHoverWash = tokens::kHoverWash;
+constexpr UiColor kGalleryShelf = tokens::kSurfaceSoft;
 
 }  // namespace theme
 
-// Tamaños tipográficos en PUNTOS lógicos. Jerarquía por tamaño/peso/
-// espacio, no por más contenedores (brief §7/§17).
+// ============================================================
+//  Escala tipográfica + ROLES semánticos (Block 12A)
+// ============================================================
+//
+// Tamaños en PUNTOS lógicos. Jerarquía por tamaño / peso / espacio /
+// composición, NO por más contenedores ni por una tipografía empacada:
+// el look serif editorial del mockup es INSPIRACIÓN para la jerarquía
+// y el aire, no un mandato de traer una fuente externa (brief §6). Se
+// sigue usando la rasterización nativa segura por plataforma
+// (platform::RasterizeText).
 namespace type {
 
 constexpr double kTitle = 16.0;        // "Nimvlets" (cabecera discreta)
@@ -57,6 +54,22 @@ constexpr double kGalleryName = 13.5;
 constexpr double kGalleryStatus = 11.5;
 
 constexpr double kButton = 13.0;
+
+// --- Roles semánticos (Block 12A) --------------------------------
+// El Product UI pide un ROL, no un número mágico. Mapean sobre la
+// escala de arriba — cambiar un rol acá lo cambia en todo su uso.
+namespace role {
+
+constexpr double kBrand = kTitle;          // 16 — el wordmark "✦ Nimvlets"
+constexpr double kHeroTitle = kHeroName;   // 25 — nombre del personaje seleccionado
+constexpr double kSectionTitle = 15.0;     // encabezados de sección / grupo
+constexpr double kBody = kHeroBody;        // 13.5 — descripción editorial
+constexpr double kMetadata = 13.0;         // especie, precio, estado
+constexpr double kCaption = 11.5;          // sub-línea de gallery, hints, encabezados contextuales
+constexpr double kButton = 13.0;           // etiqueta de CTA
+constexpr double kWallet = kClicks;        // 13 — balance en la pill del wallet
+
+}  // namespace role
 
 }  // namespace type
 

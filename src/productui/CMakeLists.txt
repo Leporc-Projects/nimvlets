@@ -15,6 +15,9 @@
 add_library(nimvlets_productui_core STATIC
   UiGeometry.h
   UiColor.h
+  VisualTokens.h
+  Contrast.h
+  OrnamentGeometry.h
   TextLayout.h
   ProductWindowState.h
   FocusList.h
@@ -23,6 +26,8 @@ add_library(nimvlets_productui_core STATIC
   Format.cpp
   PetAccent.h
   PetAccent.cpp
+  ButtonStyle.h
+  ButtonStyle.cpp
   PetEditorial.h
   PetEditorial.cpp
   PreviewArtifact.h
@@ -55,6 +60,8 @@ add_library(nimvlets_productui STATIC
   UiTheme.h
   UiPaint.h
   UiPaint.cpp
+  Ornaments.h
+  Ornaments.cpp
   TextCache.h
   TextCache.cpp
   PetPreviewCache.h
