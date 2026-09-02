@@ -82,4 +82,21 @@ SectionHeaderLayout BuildSectionHeaderLayout(
     float viewportW, float marginX, float scrollY, ProductSection active, core::Language lang,
     std::uint64_t clickBalance);
 
+// --- Métricas de la pill del wallet (Block 12A) ---------------------
+//
+// El wallet pasa de texto suelto a una cápsula discreta con un spark
+// procedural + el balance formateado (referencia B). El ancho depende
+// del ancho REAL del texto, que solo la vista puede medir; esta
+// función pura arma la geometría a partir de esa medida para que el
+// test la fije y la vista y el test no puedan divergir. Puntos
+// lógicos. `textWidth` = ancho del string ya formateado
+// (SectionHeaderLayout::clicksText).
+struct WalletPillMetrics {
+    float width = 0.0f;   // ancho total de la pill
+    float height = 0.0f;  // alto de la pill
+    float sparkCenterX = 0.0f;  // relativo al borde IZQUIERDO de la pill
+    float textLeftX = 0.0f;     // relativo al borde IZQUIERDO de la pill (ancla izquierda del balance)
+};
+WalletPillMetrics ComputeWalletPill(float textWidth);
+
 }  // namespace nimvlets::productui

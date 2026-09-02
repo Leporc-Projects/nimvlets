@@ -1,5 +1,7 @@
 #include "productui/SectionNav.h"
 
+#include <algorithm>
+
 #include "core/Localization.h"
 #include "productui/Format.h"
 
@@ -99,6 +101,24 @@ SectionHeaderLayout BuildSectionHeaderLayout(
 
     out.bodyTop = kTabsTop + kTabsH + kBelowTabs - scrollY;
     return out;
+}
+
+WalletPillMetrics ComputeWalletPill(float textWidth) {
+    // spark + hueco + balance, con aire igual a cada lado. Valores
+    // elegidos para que "1 000 000 clics" (el caso grande del brief §32)
+    // entre sin romper el layout ni chocar con las pestañas (que van en
+    // una fila más abajo).
+    constexpr float kPadX = 11.0f;
+    constexpr float kSpark = 9.0f;
+    constexpr float kGap = 6.0f;
+    constexpr float kHeight = 22.0f;
+
+    WalletPillMetrics m;
+    m.height = kHeight;
+    m.sparkCenterX = kPadX + kSpark * 0.5f;
+    m.textLeftX = kPadX + kSpark + kGap;
+    m.width = m.textLeftX + std::max(0.0f, textWidth) + kPadX;
+    return m;
 }
 
 }  // namespace nimvlets::productui
