@@ -67,6 +67,32 @@ constexpr const char* kStrings[static_cast<std::size_t>(StringKey::kCount)][2] =
     /* kStarterChoicesHeading */        {"Starter choices", "Opciones iniciales"},
     /* kStarterShopBack */              {"\xE2\x86\x90 Shop", "\xE2\x86\x90 Tienda"},
     /* kStarterShopEmpty */             {"No more starter choices.", "No quedan opciones iniciales."},
+
+    /* kSettingsInteraction */          {"Interaction", "Interacción"},
+    /* kClickCounting */                {"Click counting", "Conteo de clics"},
+    /* kClickCountingNimvletOnly */     {"Nimvlet only", "Solo el Nimvlet"},
+    /* kClickCountingAnywhere */        {"Anywhere", "En cualquier lugar"},
+    /* kClickCountingHint */            {"Where a click has to happen for it to count.",
+                                        "Dónde tiene que ocurrir un clic para que cuente."},
+    /* kGlobalClickExplain */           {"To count clicks outside Nimvlets, your system needs {permission}. "
+                                        "Nimvlets only counts primary mouse presses \xE2\x80\x94 never keys, "
+                                        "pointer positions, apps, or screen content.",
+                                        "Para contar clics fuera de Nimvlets, tu sistema necesita {permission}. "
+                                        "Nimvlets solo cuenta pulsaciones del botón principal: nunca teclas, "
+                                        "posiciones del puntero, apps ni el contenido de la pantalla."},
+    /* kGlobalClickContinue */          {"Continue", "Continuar"},
+    /* kGlobalClickNotNow */            {"Not now", "Ahora no"},
+    /* kGlobalClickCheckAgain */        {"Check again", "Comprobar de nuevo"},
+    /* kGlobalClickActive */            {"Active", "Activo"},
+    /* kGlobalClickPermissionNeeded */  {"{permission} permission needed", "Falta el permiso {permission}"},
+    /* kGlobalClickUnavailable */       {"Not available on this system", "No disponible en este sistema"},
+    /* kGlobalClickFailed */            {"Could not start", "No se pudo iniciar"},
+    /* kGlobalClickGrantHint */         {"Turn Nimvlets on under {permission} in System Settings, "
+                                        "then check again.",
+                                        "Activa Nimvlets en {permission}, dentro de Ajustes del Sistema, "
+                                        "y vuelve a comprobar."},
+    /* kGlobalClickDragNote */          {"A press counts once, even if it becomes a drag.",
+                                        "Una pulsación cuenta una vez, aunque se convierta en un arrastre."},
 };
 
 }  // namespace

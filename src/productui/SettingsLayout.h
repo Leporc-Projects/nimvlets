@@ -5,18 +5,26 @@
 #include <vector>
 
 #include "core/Preferences.h"
+#include "platform/GlobalClickTypes.h"
 #include "productui/SectionNav.h"
 #include "productui/UiGeometry.h"
 
 namespace nimvlets::productui {
 
-// El layout PURO de la sección Settings (Block 08): convierte
-// core::Preferences (tamaño / opacidad / lock / idioma — las MISMAS
-// cuatro preferencias que el menú rápido ya expone) + tamaño de
-// viewport + scroll en un puñado de grupos con controles segmentados,
-// el orden de tabulación, y un hit-test por punto. Métricas en PUNTOS
+// El layout PURO de la sección Settings (Block 08 + 11A): convierte
+// core::Preferences (tamaño / opacidad / lock / idioma — las mismas que
+// el menú rápido expone — más el modo de conteo de clics, que solo vive
+// acá) + el estado GENÉRICO del monitor de clics globales + tamaño de
+// viewport + scroll en un puñado de grupos con controles segmentados, el
+// orden de tabulación, y un hit-test por punto. Métricas en PUNTOS
 // lógicos. Determinista: mismas entradas -> mismo resultado, sin SDL,
 // sin medición de texto real.
+//
+// **Sin ramas por plataforma** (brief §18). El grupo "Interaction" se
+// dibuja a partir de platform::GlobalClickUiState — capacidad, permiso,
+// actividad ya resueltos a estado genérico — nunca a partir de un
+// `#ifdef __APPLE__` / `#ifdef _WIN32`. El nombre del permiso del OS
+// llega como DATO (`GlobalClickUiState::permissionName`).
 //
 // Comparte la CABECERA (título "Nimvlets" + balance + pestañas
 // Collection · Shop · Settings) con las otras dos secciones vía
@@ -35,10 +43,56 @@ struct SettingsSegment {
     std::string label;      // ya localizado ("Small" / "Pequeño" / "70%" / "On" ...)
     UiRect rect;            // zona clickeable + pill de selección
     // "opt:<field>:<value>" — p. ej. "opt:size:large", "opt:opacity:70",
-    // "opt:lock:on", "opt:language:es". Solo para hit-test de mouse: el
-    // FOCO de teclado vive en "row:<field>".
+    // "opt:lock:on", "opt:language:es", "opt:clickcounting:anywhere".
+    // Solo para hit-test de mouse: el FOCO de teclado vive en
+    // "row:<field>".
     std::string focusId;
     bool selected = false;  // = es el valor actual de la preferencia
+    // false = la opción existe pero NO se puede elegir en este sistema
+    // (Block 11A: "Anywhere" donde la plataforma no soporta el monitor
+    // global). Se SIGUE dibujando, apagada, para que la línea de estado
+    // ("Not available on this system") tenga a qué referirse — pero
+    // queda fuera del HitTest y del recorrido con flechas.
+    bool enabled = true;
+};
+
+// Una acción del bloque de aviso del conteo global. NO es un cambio de
+// preferencia: son los botones del flujo de permiso (brief §8/§9).
+enum class GlobalClickAction {
+    kNone,
+    kContinue,    // ÚNICO camino que puede pedir el permiso nativo
+    kNotNow,      // cierra la explicación sin pedir nada
+    kCheckAgain,  // re-consulta el permiso e intenta arrancar de nuevo
+};
+
+// Traduce un focusId de aviso ("gc:continue" ...). Devuelve kNone si no
+// es uno.
+GlobalClickAction ParseGlobalClickAction(const std::string& focusId);
+
+struct SettingsNoticeButton {
+    std::string label;    // ya localizado
+    UiRect rect;
+    std::string focusId;  // "gc:continue" / "gc:notnow" / "gc:recheck"
+};
+
+// Bloque de aviso opcional bajo una fila: una etiqueta de estado corta,
+// un párrafo, y hasta dos botones. Es el vehículo de TODO lo que el
+// brief §8/§9 pide (explicación previa al permiso, estado, reintento)
+// sin convertir Settings en un panel de administración.
+struct SettingsNotice {
+    bool present = false;
+    // "Active" / "Input Monitoring permission needed" / … ("" si no hay).
+    std::string statusLabel;
+    UiRect statusAnchor;
+    // true cuando el estado pide atención (falta permiso / falló / no
+    // disponible) — la vista lo tinta distinto de un "Active" tranquilo.
+    bool statusIsAlert = false;
+    // Párrafo envuelto: la explicación de privacidad, el hint para
+    // conceder el permiso, o la nota de semántica de drag ("" si no hay).
+    std::string body;
+    UiRect bodyAnchor;   // ancla IZQUIERDA; .w = ancho de envoltura, .h = alto reservado
+    int bodyLines = 0;   // líneas estimadas (layout puro: sin medir texto real)
+    std::vector<SettingsNoticeButton> buttons;
 };
 
 struct SettingsRow {
@@ -48,8 +102,9 @@ struct SettingsRow {
     std::vector<SettingsSegment> segments;
     std::string focusId;    // "row:<field>" — el punto de foco de teclado
     UiRect focusRect;       // anillo de foco alrededor del grupo de segmentos
-    std::string hint;       // frase corta bajo la fila ("" salvo Lock position)
+    std::string hint;       // frase corta bajo la fila ("" salvo Lock position / Click counting)
     UiRect hintAnchor;      // ancla IZQUIERDA del hint (.w = ancho de envoltura)
+    SettingsNotice notice;  // bloque de aviso opcional (solo Click counting hoy)
 };
 
 struct SettingsGroup {
@@ -64,14 +119,19 @@ struct SettingsLayout {
     SectionHeaderLayout header;
     std::vector<SettingsGroup> groups;
 
-    // Orden de tabulación: pestañas de nav, luego "row:size",
-    // "row:opacity", "row:lock", "row:language" (de arriba hacia abajo).
+    // Orden de tabulación: pestañas de nav, luego las filas de arriba
+    // hacia abajo ("row:size", "row:opacity", "row:lock",
+    // "row:clickcounting", "row:language"), con los botones del aviso de
+    // una fila insertados JUSTO DESPUÉS de esa fila — así Tab desde
+    // "Click counting" cae en "Continue"/"Not now"/"Check again" antes de
+    // seguir a Language.
     std::vector<std::string> focusOrder;
 
     float contentHeight = 0.0f;
 
-    // focusId accionable en (x, y): una pestaña de nav, o el segmento
-    // exacto ("opt:<field>:<value>"). "" si nada.
+    // focusId accionable en (x, y): una pestaña de nav, el segmento
+    // exacto ("opt:<field>:<value>"), o un botón de aviso ("gc:..."). ""
+    // si nada. Un segmento con `enabled == false` NUNCA se devuelve.
     std::string HitTest(float x, float y) const;
 
     // La fila de `field`, o nullptr.
@@ -82,7 +142,16 @@ struct SettingsLayoutInput {
     float viewportW = 800.0f;
     float viewportH = 560.0f;
     float scrollY = 0.0f;
-    core::Preferences prefs;  // idioma incluido (prefs.language)
+    core::Preferences prefs;  // idioma y modo de conteo incluidos
+    // Estado GENÉRICO del monitor de clics globales, ya derivado de la
+    // capacidad/permiso por platform::ResolveGlobalClickUiState. Su
+    // default (kUnavailable) es el correcto para cualquier host sin
+    // soporte, así que los tests que no lo tocan siguen valiendo.
+    platform::GlobalClickUiState globalClick;
+    // true mientras se muestra la explicación de primera parte, ANTES de
+    // que se pida ningún permiso (brief §8). Lo gobierna src/app: la
+    // vista nunca lo enciende sola.
+    bool globalClickExplanationVisible = false;
     // Balance de clics CANÓNICO (de ProductWindow) para la cabecera
     // compartida — ver SectionHeaderLayout::clicksText. Settings NO tiene
     // wallet propio: consume este mismo valor que Collection / Shop

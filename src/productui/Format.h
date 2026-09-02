@@ -40,4 +40,13 @@ std::string FormatSpendPrompt(std::uint64_t price, const std::string& petName, c
 // StringKey::kOnboardingConfirmStarter; acá solo se sustituye "{pet}".
 std::string FormatOnboardingConfirmPrompt(const std::string& petName, core::Language lang);
 
+// Sustituye "{permission}" por el nombre que el SISTEMA OPERATIVO le da
+// al permiso ("Input Monitoring" en macOS), que aporta el adapter de
+// plataforma vía platform::GlobalClickStatus::permissionName (Block
+// 11A). Es lo que deja que la copy de Settings nombre el permiso real
+// SIN una sola rama por plataforma en src/productui (brief §18). Con
+// `permissionName` vacío el token se borra y la frase sigue leyéndose.
+std::string FormatWithPermission(
+    core::StringKey key, const std::string& permissionName, core::Language lang);
+
 }  // namespace nimvlets::productui

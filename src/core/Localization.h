@@ -114,6 +114,37 @@ enum class StringKey {
     kStarterShopBack,        // "← Shop" / "← Tienda" — volver al Shop público
     kStarterShopEmpty,       // "No more starter choices." / "No quedan opciones iniciales."
 
+    // Interaction — modo OPT-IN de conteo de clics (Block 11A). Vive
+    // SOLO en Settings; el menú rápido no lo gana (brief §10). "Nimvlet"
+    // no se traduce. El nombre del permiso del OS ("Input Monitoring")
+    // NO es una clave: lo aporta el adapter de plataforma vía
+    // GlobalClickStatus::permissionName y se sustituye en {permission},
+    // así el Product UI no tiene ninguna rama por plataforma (brief §18).
+    // Ver docs/GLOBAL_CLICK_MODE.md.
+    kSettingsInteraction,       // "Interaction" / "Interacción" — encabezado de grupo
+    kClickCounting,             // "Click counting" / "Conteo de clics"
+    kClickCountingNimvletOnly,  // "Nimvlet only" / "Solo el Nimvlet"
+    kClickCountingAnywhere,     // "Anywhere" / "En cualquier lugar"
+    kClickCountingHint,         // frase corta bajo la fila
+    // La explicación de PRIMERA PARTE que se muestra ANTES de pedir el
+    // permiso (brief §8). Nombra qué se cuenta y, sobre todo, qué NO se
+    // observa nunca. {permission} = el nombre del permiso del OS.
+    kGlobalClickExplain,
+    kGlobalClickContinue,       // "Continue" / "Continuar"
+    kGlobalClickNotNow,         // "Not now" / "Ahora no"
+    kGlobalClickCheckAgain,     // "Check again" / "Comprobar de nuevo"
+    kGlobalClickActive,         // "Active" / "Activo"
+    kGlobalClickPermissionNeeded,  // "{permission} permission needed" / "Falta el permiso {permission}"
+    kGlobalClickUnavailable,    // "Not available on this system" / "No disponible en este sistema"
+    kGlobalClickFailed,         // "Could not start" / "No se pudo iniciar"
+    // Qué hacer tras un pedido denegado/pendiente. Se nombra el lugar
+    // del OS sin usar ningún deep link no documentado (brief §9).
+    kGlobalClickGrantHint,
+    // Semántica de drag, dicha en voz alta en Settings (brief §21): en
+    // modo global una presión primaria cuenta una vez, aunque se
+    // convierta en arrastre.
+    kGlobalClickDragNote,
+
     kCount,  // centinela — no es una clave real
 };
 

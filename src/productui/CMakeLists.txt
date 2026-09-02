@@ -41,7 +41,14 @@ add_library(nimvlets_productui_core STATIC
 )
 
 target_include_directories(nimvlets_productui_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(nimvlets_productui_core PUBLIC nimvlets_catalog PRIVATE nimvlets_warnings)
+# nimvlets_platform_policy: SettingsLayout consume
+# platform::GlobalClickUiState (Block 11A) — tipos PUROS, sin AppKit /
+# windows.h / X11 (ver src/platform/GlobalClickTypes.h), igual que
+# QuickMenuModel consume core. PUBLIC porque SettingsLayoutInput lo
+# expone en su interfaz.
+target_link_libraries(nimvlets_productui_core
+  PUBLIC nimvlets_catalog nimvlets_platform_policy
+  PRIVATE nimvlets_warnings)
 
 add_library(nimvlets_productui STATIC
   UiTheme.h

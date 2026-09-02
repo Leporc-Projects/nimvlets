@@ -2,18 +2,23 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <string>
 
 #include "core/DisplayControls.h"
 #include "core/Localization.h"
+#include "productui/Format.h"
 
 namespace nimvlets::productui {
 
+using core::ClickCountingMode;
 using core::Language;
 using core::Localized;
 using core::PetSizeChoice;
 using core::PreferenceField;
 using core::StringKey;
+using platform::GlobalClickStatusLine;
+using platform::GlobalClickUiState;
 
 namespace {
 
@@ -39,6 +44,17 @@ constexpr float kSegPadX = 14.0f;
 constexpr float kHintGap = 8.0f;
 constexpr float kHintH = 15.0f;
 
+// --- Bloque de aviso del conteo global (Block 11A) ------------------
+constexpr float kNoticeGap = 10.0f;      // hint/fila -> etiqueta de estado
+constexpr float kNoticeStatusH = 15.0f;
+constexpr float kNoticeBodyGap = 6.0f;
+constexpr float kNoticeLineH = 15.0f;
+constexpr float kNoticeButtonsGap = 10.0f;
+constexpr float kNoticeButtonH = 24.0f;
+constexpr float kNoticeButtonGap = 8.0f;
+constexpr float kNoticeButtonPadX = 14.0f;
+constexpr int kNoticeMaxLines = 4;
+
 // Ancho aproximado por carácter — la vista mide fino y centra el texto;
 // alcanza para dimensionar el pill y el hit-test (mismo patrón que
 // CollectionLayout / ShopLayout).
@@ -46,6 +62,20 @@ constexpr float kApproxCharW = 8.0f;
 
 float SegWidth(const std::string& label) {
     return kSegPadX * 2.0f + static_cast<float>(label.size()) * kApproxCharW;
+}
+
+// Líneas que ocuparía `body` envuelto en `wrapW`. Estimación pura, con
+// el mismo kApproxCharW que dimensiona los pills: esta capa no mide
+// texto real (la vista sí, al dibujar con DrawTextWrapped). Acotada a
+// kNoticeMaxLines, igual que el dibujo.
+int EstimateWrappedLines(const std::string& body, float wrapW) {
+    if (body.empty() || wrapW <= 0.0f) {
+        return 0;
+    }
+    const float perLine = std::max(1.0f, wrapW / kApproxCharW);
+    const int lines =
+        static_cast<int>(std::ceil(static_cast<float>(body.size()) / perLine));
+    return std::clamp(lines, 1, kNoticeMaxLines);
 }
 
 const char* FieldToken(PreferenceField field) {
@@ -58,6 +88,8 @@ const char* FieldToken(PreferenceField field) {
             return "lock";
         case PreferenceField::kLanguage:
             return "language";
+        case PreferenceField::kClickCounting:
+            return "clickcounting";
     }
     return "";
 }
@@ -66,6 +98,7 @@ struct SegSpec {
     std::string label;
     std::string value;   // token para el focusId ("small", "70", "on", "es")
     bool selected = false;
+    bool enabled = true;
 };
 
 std::vector<SegSpec> SizeSegs(PetSizeChoice current, Language lang) {
@@ -93,6 +126,18 @@ std::vector<SegSpec> LockSegs(bool locked, Language lang) {
     };
 }
 
+// [ Nimvlet only ] [ Anywhere ] (Block 11A). "Anywhere" queda apagado
+// —dibujado pero no elegible— donde la plataforma no tiene capacidad.
+std::vector<SegSpec> ClickCountingSegs(
+    ClickCountingMode current, bool anywhereSelectable, Language lang) {
+    return {
+        {Localized(StringKey::kClickCountingNimvletOnly, lang), "nimvlet_only",
+         current == ClickCountingMode::kNimvletOnly, true},
+        {Localized(StringKey::kClickCountingAnywhere, lang), "anywhere",
+         current == ClickCountingMode::kAnywhere, anywhereSelectable},
+    };
+}
+
 std::vector<SegSpec> LanguageSegs(Language current) {
     // Endónimos: SIEMPRE en su propio idioma (igual que el submenú
     // Language del menú rápido).
@@ -116,6 +161,7 @@ float LayoutRow(
         seg.label = s.label;
         seg.focusId = std::string("opt:") + FieldToken(row.field) + ":" + s.value;
         seg.selected = s.selected;
+        seg.enabled = s.enabled;
         const float w = SegWidth(s.label);
         seg.rect = UiRect{segX, segY, w, kSegH};
         row.segments.push_back(seg);
@@ -134,7 +180,109 @@ float LayoutRow(
     return afterY;
 }
 
+// Construye el bloque de aviso de la fila "Click counting" y lo coloca a
+// partir de `y`. Devuelve la y tras el bloque. Vacío (present == false)
+// cuando no hay nada que decir — el caso normal en modo local sobre una
+// plataforma con soporte, que es el estado por defecto del producto.
+float LayoutClickCountingNotice(
+    SettingsRow& row, float y, float contentX, float contentW, const GlobalClickUiState& gc,
+    bool explanationVisible, Language lang) {
+    const float bodyX = contentX + kLabelColW + kLabelToControl;
+    const float wrapW = std::max(120.0f, contentW - kLabelColW - kLabelToControl);
+
+    SettingsNotice notice;
+
+    if (explanationVisible) {
+        // La explicación de PRIMERA PARTE, antes de cualquier pedido de
+        // permiso (brief §8). Sin línea de estado: acá lo único que
+        // importa es qué se va a pedir y qué NO se observa nunca.
+        notice.present = true;
+        notice.body = FormatWithPermission(StringKey::kGlobalClickExplain, gc.permissionName, lang);
+        notice.buttons.push_back(
+            SettingsNoticeButton{Localized(StringKey::kGlobalClickNotNow, lang), UiRect{}, "gc:notnow"});
+        notice.buttons.push_back(
+            SettingsNoticeButton{Localized(StringKey::kGlobalClickContinue, lang), UiRect{}, "gc:continue"});
+    } else {
+        switch (gc.statusLine) {
+            case GlobalClickStatusLine::kNone:
+                break;
+            case GlobalClickStatusLine::kActive:
+                notice.present = true;
+                notice.statusLabel = Localized(StringKey::kGlobalClickActive, lang);
+                // La semántica de drag solo importa cuando el conteo
+                // global está REALMENTE contando (brief §21).
+                notice.body = Localized(StringKey::kGlobalClickDragNote, lang);
+                break;
+            case GlobalClickStatusLine::kPermissionRequired:
+                notice.present = true;
+                notice.statusLabel =
+                    FormatWithPermission(StringKey::kGlobalClickPermissionNeeded, gc.permissionName, lang);
+                notice.statusIsAlert = true;
+                notice.body =
+                    FormatWithPermission(StringKey::kGlobalClickGrantHint, gc.permissionName, lang);
+                break;
+            case GlobalClickStatusLine::kUnavailable:
+                notice.present = true;
+                notice.statusLabel = Localized(StringKey::kGlobalClickUnavailable, lang);
+                notice.statusIsAlert = true;
+                break;
+            case GlobalClickStatusLine::kFailed:
+                notice.present = true;
+                notice.statusLabel = Localized(StringKey::kGlobalClickFailed, lang);
+                notice.statusIsAlert = true;
+                break;
+        }
+        if (notice.present && gc.showCheckAgain) {
+            notice.buttons.push_back(SettingsNoticeButton{
+                Localized(StringKey::kGlobalClickCheckAgain, lang), UiRect{}, "gc:recheck"});
+        }
+    }
+
+    if (!notice.present) {
+        row.notice = std::move(notice);
+        return y;
+    }
+
+    float ny = y + kNoticeGap;
+    if (!notice.statusLabel.empty()) {
+        notice.statusAnchor = UiRect{bodyX, ny, wrapW, kNoticeStatusH};
+        ny += kNoticeStatusH;
+    }
+    if (!notice.body.empty()) {
+        notice.bodyLines = EstimateWrappedLines(notice.body, wrapW);
+        const float bodyH = static_cast<float>(notice.bodyLines) * kNoticeLineH;
+        notice.bodyAnchor = UiRect{bodyX, ny + kNoticeBodyGap, wrapW, bodyH};
+        ny += kNoticeBodyGap + bodyH;
+    }
+    if (!notice.buttons.empty()) {
+        ny += kNoticeButtonsGap;
+        float bx = bodyX;
+        for (SettingsNoticeButton& b : notice.buttons) {
+            const float w = kNoticeButtonPadX * 2.0f + static_cast<float>(b.label.size()) * kApproxCharW;
+            b.rect = UiRect{bx, ny, w, kNoticeButtonH};
+            bx += w + kNoticeButtonGap;
+        }
+        ny += kNoticeButtonH;
+    }
+
+    row.notice = std::move(notice);
+    return ny;
+}
+
 }  // namespace
+
+GlobalClickAction ParseGlobalClickAction(const std::string& focusId) {
+    if (focusId == "gc:continue") {
+        return GlobalClickAction::kContinue;
+    }
+    if (focusId == "gc:notnow") {
+        return GlobalClickAction::kNotNow;
+    }
+    if (focusId == "gc:recheck") {
+        return GlobalClickAction::kCheckAgain;
+    }
+    return GlobalClickAction::kNone;
+}
 
 const SettingsRow* SettingsLayout::FindRow(PreferenceField field) const {
     for (const SettingsGroup& g : groups) {
@@ -156,8 +304,15 @@ std::string SettingsLayout::HitTest(float x, float y) const {
     for (const SettingsGroup& g : groups) {
         for (const SettingsRow& r : g.rows) {
             for (const SettingsSegment& s : r.segments) {
-                if (s.rect.Contains(x, y)) {
+                // Un segmento apagado ("Anywhere" sin capacidad de
+                // plataforma) se dibuja pero NUNCA es accionable.
+                if (s.enabled && s.rect.Contains(x, y)) {
                     return s.focusId;
+                }
+            }
+            for (const SettingsNoticeButton& b : r.notice.buttons) {
+                if (b.rect.Contains(x, y)) {
+                    return b.focusId;
                 }
             }
         }
@@ -224,6 +379,36 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
 
     y += kGroupGap;
 
+    // --- Grupo "Interaction": el modo de conteo de clics (Block 11A) ---
+    //
+    // La PRIMERA preferencia que vive solo en Settings: el menú rápido
+    // NO la gana (brief §10). Va entre "Companion" (el pet) y "Language"
+    // (chrome de la app), que es donde encaja: es cómo se interactúa con
+    // el pet. Las filas de "Companion" no se mueven.
+    {
+        SettingsGroup g;
+        g.title = Localized(StringKey::kSettingsInteraction, lang);
+        g.titleAnchor = UiRect{contentX, y, contentW, kGroupTitleH};
+        y += kGroupTitleH + kGroupTitleToRule;
+        g.rule = UiRect{contentX, y, contentW, 1.0f};
+        y += 1.0f + kRuleToRows;
+
+        SettingsRow clicks;
+        clicks.field = PreferenceField::kClickCounting;
+        clicks.label = Localized(StringKey::kClickCounting, lang);
+        clicks.focusId = "row:clickcounting";
+        clicks.hint = Localized(StringKey::kClickCountingHint, lang);
+        y = LayoutRow(clicks, y, contentX, contentW,
+                      ClickCountingSegs(in.prefs.clickCounting, in.globalClick.anywhereSelectable, lang));
+        y = LayoutClickCountingNotice(clicks, y, contentX, contentW, in.globalClick,
+                                      in.globalClickExplanationVisible, lang);
+        g.rows.push_back(std::move(clicks));
+
+        out.groups.push_back(std::move(g));
+    }
+
+    y += kGroupGap;
+
     // --- Grupo "Language": el selector de idioma ---
     {
         SettingsGroup g;
@@ -250,6 +435,11 @@ SettingsLayout BuildSettingsLayout(const SettingsLayoutInput& in) {
     for (const SettingsGroup& g : out.groups) {
         for (const SettingsRow& r : g.rows) {
             out.focusOrder.push_back(r.focusId);
+            // Los botones del aviso se tabulan JUSTO DESPUÉS de su fila:
+            // el orden de foco sigue el orden visual, sin saltos.
+            for (const SettingsNoticeButton& b : r.notice.buttons) {
+                out.focusOrder.push_back(b.focusId);
+            }
         }
     }
 

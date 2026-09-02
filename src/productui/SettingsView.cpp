@@ -11,6 +11,7 @@
 
 namespace nimvlets::productui {
 
+using core::ClickCountingMode;
 using core::Language;
 using core::PetSizeChoice;
 using core::PreferenceField;
@@ -34,6 +35,8 @@ bool ParseField(const std::string& token, PreferenceField& outField) {
         outField = PreferenceField::kLockPosition;
     } else if (token == "language") {
         outField = PreferenceField::kLanguage;
+    } else if (token == "clickcounting") {
+        outField = PreferenceField::kClickCounting;
     } else {
         return false;
     }
@@ -42,8 +45,57 @@ bool ParseField(const std::string& token, PreferenceField& outField) {
 
 }  // namespace
 
+void SettingsView::DrawNotice(
+    UiPainter& painter, TextCache& text, const SettingsNotice& notice,
+    const std::string& focusedId) const {
+    if (!notice.present) {
+        return;
+    }
+
+    if (!notice.statusLabel.empty()) {
+        DrawText(painter, text, notice.statusLabel, type::kGalleryStatus, TextWeight::kMedium,
+                 notice.statusIsAlert ? theme::kText : theme::kTextMuted, notice.statusAnchor.x,
+                 notice.statusAnchor.y + 11.0f, HAlign::kLeft,
+                 static_cast<int>(notice.statusAnchor.w));
+    }
+
+    if (!notice.body.empty()) {
+        // Envoltura real por palabras: la capa de layout solo ESTIMÓ
+        // cuántas líneas reservar (no puede medir texto), así que se
+        // corta a las mismas líneas para que el dibujo no se salga del
+        // hueco calculado.
+        DrawTextWrapped(painter, text, notice.body, type::kGalleryStatus, TextWeight::kRegular,
+                        theme::kTextMuted, notice.bodyAnchor.x, notice.bodyAnchor.y + 11.0f,
+                        notice.bodyAnchor.w, 15.0f, std::max(1, notice.bodyLines));
+    }
+
+    for (const SettingsNoticeButton& b : notice.buttons) {
+        const bool hovered = hoverId_ == b.focusId;
+        if (hovered) {
+            painter.FillRoundRect(b.rect, 7.0f, theme::kHoverWash);
+        }
+        painter.StrokeRoundRect(b.rect, 7.0f, 1.25f, theme::kHairline);
+        if (focusedId == b.focusId) {
+            painter.StrokeRoundRect(
+                UiRect{b.rect.x - 4.0f, b.rect.y - 4.0f, b.rect.w + 8.0f, b.rect.h + 8.0f}, 10.0f,
+                2.0f, theme::kText);
+        }
+        DrawText(painter, text, b.label, type::kButton, TextWeight::kMedium, theme::kText,
+                 b.rect.CenterX(), b.rect.CenterY() + 4.5f, HAlign::kCenter,
+                 static_cast<int>(b.rect.w - 4.0f));
+    }
+}
+
 void SettingsView::SetPreferences(core::Preferences prefs) {
     prefs_ = prefs;
+    SyncFocusList(BuildLayout(viewportW_, viewportH_));
+    dirty_ = true;
+}
+
+void SettingsView::SetGlobalClick(
+    const platform::GlobalClickUiState& state, bool explanationVisible) {
+    globalClick_ = state;
+    globalClickExplanationVisible_ = explanationVisible;
     SyncFocusList(BuildLayout(viewportW_, viewportH_));
     dirty_ = true;
 }
@@ -71,6 +123,8 @@ SettingsLayout SettingsView::BuildLayout(float w, float h) const {
     in.viewportH = h;
     in.scrollY = ClampSettingsScroll(scrollY_, lastContentHeight_, h);
     in.prefs = prefs_;
+    in.globalClick = globalClick_;
+    in.globalClickExplanationVisible = globalClickExplanationVisible_;
     in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
     return BuildSettingsLayout(in);
 }
@@ -102,8 +156,19 @@ SettingsChange SettingsView::ChangeForSegment(const std::string& focusId) const 
         case PreferenceField::kLanguage:
             c.language = (value == "es") ? Language::kEs : Language::kEn;
             break;
+        case PreferenceField::kClickCounting:
+            c.clickCounting = core::ParseClickCountingMode(value);
+            break;
     }
     return c;
+}
+
+bool SettingsView::ChangeIsAllowed(const SettingsChange& change) const {
+    if (change.field == PreferenceField::kClickCounting &&
+        change.clickCounting == ClickCountingMode::kAnywhere) {
+        return globalClick_.anywhereSelectable;
+    }
+    return true;
 }
 
 SettingsChange SettingsView::ChangeForStep(PreferenceField field, int dir, bool wrap) const {
@@ -130,6 +195,13 @@ SettingsChange SettingsView::ChangeForStep(PreferenceField field, int dir, bool 
             c.language = (next == 0) ? Language::kEn : Language::kEs;
             break;
         }
+        case PreferenceField::kClickCounting: {
+            // segmentos [Nimvlet only, Anywhere]; Nimvlet only = índice 0.
+            const int idx = prefs_.clickCounting == ClickCountingMode::kNimvletOnly ? 0 : 1;
+            const int next = wrap ? (idx + step + 2) % 2 : std::clamp(idx + step, 0, 1);
+            c.clickCounting = (next == 0) ? ClickCountingMode::kNimvletOnly : ClickCountingMode::kAnywhere;
+            break;
+        }
     }
     return c;
 }
@@ -147,9 +219,23 @@ SettingsViewResult SettingsView::ActivateWidget(const std::string& focusId) {
         r.dirty = true;
         return r;
     }
+    if (const GlobalClickAction action = ParseGlobalClickAction(focusId);
+        action != GlobalClickAction::kNone) {
+        // Los botones del flujo de permiso (Block 11A). NO son un cambio
+        // de preferencia: src/app decide qué hacer con cada uno —
+        // "Continue" es el único camino que puede pedir el permiso
+        // nativo (brief §8).
+        r.hasGlobalClickAction = true;
+        r.globalClickAction = action;
+        r.dirty = true;
+        return r;
+    }
     if (StartsWith(focusId, "opt:")) {
-        r.hasChange = true;
-        r.change = ChangeForSegment(focusId);
+        const SettingsChange change = ChangeForSegment(focusId);
+        if (ChangeIsAllowed(change)) {
+            r.hasChange = true;
+            r.change = change;
+        }
         r.dirty = true;
         return r;
     }
@@ -159,8 +245,11 @@ SettingsViewResult SettingsView::ActivateWidget(const std::string& focusId) {
         // tecla).
         PreferenceField field = PreferenceField::kSize;
         if (ParseField(focusId.substr(4), field)) {
-            r.hasChange = true;
-            r.change = ChangeForStep(field, +1, /*wrap=*/true);
+            const SettingsChange change = ChangeForStep(field, +1, /*wrap=*/true);
+            if (ChangeIsAllowed(change)) {
+                r.hasChange = true;
+                r.change = change;
+            }
             r.dirty = true;
         }
         return r;
@@ -188,7 +277,7 @@ SettingsViewResult SettingsView::OnMouseDown(float x, float y) {
         dirty_ = true;  // por si había chrome de foco visible que ahora se apaga
         return SettingsViewResult{};
     }
-    if (StartsWith(hit, "nav:")) {
+    if (StartsWith(hit, "nav:") || StartsWith(hit, "gc:")) {
         focus_.Focus(hit);
     } else if (StartsWith(hit, "opt:")) {
         // El foco de teclado vive en la FILA, no en el segmento.
@@ -248,8 +337,14 @@ SettingsViewResult SettingsView::OnKey(int sdlKeycode, bool shiftHeld) {
             if (onRow) {
                 PreferenceField field = PreferenceField::kSize;
                 if (ParseField(focused.substr(4), field)) {
-                    r.hasChange = true;
-                    r.change = ChangeForStep(field, dir, /*wrap=*/false);
+                    const SettingsChange change = ChangeForStep(field, dir, /*wrap=*/false);
+                    // Una opción no elegible en este sistema ("Anywhere"
+                    // sin capacidad) se comporta como el extremo del
+                    // control: la flecha no hace nada.
+                    if (ChangeIsAllowed(change)) {
+                        r.hasChange = true;
+                        r.change = change;
+                    }
                 }
             } else {
                 // Sobre una pestaña de nav: ← → recorren el foco (igual
@@ -270,6 +365,16 @@ SettingsViewResult SettingsView::OnKey(int sdlKeycode, bool shiftHeld) {
             keyboardFocus_ = true;
             return ActivateWidget(focus_.FocusedId());
         case SDLK_ESCAPE:
+            if (globalClickExplanationVisible_) {
+                // La explicación es un paso modal chico: Esc la descarta
+                // (equivale a "Not now") antes de poder cerrar la
+                // ventana — mismo patrón que Esc saliendo del submodo
+                // del Starter Shop antes de cerrar.
+                r.hasGlobalClickAction = true;
+                r.globalClickAction = GlobalClickAction::kNotNow;
+                r.dirty = true;
+                return r;
+            }
             r.requestClose = true;
             return r;
         default:
@@ -320,7 +425,7 @@ void SettingsView::Render(
             }
 
             for (const SettingsSegment& seg : row.segments) {
-                const bool hovered = hoverId_ == seg.focusId;
+                const bool hovered = seg.enabled && hoverId_ == seg.focusId;
                 if (seg.selected) {
                     painter.FillRoundRect(seg.rect, 7.0f, theme::kText);
                 } else {
@@ -329,10 +434,16 @@ void SettingsView::Render(
                     }
                     painter.StrokeRoundRect(seg.rect, 7.0f, 1.25f, theme::kHairline);
                 }
+                // Un segmento apagado ("Anywhere" sin capacidad de
+                // plataforma) se dibuja con la tinta más tenue del tema:
+                // se ve que la opción EXISTE, y la línea de estado de
+                // abajo explica por qué no se puede elegir acá.
+                const UiColor segInk = seg.selected      ? theme::kBackground
+                                       : seg.enabled     ? theme::kTextMuted
+                                                         : theme::kHairline;
                 DrawText(painter, text, seg.label, type::kButton,
-                         seg.selected ? TextWeight::kSemibold : TextWeight::kMedium,
-                         seg.selected ? theme::kBackground : theme::kTextMuted, seg.rect.CenterX(),
-                         seg.rect.CenterY() + 4.5f, HAlign::kCenter,
+                         seg.selected ? TextWeight::kSemibold : TextWeight::kMedium, segInk,
+                         seg.rect.CenterX(), seg.rect.CenterY() + 4.5f, HAlign::kCenter,
                          static_cast<int>(seg.rect.w - 4.0f));
             }
 
@@ -341,6 +452,8 @@ void SettingsView::Render(
                          theme::kTextMuted, row.hintAnchor.x, row.hintAnchor.y + 11.0f, HAlign::kLeft,
                          static_cast<int>(row.hintAnchor.w));
             }
+
+            DrawNotice(painter, text, row.notice, focusedId);
         }
     }
 

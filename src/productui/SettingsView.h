@@ -25,6 +25,10 @@ struct SettingsChange {
     int opacityPercent = 100;
     bool lockPosition = false;
     core::Language language = core::Language::kEn;
+    // Block 11A. Un `kAnywhere` acá es una PETICIÓN, no un hecho: src/app
+    // la evalúa (platform::EvaluateGlobalClickRequest) y puede responder
+    // mostrando primero la explicación en vez de aplicarla.
+    core::ClickCountingMode clickCounting = core::ClickCountingMode::kNimvletOnly;
 };
 
 struct SettingsViewResult {
@@ -34,6 +38,11 @@ struct SettingsViewResult {
     ProductSection targetSection = ProductSection::kCollection;
     bool hasChange = false;
     SettingsChange change;
+    // Block 11A: una acción del flujo de permiso (Continue / Not now /
+    // Check again). Separada de `change` a propósito — no muta ninguna
+    // preferencia por sí misma; src/app decide qué hacer.
+    bool hasGlobalClickAction = false;
+    GlobalClickAction globalClickAction = GlobalClickAction::kNone;
 };
 
 // La sección SETTINGS del Product UI (Block 08). Misma arquitectura que
@@ -59,6 +68,12 @@ class SettingsView {
     // usa en las otras vistas). Equivale a SetPreferences con el mismo
     // resto de campos.
     void SetLanguage(core::Language language);
+
+    // Estado GENÉRICO del monitor de clics globales + si la explicación
+    // de primera parte está visible (Block 11A). Lo empuja src/app: la
+    // vista NUNCA enciende la explicación sola ni deduce el estado del
+    // permiso — igual que nunca muta sus propias preferencias.
+    void SetGlobalClick(const platform::GlobalClickUiState& state, bool explanationVisible);
 
     const core::Preferences& Preferences() const { return prefs_; }
 
@@ -100,8 +115,18 @@ class SettingsView {
     SettingsViewResult ActivateWidget(const std::string& focusId);
     SettingsChange ChangeForSegment(const std::string& focusId) const;
     SettingsChange ChangeForStep(core::PreferenceField field, int dir, bool wrap) const;
+    // false para un `kAnywhere` pedido en un sistema sin capacidad — así
+    // ni el teclado ni el mouse pueden elegir una opción que la línea de
+    // estado ya declara no disponible.
+    bool ChangeIsAllowed(const SettingsChange& change) const;
+    // Dibuja el bloque de aviso de una fila (estado + párrafo + botones).
+    void DrawNotice(
+        UiPainter& painter, TextCache& text, const SettingsNotice& notice,
+        const std::string& focusedId) const;
 
     core::Preferences prefs_;
+    platform::GlobalClickUiState globalClick_;
+    bool globalClickExplanationVisible_ = false;
     // Cache del balance CANÓNICO: lo fija Render() cada frame (valor de
     // ProductWindow) para que BuildLayout() lo pase a la cabecera
     // compartida — igual que Collection / Shop.

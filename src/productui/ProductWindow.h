@@ -38,6 +38,11 @@ struct ProductWindowEvent {
     PurchaseRequest starterPurchase;  // lleva la IDENTIDAD EXACTA {petId, variantId}
     bool hasPreferenceChange = false;  // el owner cambió una preferencia en Settings (Block 08)
     SettingsChange preferenceChange;
+    // El owner tocó un botón del flujo de permiso del conteo global
+    // (Block 11A). NO es un cambio de preferencia — ver
+    // productui::GlobalClickAction.
+    bool hasGlobalClickAction = false;
+    GlobalClickAction globalClickAction = GlobalClickAction::kNone;
     bool hasOnboardingSelection = false;  // el owner confirmó un starter en el onboarding (Block 09A)
     catalog::PetIdentity onboardingSelection;
 };
@@ -97,6 +102,11 @@ class ProductWindow {
     // preferencia cambia — venga de Settings o del menú rápido (Block 08
     // §7, sincronización bidireccional). No-op si está cerrada.
     void SetPreferences(const core::Preferences& prefs);
+
+    // Estado GENÉRICO del monitor de clics globales + si la explicación
+    // de primera parte está visible (Block 11A). Lo empuja src/app junto
+    // con las preferencias. No-op si está cerrada.
+    void SetGlobalClick(const platform::GlobalClickUiState& state, bool explanationVisible);
 
     // --- Modo ONBOARDING de primer arranque (Block 09A) --------------
     //

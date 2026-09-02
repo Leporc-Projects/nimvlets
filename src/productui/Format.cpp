@@ -7,8 +7,8 @@ namespace nimvlets::productui {
 namespace {
 
 // Sustituye TODAS las apariciones de `token` en `s` por `value`. Los
-// tokens ("{n}", "{pet}") no se solapan con `value`, así que un solo
-// paso alcanza.
+// tokens ("{n}", "{pet}", "{permission}") no se solapan con `value`, así
+// que un solo paso alcanza.
 std::string Substitute(std::string s, const std::string& token, const std::string& value) {
     std::string::size_type pos = 0;
     while ((pos = s.find(token, pos)) != std::string::npos) {
@@ -58,6 +58,11 @@ std::string FormatSpendPrompt(std::uint64_t price, const std::string& petName, c
 
 std::string FormatOnboardingConfirmPrompt(const std::string& petName, core::Language lang) {
     return Substitute(core::Localized(core::StringKey::kOnboardingConfirmStarter, lang), "{pet}", petName);
+}
+
+std::string FormatWithPermission(
+    core::StringKey key, const std::string& permissionName, core::Language lang) {
+    return Substitute(core::Localized(key, lang), "{permission}", permissionName);
 }
 
 }  // namespace nimvlets::productui

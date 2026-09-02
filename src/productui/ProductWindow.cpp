@@ -183,6 +183,11 @@ void ProductWindow::SetPreferences(const core::Preferences& prefs) {
     settingsView_.SetPreferences(prefs);
 }
 
+void ProductWindow::SetGlobalClick(
+    const platform::GlobalClickUiState& state, bool explanationVisible) {
+    settingsView_.SetGlobalClick(state, explanationVisible);
+}
+
 void ProductWindow::EnterOnboarding(catalog::OnboardingOffer offer) {
     onboarding_ = true;
     onboardingView_.SetOffer(std::move(offer));
@@ -491,6 +496,10 @@ ProductWindowEvent ProductWindow::HandleEvent(const SDL_Event& event) {
         if (r.hasChange) {
             out.hasPreferenceChange = true;
             out.preferenceChange = r.change;
+        }
+        if (r.hasGlobalClickAction) {
+            out.hasGlobalClickAction = true;
+            out.globalClickAction = r.globalClickAction;
         }
         if (r.requestClose) {
             out.closeRequested = true;
