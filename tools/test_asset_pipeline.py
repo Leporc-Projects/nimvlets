@@ -1912,32 +1912,95 @@ class NidirGoldenControlTest(unittest.TestCase):
 
 
 class PrivacyInvariantTest(unittest.TestCase):
-    """AGENTS.md §5/§14 son contratos duros: nada en el runtime instala
-    un hook global de input, captura pantalla, ni pide un permiso de
-    TCC. La pasada de estabilización de Block 05 tocó justamente el
-    código de plataforma de macOS donde un atajo así sería tentador
-    (había una alternativa técnicamente viable -- un monitor global de
-    `NSEvent` -- y se descartó explícitamente por esta razón, ver
-    DEC-086), así que el contrato se fija en un test en vez de quedar
-    solo escrito.
+    """AGENTS.md §5 es un contrato duro: nada en el runtime lee teclado,
+    captura pantalla, enumera apps, ni pide un permiso de TCC fuera del
+    ÚNICO caso que un brief autorizó explícitamente.
+
+    **Actualización de Block 11A.** Hasta este bloque, `CGEventTapCreate`
+    estaba prohibido de plano (AGENTS.md §14 lo vetaba "hasta que un
+    brief lo autorice explícitamente"). El brief de Block 11A lo
+    autoriza, y SOLO para el modo opt-in de conteo de clics globales. El
+    contrato no se relaja: se vuelve MÁS específico. En vez de "ninguna
+    parte de src/ menciona un event tap", ahora se fija que:
+
+      - el event tap existe en EXACTAMENTE un archivo
+        (src/platform/macos/GlobalClickMonitor.mm), nunca en ningún otro;
+      - es LISTEN-ONLY (`kCGEventTapOptionListenOnly`) -- nunca puede
+        modificar, suprimir ni retrasar el clic del usuario;
+      - su máscara es EXACTAMENTE `CGEventMaskBit(kCGEventLeftMouseDown)`
+        -- sin teclado, sin botón derecho/medio, sin scroll, sin motion;
+      - su callback NO lee coordenadas, ni flags, ni timestamp, ni la
+        app/ventana destino;
+      - el permiso que pide es **Input Monitoring**
+        (`CGRequestListenEventAccess`), NO Accessibility
+        (`AXIsProcessTrusted`, que sigue prohibido en todo src/), NO
+        Screen Recording;
+      - el pedido de permiso ocurre en un solo lugar, para que sea
+        auditable de un vistazo que ningún camino de arranque lo llama.
 
     Vive en esta suite porque es la única suite de Python del repo; no
     tiene nada que ver con assets. Es un chequeo de FUENTE, no de
     comportamiento -- no puede probar que no aparezca un diálogo de
     permiso, pero sí que no exista ninguna de las APIs que lo
-    provocarían."""
+    provocarían, y que la única autorizada esté acotada como corresponde."""
 
-    # Cada entrada: (símbolo prohibido, por qué).
+    # El ÚNICO archivo donde el brief de Block 11A autoriza un event tap.
+    GLOBAL_CLICK_ADAPTER = "src/platform/macos/GlobalClickMonitor.mm"
+
+    # Cada entrada: (símbolo prohibido, por qué). Prohibido en TODO src/,
+    # sin excepción de archivo.
     FORBIDDEN = (
         ("addGlobalMonitorForEvents", "monitor global de NSEvent -- hook de input system-wide"),
         ("addLocalMonitorForEvents", "monitor de NSEvent a nivel app -- innecesario y fuera de contrato"),
-        ("CGEventTapCreate", "event tap -- requiere Accessibility"),
         ("AXIsProcessTrusted", "consulta/solicitud de permiso de Accessibility"),
-        ("IOHIDManager", "acceso HID crudo -- requiere Input Monitoring"),
+        ("AXUIElement", "API de Accessibility"),
+        ("IOHIDManager", "acceso HID crudo"),
         ("CGWindowListCreateImage", "captura de pantalla"),
         ("CGDisplayCreateImage", "captura de pantalla"),
+        ("CGWindowListCopyWindowInfo", "enumeracion de ventanas de otras apps"),
         ("SCStream", "ScreenCaptureKit -- captura de pantalla"),
+        ("CGRequestScreenCaptureAccess", "permiso de Screen Recording"),
+        ("CGRequestPostEventAccess", "permiso para SINTETIZAR eventos -- Nimvlets solo observa"),
+        ("CGEventPost", "sintesis de eventos de input"),
+        ("WH_KEYBOARD_LL", "hook global de teclado (Win32)"),
+        ("kCGEventKeyDown", "observacion de teclado"),
+        ("kCGEventKeyUp", "observacion de teclado"),
+        ("NSWorkspace", "enumeracion / seguimiento de apps"),
+        ("GetForegroundWindow", "que aplicacion esta enfocada (Win32)"),
     )
+
+    # Solo pueden aparecer DENTRO de GLOBAL_CLICK_ADAPTER.
+    ADAPTER_ONLY = (
+        ("CGEventTapCreate", "event tap"),
+        ("CGRequestListenEventAccess", "pedido del permiso de Input Monitoring"),
+        ("CGPreflightListenEventAccess", "preflight del permiso de Input Monitoring"),
+    )
+
+    @staticmethod
+    def _code_only(text: str) -> str:
+        """El codigo, sin comentarios. Este guard mide lo que el programa
+        HACE, no lo que la prosa MENCIONA: los adapters de Windows/Linux y
+        el propio adapter de macOS nombran en comentarios justamente las
+        APIs que NO usan (o por que las usan asi), y eso debe seguir
+        siendo legible sin disparar el guard."""
+        out = []
+        in_block = False
+        for line in text.splitlines():
+            stripped = line.lstrip()
+            if in_block:
+                if "*/" in line:
+                    in_block = False
+                    line = line.split("*/", 1)[1]
+                else:
+                    continue
+            if stripped.startswith("//"):
+                continue
+            if "/*" in line and "*/" not in line:
+                in_block = True
+                line = line.split("/*", 1)[0]
+            line = line.split("//", 1)[0]
+            out.append(line)
+        return "\n".join(out)
 
     def _runtime_sources(self) -> list[str]:
         paths = []
@@ -1947,20 +2010,102 @@ class PrivacyInvariantTest(unittest.TestCase):
                     paths.append(os.path.join(root, name))
         return paths
 
+    def _read_code(self, rel: str) -> str:
+        with open(os.path.join(_REPO_ROOT, rel), "r", encoding="utf-8") as f:
+            return self._code_only(f.read())
+
     def test_no_global_input_hook_or_screen_capture_in_the_runtime(self) -> None:
         sources = self._runtime_sources()
         self.assertGreater(len(sources), 20, "source scan found suspiciously few files")
+        offenders = []
         for path in sources:
-            # El check GUI de click-through no se envía con el producto,
-            # pero igual no usa ninguno de estos símbolos, así que no se
-            # exceptúa: si algún día los usara, queremos enterarnos.
+            rel = os.path.relpath(path, _REPO_ROOT)
             with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
+                code = self._code_only(f.read())
             for symbol, why in self.FORBIDDEN:
-                self.assertNotIn(
-                    symbol, text,
-                    f"{os.path.relpath(path, _REPO_ROOT)} uses '{symbol}' ({why}) -- "
-                    "prohibido por AGENTS.md §5/§14")
+                if symbol in code:
+                    offenders.append(f"{rel}: '{symbol}' ({why})")
+        self.assertEqual(
+            offenders, [],
+            "APIs prohibidas por AGENTS.md S5 encontradas en el runtime: " + "; ".join(offenders))
+
+    def test_event_tap_lives_only_in_the_authorized_adapter(self) -> None:
+        """El event tap autorizado por Block 11A no se puede filtrar a
+        ningun otro archivo -- ni a src/app, ni a src/productui, ni a otro
+        adapter de plataforma."""
+        adapter_rel = self.GLOBAL_CLICK_ADAPTER.replace("/", os.sep)
+        offenders = []
+        for path in self._runtime_sources():
+            rel = os.path.relpath(path, _REPO_ROOT)
+            if rel == adapter_rel:
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                code = self._code_only(f.read())
+            for symbol, why in self.ADAPTER_ONLY:
+                if symbol in code:
+                    offenders.append(f"{rel}: '{symbol}' ({why})")
+        self.assertEqual(
+            offenders, [],
+            f"Block 11A autoriza estas APIs SOLO en {self.GLOBAL_CLICK_ADAPTER}: " + "; ".join(offenders))
+
+    def test_global_click_tap_is_listen_only_and_primary_mouse_down_only(self) -> None:
+        """El corazon del contrato de privacidad de Block 11A, fijado
+        contra la fuente real del adapter."""
+        code = self._read_code(self.GLOBAL_CLICK_ADAPTER)
+
+        # Listen-only, nunca un tap que pueda alterar el input.
+        self.assertIn("kCGEventTapOptionListenOnly", code)
+        self.assertNotIn("kCGEventTapOptionDefault", code, "el tap NUNCA puede ser modificador")
+
+        # Una sola mascara, un solo evento: el boton primario al bajar.
+        self.assertIn("CGEventMaskBit(kCGEventLeftMouseDown)", code)
+        for other in (
+            "kCGEventRightMouseDown", "kCGEventOtherMouseDown", "kCGEventScrollWheel",
+            "kCGEventMouseMoved", "kCGEventLeftMouseDragged", "kCGEventFlagsChanged",
+            "kCGEventLeftMouseUp",
+        ):
+            self.assertNotIn(
+                other, code,
+                f"la mascara del tap debe ser SOLO kCGEventLeftMouseDown (encontrado {other})")
+
+        # El callback no lee NADA del evento mas alla de su tipo.
+        for reader in (
+            "CGEventGetLocation", "CGEventGetIntegerValueField", "CGEventGetDoubleValueField",
+            "CGEventGetFlags", "CGEventGetTimestamp", "kCGEventTargetUnixProcessID",
+            "kCGMouseEventNumber",
+        ):
+            self.assertNotIn(
+                reader, code,
+                f"el callback del tap no debe leer '{reader}' -- solo el TIPO del evento")
+
+        # Input Monitoring, no Accessibility, y el pedido en UN solo lugar.
+        self.assertIn("CGPreflightListenEventAccess", code)
+        self.assertEqual(
+            code.count("CGRequestListenEventAccess("), 1,
+            "el pedido de permiso debe ocurrir en exactamente un lugar, para que sea auditable")
+
+    def test_forwarded_global_click_carries_no_payload(self) -> None:
+        """La firma del callback es la garantia estructural: no se puede
+        filtrar lo que no se puede transportar. Sin coordenadas, sin
+        boton, sin timestamp, sin app -- solo 'paso un clic primario'."""
+        header = self._read_code("src/platform/GlobalClickMonitor.h")
+        self.assertIn(
+            "using GlobalPrimaryClickCallback = void (*)(void* userData);", header,
+            "el callback de clic global no debe ganar NINGUN parametro de datos")
+
+    def test_click_counting_persists_only_the_requested_mode(self) -> None:
+        """Lo unico que esta feature escribe en disco es la preferencia
+        del owner. Ni coordenadas, ni timestamps, ni historial, ni
+        contadores por fuente, ni el estado del permiso."""
+        state = self._read_code("src/persistence/AppState.h")
+        self.assertIn("std::string clickCountingMode;", state)
+        for banned in (
+            "clickHistory", "clickTimestamps", "lastClickX", "lastClickY", "globalClickCount",
+            "localClickCount", "permissionGranted",
+        ):
+            self.assertNotIn(
+                banned, state,
+                f"AppState no debe persistir '{banned}' (docs/PRIVACY_SECURITY.md SH)")
 
     def test_click_through_still_uses_only_a_cursor_position_query(self) -> None:
         """El único dato de entrada global que este producto lee es la

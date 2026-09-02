@@ -219,9 +219,48 @@ bool TestLanguageSubmenu() {
     return true;
 }
 
+// Block 11A, brief §10: el menú rápido NO gana "Click counting". Es una
+// decisión de producto explícita —Settings se vuelve deliberadamente más
+// capaz que el menú— y esta regresión existe para que agregar la
+// preferencia a core::Preferences no la filtre al menú por inercia.
+bool TestQuickMenuHasNoClickCountingOption() {
+    for (const Language lang : {Language::kEn, Language::kEs}) {
+        ShellState s;
+        s.language = lang;
+        s.currentPetName = "Nidir";
+        const QuickMenuModel m = BuildQuickMenuModel(s);
+
+        // Ninguna etiqueta, en ningún nivel, menciona el conteo de clics
+        // ni el permiso que necesitaría.
+        const char* forbidden[] = {"Click counting", "Conteo de clics", "Anywhere",
+                                   "En cualquier lugar", "Input Monitoring", "Interaction",
+                                   "Interacción"};
+        for (const MenuItem& it : m.items) {
+            for (const char* bad : forbidden) {
+                NIMVLETS_CHECK(it.label.find(bad) == std::string::npos);
+            }
+            for (const MenuItem& sub : it.submenu) {
+                for (const char* bad : forbidden) {
+                    NIMVLETS_CHECK(sub.label.find(bad) == std::string::npos);
+                }
+            }
+        }
+
+        // Y el conjunto de submenús sigue siendo exactamente el de Block
+        // 06.1: Size, Opacity, Language — ninguno nuevo.
+        int submenus = 0;
+        for (const MenuItem& it : m.items) {
+            submenus += it.kind == MenuItemKind::kSubmenu ? 1 : 0;
+        }
+        NIMVLETS_CHECK(submenus == 3);
+    }
+    return true;
+}
+
 }  // namespace
 
 void RegisterQuickMenuModelTests(testing::TestRunner& runner) {
+    runner.Add("QuickMenuModel/QuickMenuHasNoClickCountingOption", TestQuickMenuHasNoClickCountingOption);
     runner.Add("QuickMenuModel/HeaderShowsPetNameOrFallback", TestHeaderShowsPetNameOrFallback);
     runner.Add("QuickMenuModel/ShowHideLabelFollowsVisibility", TestShowHideLabelFollowsVisibility);
     runner.Add("QuickMenuModel/CollectionAndQuitArePresent", TestCollectionAndQuitArePresent);

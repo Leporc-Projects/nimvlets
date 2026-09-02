@@ -3,6 +3,7 @@
 #include "catalog/CollectionModel.h"
 #include "catalog/PetCatalog.h"
 #include "catalog/PetEntitlement.h"
+#include "core/ClickCounting.h"
 #include "persistence/AppState.h"
 #include "persistence/AppStateSerializer.h"
 
@@ -205,6 +206,20 @@ std::vector<std::uint8_t> BuildV4(
     PutStr(b, "medium");  // sizeChoice
     PutU32(b, 100);       // opacityPercent
     PutStr(b, language);
+    return b;
+}
+
+// v5 (Block 09A): cuerpo v4 + el byte de onboardingLifecycle, y SIN el
+// string de modo de conteo de clics. Es el save "actual" del bloque
+// anterior — el que Block 11A tiene que migrar a v6 sin tocar nada.
+std::vector<std::uint8_t> BuildV5(
+    const std::string& activePetId, const std::string& activeVariantId,
+    const std::vector<std::pair<std::string, std::string>>& ownedPairs, const std::string& language,
+    std::uint8_t lifecycleByte) {
+    std::vector<std::uint8_t> b = BuildV4(activePetId, activeVariantId, ownedPairs, language);
+    const std::uint32_t five = 5;
+    std::memcpy(b.data() + 8, &five, 4);
+    PutU8(b, lifecycleByte);
     return b;
 }
 
@@ -473,9 +488,142 @@ bool TestCleanV4IsIdempotentUnderExpansion() {
     return true;
 }
 
+// --- Block 11A: la frontera histórica de propiedad sigue CONGELADA
+//     al subir el schema a v6 (brief §12) ---------------------------
+//
+// El riesgo concreto que el brief pide descartar: escribir la migración
+// como `if (oldSchema < currentSchema) expandir Frin`. Con
+// kCurrentSchemaVersion == 6, ESO haría que un save v4 o v5 —propiedad
+// ya explícita— volviera a pasar por la expansión histórica y ganara
+// variantes que su dueño nunca compró. El gate real es
+// `< kFirstExplicitEntitlementSchema` (== 4), un umbral SEMÁNTICO fijo
+// que este bump no mueve.
+
+// Un v4 con `{frin, ""}` (propiedad explícita "todo Frin", o un archivo
+// tocado a mano) NO se expande al migrar a v6.
+bool TestV4ToV6DoesNotGainNewFrinVariants() {
+    const std::vector<std::uint8_t> buf =
+        BuildV4("frin", "male", {{"bunny", ""}, {"frin", ""}}, "en");
+
+    // El gate del camino real no se dispara: 4 no es < 4.
+    NIMVLETS_CHECK(!(4u < AppState::kFirstExplicitEntitlementSchema));
+    // ...pero SÍ se dispararía con un gate mal escrito contra la versión
+    // actual — que ahora es 6. Esta línea documenta el bug que este test
+    // existe para atrapar.
+    NIMVLETS_CHECK(4u < AppState::kCurrentSchemaVersion);
+
+    const Ents got = MigrateThroughAppPath(buf);
+    NIMVLETS_CHECK((got == Ents{NoVar("bunny"), NoVar("frin")}));
+    // NO aparecieron {frin,"male"} ni {frin,"female"}: nada se expandió.
+    NIMVLETS_CHECK(got.size() == 2);
+    for (const PetEntitlement& e : got) {
+        NIMVLETS_CHECK(!(e.petId == "frin" && !e.variantId.empty()));
+    }
+    return true;
+}
+
+// Un v5 (el save del bloque anterior) tampoco reinterpreta propiedad al
+// migrar a v6 — ni expande, ni reordena, ni inventa.
+bool TestV5ToV6DoesNotReinterpretOwnership() {
+    const std::vector<std::uint8_t> buf =
+        BuildV5("frin", "female", {{"frin", "female"}}, "es", /*lifecycleByte=*/2);
+
+    NIMVLETS_CHECK(!(5u < AppState::kFirstExplicitEntitlementSchema));
+    NIMVLETS_CHECK(5u < AppState::kCurrentSchemaVersion);  // el gate ingenuo fallaría acá
+
+    const Ents got = MigrateThroughAppPath(buf);
+    // EXACTAMENTE la variante que tenía. Un usuario que solo posee Frin
+    // hembra NO recibe el macho de regalo por actualizar.
+    NIMVLETS_CHECK((got == Ents{Var("frin", "female")}));
+    NIMVLETS_CHECK(!HasBareFrin(got));
+    return true;
+}
+
+// Lo que SÍ sigue funcionando: un v1/v2/v3 genuino todavía se expande al
+// conjunto histórico congelado. El bump a v6 no rompió la migración que
+// sí debe correr.
+bool TestGenuineLegacySavesStillExpandUnderV6() {
+    for (const std::uint32_t v : {2u, 3u}) {
+        const Ents got = MigrateThroughAppPath(BuildLegacyOwned(v, "frin", {"frin"}, "en"));
+        NIMVLETS_CHECK((got == Ents{Var("frin", "female"), Var("frin", "male")}));
+        NIMVLETS_CHECK(!HasBareFrin(got));
+    }
+    return true;
+}
+
+// Todo lo demás de un v4/v5 sobrevive EXACTO a la migración a v6, y el
+// modo de conteo de clics arranca en local (brief §12).
+bool TestV4AndV5MigrateToV6WithEverythingElseIntact() {
+    // v4: sin byte de lifecycle -> kLegacyComplete (contrato de Block 09A,
+    // intacto).
+    {
+        const AppState st = DecodeFull(BuildV4("bunny", "", {{"bunny", ""}}, "es"));
+        NIMVLETS_CHECK(st.schemaVersion == AppState::kCurrentSchemaVersion);
+        NIMVLETS_CHECK(st.onboardingLifecycle == persistence::OnboardingLifecycle::kLegacyComplete);
+        NIMVLETS_CHECK(st.clickBalance == 100);          // wallet intacto
+        NIMVLETS_CHECK(st.activePetId == "bunny");
+        NIMVLETS_CHECK(st.ownershipSeeded);
+        NIMVLETS_CHECK(st.sizeChoice == "medium");       // preferencias intactas
+        NIMVLETS_CHECK(st.opacityPercent == 100);
+        NIMVLETS_CHECK(!st.lockPosition);
+        NIMVLETS_CHECK(st.language == "es");
+        // El campo nuevo llega VACÍO -> modo local.
+        NIMVLETS_CHECK(st.clickCountingMode.empty());
+        NIMVLETS_CHECK(core::ParseClickCountingMode(st.clickCountingMode) ==
+                       core::ClickCountingMode::kNimvletOnly);
+    }
+    // v5: el lifecycle persistido se conserva TAL CUAL (kCompleted), no
+    // se degrada ni se reinterpreta.
+    {
+        const AppState st =
+            DecodeFull(BuildV5("frin", "male", {{"frin", "male"}}, "en", /*lifecycleByte=*/2));
+        NIMVLETS_CHECK(st.schemaVersion == AppState::kCurrentSchemaVersion);
+        NIMVLETS_CHECK(st.onboardingLifecycle == persistence::OnboardingLifecycle::kCompleted);
+        NIMVLETS_CHECK(st.clickBalance == 100);
+        NIMVLETS_CHECK(st.activePetId == "frin");
+        NIMVLETS_CHECK(st.activeVariantId == "male");
+        NIMVLETS_CHECK(st.language == "en");
+        NIMVLETS_CHECK(core::ParseClickCountingMode(st.clickCountingMode) ==
+                       core::ClickCountingMode::kNimvletOnly);
+    }
+    // Y un v1..v3 tampoco gana conteo global.
+    for (const std::uint32_t v : {2u, 3u}) {
+        const AppState st = DecodeFull(BuildLegacyOwned(v, "bunny", {"bunny"}, "en"));
+        NIMVLETS_CHECK(core::ParseClickCountingMode(st.clickCountingMode) ==
+                       core::ClickCountingMode::kNimvletOnly);
+        NIMVLETS_CHECK(st.onboardingLifecycle == persistence::OnboardingLifecycle::kLegacyComplete);
+    }
+    {
+        const AppState st = DecodeFull(BuildV1("bunny", ""));
+        NIMVLETS_CHECK(core::ParseClickCountingMode(st.clickCountingMode) ==
+                       core::ClickCountingMode::kNimvletOnly);
+    }
+    return true;
+}
+
+// La frontera en sí: `kFirstExplicitEntitlementSchema` es 4 y NO sigue a
+// `kCurrentSchemaVersion`. Si alguien las iguala "para simplificar",
+// este test cae.
+bool TestEntitlementBoundaryConstantStaysFrozenAtFour() {
+    NIMVLETS_CHECK(AppState::kFirstExplicitEntitlementSchema == 4);
+    NIMVLETS_CHECK(AppState::kCurrentSchemaVersion == 6);
+    NIMVLETS_CHECK(AppState::kFirstExplicitEntitlementSchema < AppState::kCurrentSchemaVersion);
+    return true;
+}
+
 }  // namespace
 
 void RegisterEntitlementMigrationTests(testing::TestRunner& runner) {
+    runner.Add("EntitlementMigration/V4ToV6DoesNotGainNewFrinVariants",
+               TestV4ToV6DoesNotGainNewFrinVariants);
+    runner.Add("EntitlementMigration/V5ToV6DoesNotReinterpretOwnership",
+               TestV5ToV6DoesNotReinterpretOwnership);
+    runner.Add("EntitlementMigration/GenuineLegacySavesStillExpandUnderV6",
+               TestGenuineLegacySavesStillExpandUnderV6);
+    runner.Add("EntitlementMigration/V4AndV5MigrateToV6WithEverythingElseIntact",
+               TestV4AndV5MigrateToV6WithEverythingElseIntact);
+    runner.Add("EntitlementMigration/EntitlementBoundaryConstantStaysFrozenAtFour",
+               TestEntitlementBoundaryConstantStaysFrozenAtFour);
     runner.Add("EntitlementMigration/V1LegacyFrinBecomesExplicitVariants", TestV1LegacyFrinBecomesExplicitVariants);
     runner.Add("EntitlementMigration/V2LegacyFrinExpandsToMaleAndFemale", TestV2LegacyFrinExpandsToMaleAndFemale);
     runner.Add("EntitlementMigration/V3LegacyFrinExpandsToMaleAndFemale", TestV3LegacyFrinExpandsToMaleAndFemale);

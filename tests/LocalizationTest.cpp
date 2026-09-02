@@ -205,9 +205,71 @@ bool TestEveryKeyIsPopulatedAndDistinct() {
     return true;
 }
 
+// --- Block 11A: Interaction / conteo de clics global --------------
+
+bool TestInteractionStrings() {
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettingsInteraction, Language::kEn), "Interaction"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kSettingsInteraction, Language::kEs), "Interacción"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCounting, Language::kEn), "Click counting"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCounting, Language::kEs), "Conteo de clics"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCountingNimvletOnly, Language::kEn), "Nimvlet only"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCountingNimvletOnly, Language::kEs), "Solo el Nimvlet"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCountingAnywhere, Language::kEn), "Anywhere"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kClickCountingAnywhere, Language::kEs), "En cualquier lugar"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickContinue, Language::kEn), "Continue"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickContinue, Language::kEs), "Continuar"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickNotNow, Language::kEn), "Not now"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickNotNow, Language::kEs), "Ahora no"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickCheckAgain, Language::kEn), "Check again"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickCheckAgain, Language::kEs), "Comprobar de nuevo"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickActive, Language::kEn), "Active"));
+    NIMVLETS_CHECK(Eq(Localized(StringKey::kGlobalClickActive, Language::kEs), "Activo"));
+    NIMVLETS_CHECK(
+        Eq(Localized(StringKey::kGlobalClickUnavailable, Language::kEn), "Not available on this system"));
+    NIMVLETS_CHECK(
+        Eq(Localized(StringKey::kGlobalClickUnavailable, Language::kEs), "No disponible en este sistema"));
+
+    // "Nimvlet" es marca: NO se traduce ni en la etiqueta del segmento.
+    for (const Language lang : {Language::kEn, Language::kEs}) {
+        NIMVLETS_CHECK(std::string(Localized(StringKey::kClickCountingNimvletOnly, lang))
+                           .find("Nimvlet") != std::string::npos);
+    }
+    return true;
+}
+
+// Las claves que nombran el permiso del OS llevan el placeholder
+// "{permission}" en LOS DOS idiomas — es lo que deja que el adapter
+// aporte "Input Monitoring" sin que src/productui conozca la plataforma
+// (brief §18). Si una traducción se olvidara del token, el usuario
+// leería una frase incompleta.
+bool TestPermissionPlaceholderPresentInBothLanguages() {
+    const StringKey withToken[] = {
+        StringKey::kGlobalClickExplain,
+        StringKey::kGlobalClickPermissionNeeded,
+        StringKey::kGlobalClickGrantHint,
+    };
+    for (const StringKey key : withToken) {
+        for (const Language lang : {Language::kEn, Language::kEs}) {
+            NIMVLETS_CHECK(std::string(Localized(key, lang)).find("{permission}") != std::string::npos);
+        }
+    }
+
+    // Y la explicación de privacidad dice, en los dos idiomas, qué NO se
+    // observa nunca — es el contenido del brief §8, no decoración.
+    NIMVLETS_CHECK(std::string(Localized(StringKey::kGlobalClickExplain, Language::kEn))
+                       .find("never keys") != std::string::npos);
+    NIMVLETS_CHECK(
+        std::string(Localized(StringKey::kGlobalClickExplain, Language::kEs)).find("nunca teclas") !=
+        std::string::npos);
+    return true;
+}
+
 }  // namespace
 
 void RegisterLocalizationTests(testing::TestRunner& runner) {
+    runner.Add("Localization/InteractionStrings", TestInteractionStrings);
+    runner.Add("Localization/PermissionPlaceholderPresentInBothLanguages",
+               TestPermissionPlaceholderPresentInBothLanguages);
     runner.Add("Localization/LanguageIdRoundTrips", TestLanguageIdRoundTrips);
     runner.Add("Localization/UnknownLanguageFallsBackToEnglish", TestUnknownLanguageFallsBackToEnglish);
     runner.Add("Localization/LanguageEndonyms", TestLanguageEndonyms);

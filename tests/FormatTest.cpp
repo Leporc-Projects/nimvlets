@@ -10,6 +10,8 @@ using nimvlets::productui::FormatClickCount;
 using nimvlets::productui::FormatGroupedNumber;
 using nimvlets::productui::FormatNeedMoreClicks;
 using nimvlets::productui::FormatSpendPrompt;
+using nimvlets::productui::FormatWithPermission;
+namespace core = nimvlets::core;
 
 namespace nimvlets::tests {
 
@@ -72,9 +74,40 @@ bool TestSpendPrompt() {
     return true;
 }
 
+// Block 11A: el nombre del permiso del OS entra como DATO en la copy
+// localizada. Es lo que evita un `#ifdef __APPLE__` dentro de
+// src/productui (brief §18).
+bool TestFormatWithPermission() {
+    const std::string en = FormatWithPermission(
+        core::StringKey::kGlobalClickPermissionNeeded, "Input Monitoring", Language::kEn);
+    NIMVLETS_CHECK(en == "Input Monitoring permission needed");
+
+    const std::string es = FormatWithPermission(
+        core::StringKey::kGlobalClickPermissionNeeded, "Input Monitoring", Language::kEs);
+    NIMVLETS_CHECK(es == "Falta el permiso Input Monitoring");
+
+    // El nombre del permiso NO se traduce: es como lo llama el OS.
+    NIMVLETS_CHECK(es.find("Input Monitoring") != std::string::npos);
+
+    // La explicación sustituye TODAS las apariciones y no deja tokens.
+    const std::string explain = FormatWithPermission(
+        core::StringKey::kGlobalClickExplain, "Input Monitoring", Language::kEn);
+    NIMVLETS_CHECK(explain.find("{permission}") == std::string::npos);
+    NIMVLETS_CHECK(explain.find("Input Monitoring") != std::string::npos);
+
+    // Con un nombre vacío el token desaparece y la frase sigue siendo
+    // legible (una plataforma sin permiso nombrado nunca muestra "{}").
+    const std::string blank =
+        FormatWithPermission(core::StringKey::kGlobalClickGrantHint, "", Language::kEn);
+    NIMVLETS_CHECK(blank.find("{permission}") == std::string::npos);
+    NIMVLETS_CHECK(!blank.empty());
+    return true;
+}
+
 }  // namespace
 
 void RegisterFormatTests(testing::TestRunner& runner) {
+    runner.Add("Format/FormatWithPermission", TestFormatWithPermission);
     runner.Add("Format/GroupedNumber", TestGroupedNumber);
     runner.Add("Format/ClickCountWordingEnglish", TestClickCountWordingEnglish);
     runner.Add("Format/ClickCountWordingSpanish", TestClickCountWordingSpanish);

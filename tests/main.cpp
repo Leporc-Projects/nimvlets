@@ -4,6 +4,7 @@
 #include "AppStateSerializerTest.h"
 #include "AppStateStoreTest.h"
 #include "ClickAccountingTest.h"
+#include "ClickCountingPolicyTest.h"
 #include "ClickThroughPolicyTest.h"
 #include "CollectionLayoutTest.h"
 #include "CollectionModelTest.h"
@@ -23,6 +24,7 @@
 #include "DisplayControlsTest.h"
 #include "PreferencesTest.h"
 #include "FocusListTest.h"
+#include "GlobalClickMonitorTest.h"
 #include "TextLayoutTest.h"
 #include "FormatTest.h"
 #include "LocalizationTest.h"
@@ -56,6 +58,8 @@ int main() {
     nimvlets::tests::RegisterAnimationControllerTests(runner);
     nimvlets::tests::RegisterPetPackLoaderTests(runner);
     nimvlets::tests::RegisterClickAccountingTests(runner);
+    nimvlets::tests::RegisterClickCountingPolicyTests(runner);
+    nimvlets::tests::RegisterGlobalClickMonitorTests(runner);
     nimvlets::tests::RegisterAppStateSerializerTests(runner);
     nimvlets::tests::RegisterAppStateStoreTests(runner);
     nimvlets::tests::RegisterPersistenceSchedulerTests(runner);

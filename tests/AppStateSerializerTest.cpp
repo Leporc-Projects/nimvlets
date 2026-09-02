@@ -114,7 +114,7 @@ std::vector<std::uint8_t> BuildOwnershipPairBuffer(
     std::uint32_t schemaVersion, std::uint64_t clickBalance, const std::string& petId,
     const std::string& variantId, bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
     const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language,
-    std::uint8_t onboardingLifecycleByte) {
+    std::uint8_t onboardingLifecycleByte, const std::string& clickCountingMode = "") {
     std::vector<std::uint8_t> buf =
         BuildValidBuffer(schemaVersion, clickBalance, petId, variantId, false, 0, 0);
     AppendUint8(buf, ownershipSeeded ? 1 : 0);
@@ -130,6 +130,9 @@ std::vector<std::uint8_t> BuildOwnershipPairBuffer(
     if (schemaVersion >= 5) {
         AppendUint8(buf, onboardingLifecycleByte);
     }
+    if (schemaVersion >= 6) {
+        AppendString(buf, clickCountingMode);
+    }
     return buf;
 }
 
@@ -144,7 +147,9 @@ std::vector<std::uint8_t> BuildValidV4Buffer(
                                     language, /*onboardingLifecycleByte=*/0);
 }
 
-// Un archivo v5 completo, con el byte de onboardingLifecycle.
+// Un archivo v5 completo, con el byte de onboardingLifecycle (pero SIN
+// el string de modo de conteo de clics) — para los tests de migración
+// v5 -> v6.
 std::vector<std::uint8_t> BuildValidV5Buffer(
     std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
     bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
@@ -153,6 +158,18 @@ std::vector<std::uint8_t> BuildValidV5Buffer(
     return BuildOwnershipPairBuffer(5, clickBalance, petId, variantId, ownershipSeeded,
                                     ownedEntitlements, lockPosition, sizeChoice, opacityPercent,
                                     language, onboardingLifecycleByte);
+}
+
+// Un archivo v6 completo (Block 11A): agrega el string de modo de conteo
+// de clics al final.
+std::vector<std::uint8_t> BuildValidV6Buffer(
+    std::uint64_t clickBalance, const std::string& petId, const std::string& variantId,
+    bool ownershipSeeded, const Ents& ownedEntitlements, bool lockPosition,
+    const std::string& sizeChoice, std::uint32_t opacityPercent, const std::string& language,
+    std::uint8_t onboardingLifecycleByte, const std::string& clickCountingMode) {
+    return BuildOwnershipPairBuffer(6, clickBalance, petId, variantId, ownershipSeeded,
+                                    ownedEntitlements, lockPosition, sizeChoice, opacityPercent,
+                                    language, onboardingLifecycleByte, clickCountingMode);
 }
 
 bool TestDefaultAppStateRoundTrips() {
@@ -387,6 +404,114 @@ bool TestV5RoundTrips() {
     return true;
 }
 
+// --- Block 11A: schema v6, modo de conteo de clics ----------------
+
+bool TestV6ClickCountingModeRoundTrips() {
+    AppState original;
+    original.clickBalance = 4242;
+    original.activePetId = "nidir";
+    original.ownershipSeeded = true;
+    original.ownedEntitlements = {OwnedEntitlement{"nidir", ""}};
+    original.sizeChoice = "large";
+    original.opacityPercent = 70;
+    original.lockPosition = true;
+    original.language = "es";
+    original.onboardingLifecycle = nimvlets::persistence::OnboardingLifecycle::kCompleted;
+    original.clickCountingMode = "anywhere";
+
+    const std::vector<std::uint8_t> bytes = SerializeAppState(original);
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(DeserializeAppState(bytes.data(), bytes.size(), decoded, error));
+    NIMVLETS_CHECK(decoded == original);
+    NIMVLETS_CHECK(decoded.clickCountingMode == "anywhere");
+
+    // Determinismo byte a byte, igual que todo el resto del formato.
+    NIMVLETS_CHECK(SerializeAppState(decoded) == bytes);
+
+    // Un buffer v6 hecho a mano parsea idéntico (independiente del
+    // serializador: el test no lo verifica contra sí mismo).
+    const std::vector<std::uint8_t> handmade = BuildValidV6Buffer(
+        4242, "nidir", "", true, {OwnedEntitlement{"nidir", ""}}, true, "large", 70, "es",
+        /*onboardingLifecycleByte=*/2, "anywhere");
+    AppState fromHandmade;
+    NIMVLETS_CHECK(DeserializeAppState(handmade.data(), handmade.size(), fromHandmade, error));
+    NIMVLETS_CHECK(fromHandmade == original);
+
+    // "nimvlet_only" explícito y "" (nunca elegido) son estados
+    // DISTINTOS en disco, y los dos se leen como modo local.
+    original.clickCountingMode = "nimvlet_only";
+    const std::vector<std::uint8_t> local = SerializeAppState(original);
+    AppState decodedLocal;
+    NIMVLETS_CHECK(DeserializeAppState(local.data(), local.size(), decodedLocal, error));
+    NIMVLETS_CHECK(decodedLocal.clickCountingMode == "nimvlet_only");
+    NIMVLETS_CHECK(decodedLocal == original);
+
+    original.clickCountingMode.clear();
+    const std::vector<std::uint8_t> unset = SerializeAppState(original);
+    AppState decodedUnset;
+    NIMVLETS_CHECK(DeserializeAppState(unset.data(), unset.size(), decodedUnset, error));
+    NIMVLETS_CHECK(decodedUnset.clickCountingMode.empty());
+    NIMVLETS_CHECK(decodedUnset == original);
+    return true;
+}
+
+// TODO save v1..v5 llega a v6 con el campo VACÍO — es decir, en modo
+// local. Ningún usuario existente queda con conteo global habilitado por
+// actualizar, y la app no pide ningún permiso de input por eso
+// (brief §12).
+bool TestV1ThroughV5MigrateToLocalClickCounting() {
+    AppState decoded;
+    std::string error;
+
+    {
+        const auto buf = BuildValidBuffer(1, 9, "bunny", "", false, 0, 0);
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.clickCountingMode.empty());
+    }
+    for (std::uint32_t v : {2u, 3u}) {
+        const auto buf =
+            BuildLegacyOwnershipBuffer(v, 9, "bunny", true, {"bunny"}, false, "medium", 100, "es");
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.clickCountingMode.empty());
+    }
+    {
+        const auto buf = BuildValidV4Buffer(
+            9, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en");
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.clickCountingMode.empty());
+    }
+    {
+        const auto buf = BuildValidV5Buffer(
+            9, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 2);
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error));
+        NIMVLETS_CHECK(decoded.clickCountingMode.empty());
+        // Y el resto del v5 sobrevive exacto.
+        NIMVLETS_CHECK(decoded.clickBalance == 9);
+        NIMVLETS_CHECK(decoded.onboardingLifecycle ==
+                       nimvlets::persistence::OnboardingLifecycle::kCompleted);
+    }
+    // El default en memoria también es "" (== local).
+    NIMVLETS_CHECK(AppState{}.clickCountingMode.empty());
+    return true;
+}
+
+// Un v6 truncado justo antes del string falla ruidosamente en vez de
+// adivinar — misma disciplina que el byte de lifecycle de v5.
+bool TestTruncatedV6ClickCountingStringRejected() {
+    std::vector<std::uint8_t> buf = BuildValidV6Buffer(
+        9, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 1,
+        "anywhere");
+    // "anywhere" = 4 bytes de longitud + 8 de payload.
+    buf.resize(buf.size() - 12);
+
+    AppState decoded;
+    std::string error;
+    NIMVLETS_CHECK(!DeserializeAppState(buf.data(), buf.size(), decoded, error));
+    NIMVLETS_CHECK(!error.empty());
+    return true;
+}
+
 // Un default AppState{} (== "ningún save") es kPending; CUALQUIER archivo
 // v1/v2/v3/v4 migra a kLegacyComplete (usuario existente, ya
 // onboardeado — brief §4/§27, DEC-131). Un v5 conserva su byte.
@@ -517,14 +642,26 @@ bool TestOnDiskSchemaVersionOutParam() {
         NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
         NIMVLETS_CHECK(onDisk == 4);
     }
-    // v5: reporta 5.
+    // v5: reporta 5. Ya NO es la versión actual (Block 11A subió a v6),
+    // y ese es justamente el punto: el out-param dice lo que había EN
+    // DISCO, no lo que esta build escribe.
     {
         const std::vector<std::uint8_t> buf = BuildValidV5Buffer(
             10, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 2);
         std::uint32_t onDisk = 0;
         NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
-        NIMVLETS_CHECK(onDisk == AppState::kCurrentSchemaVersion);
         NIMVLETS_CHECK(onDisk == 5);
+        NIMVLETS_CHECK(decoded.schemaVersion == AppState::kCurrentSchemaVersion);
+    }
+    // v6: reporta 6 (== la versión actual de esta build).
+    {
+        const std::vector<std::uint8_t> buf = BuildValidV6Buffer(
+            10, "bunny", "", true, {OwnedEntitlement{"bunny", ""}}, false, "medium", 100, "en", 2,
+            "anywhere");
+        std::uint32_t onDisk = 0;
+        NIMVLETS_CHECK(DeserializeAppState(buf.data(), buf.size(), decoded, error, &onDisk));
+        NIMVLETS_CHECK(onDisk == AppState::kCurrentSchemaVersion);
+        NIMVLETS_CHECK(onDisk == 6);
     }
 
     // Parseo fallido (magic malo): el out-param queda intacto.
@@ -586,6 +723,11 @@ void RegisterAppStateSerializerTests(testing::TestRunner& runner) {
     runner.Add("AppStateSerializer/V4TruncatedOwnershipIsRejected", TestV4TruncatedOwnershipIsRejected);
     runner.Add("AppStateSerializer/OnDiskSchemaVersionOutParam", TestOnDiskSchemaVersionOutParam);
     runner.Add("AppStateSerializer/V4LanguageRoundTrips", TestV4LanguageRoundTrips);
+    runner.Add("AppStateSerializer/V6ClickCountingModeRoundTrips", TestV6ClickCountingModeRoundTrips);
+    runner.Add("AppStateSerializer/V1ThroughV5MigrateToLocalClickCounting",
+               TestV1ThroughV5MigrateToLocalClickCounting);
+    runner.Add("AppStateSerializer/TruncatedV6ClickCountingStringRejected",
+               TestTruncatedV6ClickCountingStringRejected);
 }
 
 }  // namespace nimvlets::tests

@@ -27,6 +27,11 @@ add_executable(nimvlets_tests
   PetPackLoaderTest.cpp
   ClickAccountingTest.h
   ClickAccountingTest.cpp
+  ClickCountingPolicyTest.h
+  ClickCountingPolicyTest.cpp
+  FakeGlobalClickMonitor.h
+  GlobalClickMonitorTest.h
+  GlobalClickMonitorTest.cpp
   AppStateSerializerTest.h
   AppStateSerializerTest.cpp
   AppStateStoreTest.h
