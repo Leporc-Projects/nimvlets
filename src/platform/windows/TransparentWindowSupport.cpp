@@ -147,12 +147,22 @@ bool ClickThroughPollingIsMeaningful(bool) { return false; }
 
 #endif
 
-// Único, fuera del #if/#else de arriba -- el valor no depende de cuál
+// Únicos, fuera del #if/#else de arriba -- el valor no depende de cuál
 // rama compiló (esta traducción unit SOLO se agrega al build en
-// Windows, ver el comentario junto al #else), así que no necesita
+// Windows, ver el comentario junto al #else), así que no necesitan
 // duplicarse en las dos ramas.
 RendererPlatform CurrentRendererPlatform() {
     return RendererPlatform::kWindows;
+}
+
+bool AbsoluteWindowPositioningSupported() {
+    // SetWindowPos (por donde pasa Windows_SetWindowPosition de SDL)
+    // reposiciona una ventana toplevel normal sin ninguna restricción de
+    // protocolo — a diferencia de Wayland. NOTA HONESTA: no se corrió en
+    // hardware Windows real en este proyecto (ver docs/PLATFORM_SPIKE.md);
+    // pero no hay ningún límite del window system que impida la
+    // operación, así que Settings ofrece "Reset position" acá.
+    return true;
 }
 
 }  // namespace nimvlets::platform

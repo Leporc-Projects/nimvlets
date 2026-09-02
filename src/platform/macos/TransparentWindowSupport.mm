@@ -240,6 +240,14 @@ bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
     return usingSoftwareRenderer;
 }
 
+bool AbsoluteWindowPositioningSupported() {
+    // Cocoa siempre permite que una ventana se reposicione a sí misma
+    // (-[NSWindow setFrameOrigin:], por donde pasa Cocoa_SetWindowPosition
+    // de la SDL pineada). No hay ninguna restricción de protocolo como la
+    // de Wayland. Verificado en vivo por el owner en macOS (Block 11B).
+    return true;
+}
+
 RendererPlatform CurrentRendererPlatform() {
     return RendererPlatform::kMacOS;
 }

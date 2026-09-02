@@ -160,6 +160,16 @@ bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer) {
     return LinuxBackendClickThroughPollingIsMeaningful(DetectBackend());
 }
 
+bool AbsoluteWindowPositioningSupported() {
+    // X11: XMoveWindow funciona; Wayland: xdg-shell no lo permite y
+    // Wayland_SetWindowPosition retorna SDL_SetError (ver
+    // docs/LINUX_PLATFORM.md §3.3/§6). Toda la decisión vive en la tabla
+    // pura y ya unit-testeada LinuxBackendSupportsPositionRestore() —
+    // acá solo se resuelve el backend activo y se delega, igual que las
+    // otras funciones de este seam.
+    return LinuxBackendSupportsPositionRestore(DetectBackend());
+}
+
 
 RendererPlatform CurrentRendererPlatform() {
     return RendererPlatform::kLinux;

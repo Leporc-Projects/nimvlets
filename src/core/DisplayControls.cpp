@@ -63,4 +63,28 @@ float OpacityFraction(int normalizedPercent) {
     return static_cast<float>(clamped) / 100.0f;
 }
 
+WindowTopLeft SafePetPlacement(DisplayBounds display, int petW, int petH) {
+    // Centrado, igual que SDL_WINDOWPOS_CENTERED sobre este display.
+    int x = display.x + (display.w - petW) / 2;
+    int y = display.y + (display.h - petH) / 2;
+
+    // Acotado: si el pet CABE en el eje, el rectángulo entero queda
+    // dentro del display; si NO cabe (pet más grande que el display en
+    // ese eje), el centrado deja el borde superior/izquierdo fuera de
+    // pantalla — se ancla ese borde al del display en su lugar. El
+    // resultado nunca deja la esquina superior-izquierda fuera de
+    // los límites del display.
+    if (petW <= display.w) {
+        x = std::clamp(x, display.x, display.x + display.w - petW);
+    } else {
+        x = display.x;
+    }
+    if (petH <= display.h) {
+        y = std::clamp(y, display.y, display.y + display.h - petH);
+    } else {
+        y = display.y;
+    }
+    return WindowTopLeft{x, y};
+}
+
 }  // namespace nimvlets::core

@@ -264,4 +264,27 @@ bool NativeShapeHitTestIsRenderSafe(bool usingSoftwareRenderer);
 // - Linux/Wayland: false — see docs/LINUX_PLATFORM.md.
 bool ClickThroughPollingIsMeaningful(bool usingSoftwareRenderer);
 
+// True if, on this platform/backend, SDL_SetWindowPosition() can really
+// move a normal toplevel window to an absolute screen position — the
+// operation Settings' "Reset position" recovery action needs (Block
+// 11B). This is a static platform fact, not runtime state; src/app
+// queries it once to decide whether to offer the action, and
+// SpikeApp::ResetPetPositionToSafeDefault() re-checks it (and the real
+// return value of SDL_SetWindowPosition()) rather than assuming.
+//
+// - macOS: true — Cocoa always lets a window move itself
+//   (-[NSWindow setFrameOrigin:], reached by SDL's Cocoa_SetWindowPosition).
+// - Windows: true — SetWindowPos, the standard Win32 mechanism (not run
+//   on real Windows hardware in this project — see docs/PLATFORM_SPIKE.md
+//   — but there is no protocol-level restriction the way Wayland has one).
+// - Linux/X11: true — XMoveWindow; X11 always let a client reposition
+//   itself.
+// - Linux/Wayland: false — xdg-shell has no client-requestable absolute
+//   position for a plain toplevel; SDL returns "wayland cannot position
+//   non-popup windows" (see docs/LINUX_PLATFORM.md §3.3/§6). Settings
+//   disables "Reset position" on that backend instead of faking it
+//   (brief §9). Delegated to the pure, unit-tested
+//   platform::LinuxBackendSupportsPositionRestore() table.
+bool AbsoluteWindowPositioningSupported();
+
 }  // namespace nimvlets::platform

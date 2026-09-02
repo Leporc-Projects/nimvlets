@@ -76,4 +76,41 @@ float OpacityFraction(int normalizedPercent);
 // y con test, no repetido como un `if` en SpikeApp.
 inline bool PetDragAllowed(bool lockPosition) { return !lockPosition; }
 
+// --- Colocación segura de la ventana (Block 11B) -------------------
+//
+// La acción "Reset position" de Settings (brief §6-§8) devuelve una
+// ventana del pet que quedó fuera de pantalla, o difícil de encontrar
+// tras un cambio de monitores, a un lugar conocido y seguro. Su
+// semántica NO inventa coordenadas: es la MISMA colocación por defecto
+// que el arranque usa cuando no hay posición guardada
+// (SDL_WINDOWPOS_CENTERED), acotada al display objetivo. Esta es la
+// pieza pura de esa política — sin SDL: src/app resuelve el display que
+// contiene el Product UI y sus bounds, y esto calcula el destino.
+
+// Rectángulo de un display en el MISMO espacio de coordenadas que
+// SDL_GetWindowPosition()/SDL_GetDisplayBounds() (int, puntos lógicos
+// de pantalla; el origen puede ser no-cero en un setup multi-monitor).
+struct DisplayBounds {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+};
+
+// Esquina superior-izquierda para SDL_SetWindowPosition().
+struct WindowTopLeft {
+    int x = 0;
+    int y = 0;
+};
+
+// La colocación SEGURA canónica de una ventana de `petW` x `petH`
+// dentro de `display`: centrada (idéntico a SDL_WINDOWPOS_CENTERED, el
+// default de arranque), y además ACOTADA para que el rectángulo entero
+// quede dentro del display. Si el pet es MÁS grande que el display en
+// algún eje, se ancla ese borde al del display (nunca fuera de pantalla
+// por arriba/izquierda). Determinista y pura: mismas entradas -> mismo
+// resultado, sin importar si el pet está oculto o si Lock Position está
+// activo (eso lo decide src/app, no esta geometría).
+WindowTopLeft SafePetPlacement(DisplayBounds display, int petW, int petH);
+
 }  // namespace nimvlets::core

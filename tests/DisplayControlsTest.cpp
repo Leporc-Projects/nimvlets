@@ -5,6 +5,7 @@
 #include <cmath>
 #include <string>
 
+using nimvlets::core::DisplayBounds;
 using nimvlets::core::NormalizeOpacityPercent;
 using nimvlets::core::OpacityFraction;
 using nimvlets::core::ParsePetSizeChoice;
@@ -12,6 +13,8 @@ using nimvlets::core::PetDragAllowed;
 using nimvlets::core::PetSizeChoice;
 using nimvlets::core::PetSizeChoiceId;
 using nimvlets::core::PetSizeScaleFactor;
+using nimvlets::core::SafePetPlacement;
+using nimvlets::core::WindowTopLeft;
 
 namespace nimvlets::tests {
 
@@ -91,6 +94,86 @@ bool TestDragAllowedTracksLock() {
     return true;
 }
 
+// --- Block 11B: SafePetPlacement (la geometría de "Reset position") ---
+
+// Caso normal: el pet cabe en el display -> queda CENTRADO, exactamente
+// como SDL_WINDOWPOS_CENTERED. El origen del display puede ser (0,0) o no.
+bool TestSafePlacementCentersWhenItFits() {
+    // Display primario en (0,0), 1920x1080; pet 160x160.
+    const WindowTopLeft a = SafePetPlacement(DisplayBounds{0, 0, 1920, 1080}, 160, 160);
+    NIMVLETS_CHECK(a.x == (1920 - 160) / 2);   // 880
+    NIMVLETS_CHECK(a.y == (1080 - 160) / 2);   // 460
+
+    // Segundo monitor a la derecha, origen (1920, 0), 1280x720.
+    const WindowTopLeft b = SafePetPlacement(DisplayBounds{1920, 0, 1280, 720}, 200, 200);
+    NIMVLETS_CHECK(b.x == 1920 + (1280 - 200) / 2);  // 2460
+    NIMVLETS_CHECK(b.y == (720 - 200) / 2);          // 260
+
+    // Monitor "por encima" con y negativa, origen (0, -1080).
+    const WindowTopLeft c = SafePetPlacement(DisplayBounds{0, -1080, 1920, 1080}, 300, 240);
+    NIMVLETS_CHECK(c.x == (1920 - 300) / 2);
+    NIMVLETS_CHECK(c.y == -1080 + (1080 - 240) / 2);
+    return true;
+}
+
+// El destino SIEMPRE queda dentro de los límites del display objetivo:
+// nunca deja la esquina superior-izquierda fuera, ni el rectángulo entero
+// si cabe.
+bool TestSafePlacementStaysInsideTargetDisplay() {
+    const DisplayBounds displays[] = {
+        {0, 0, 1440, 900},
+        {-2560, 120, 2560, 1440},
+        {1440, -300, 3840, 2160},
+    };
+    for (const DisplayBounds& d : displays) {
+        for (const int size : {64, 320, 800}) {
+            const WindowTopLeft p = SafePetPlacement(d, size, size);
+            NIMVLETS_CHECK(p.x >= d.x);
+            NIMVLETS_CHECK(p.y >= d.y);
+            if (size <= d.w) {
+                NIMVLETS_CHECK(p.x + size <= d.x + d.w);
+            }
+            if (size <= d.h) {
+                NIMVLETS_CHECK(p.y + size <= d.y + d.h);
+            }
+        }
+    }
+    return true;
+}
+
+// Pet MÁS grande que el display en un eje: la esquina superior/izquierda
+// se ancla al borde del display en vez de centrar (que la dejaría fuera
+// de pantalla por arriba/izquierda).
+bool TestSafePlacementAnchorsWhenPetOversizedForDisplay() {
+    // Pet más ancho que el display: x se ancla al borde izquierdo; y
+    // sigue centrado porque en alto sí cabe.
+    const WindowTopLeft wide = SafePetPlacement(DisplayBounds{100, 50, 400, 900}, 600, 200);
+    NIMVLETS_CHECK(wide.x == 100);                 // anclado, no 100 + (400-600)/2 = 0
+    NIMVLETS_CHECK(wide.y == 50 + (900 - 200) / 2);
+
+    // Pet más alto que el display: y se ancla al borde superior.
+    const WindowTopLeft tall = SafePetPlacement(DisplayBounds{0, 0, 1000, 300}, 200, 500);
+    NIMVLETS_CHECK(tall.x == (1000 - 200) / 2);
+    NIMVLETS_CHECK(tall.y == 0);
+
+    // Pet más grande en los dos ejes: ambas esquinas ancladas.
+    const WindowTopLeft both = SafePetPlacement(DisplayBounds{-10, -20, 200, 200}, 400, 400);
+    NIMVLETS_CHECK(both.x == -10 && both.y == -20);
+    return true;
+}
+
+// Determinismo: mismas entradas -> mismo resultado. La geometría no
+// conoce "pet oculto" ni "Lock Position" (eso lo decide src/app).
+bool TestSafePlacementIsDeterministic() {
+    const DisplayBounds d{37, 91, 1710, 1112};
+    const WindowTopLeft first = SafePetPlacement(d, 173, 211);
+    for (int i = 0; i < 5; ++i) {
+        const WindowTopLeft again = SafePetPlacement(d, 173, 211);
+        NIMVLETS_CHECK(again.x == first.x && again.y == first.y);
+    }
+    return true;
+}
+
 }  // namespace
 
 void RegisterDisplayControlsTests(testing::TestRunner& runner) {
@@ -102,6 +185,12 @@ void RegisterDisplayControlsTests(testing::TestRunner& runner) {
     runner.Add("DisplayControls/OpacityNormalizesToNearestChoice", TestOpacityNormalizesToNearestChoice);
     runner.Add("DisplayControls/OpacityFractionClamps", TestOpacityFractionClamps);
     runner.Add("DisplayControls/DragAllowedTracksLock", TestDragAllowedTracksLock);
+    runner.Add("DisplayControls/SafePlacementCentersWhenItFits", TestSafePlacementCentersWhenItFits);
+    runner.Add("DisplayControls/SafePlacementStaysInsideTargetDisplay",
+               TestSafePlacementStaysInsideTargetDisplay);
+    runner.Add("DisplayControls/SafePlacementAnchorsWhenPetOversizedForDisplay",
+               TestSafePlacementAnchorsWhenPetOversizedForDisplay);
+    runner.Add("DisplayControls/SafePlacementIsDeterministic", TestSafePlacementIsDeterministic);
 }
 
 }  // namespace nimvlets::tests
