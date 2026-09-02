@@ -13,6 +13,7 @@
 #include "content/AnimationController.h"
 #include "content/AnimationDefinition.h"
 #include "core/AlphaMask.h"
+#include "core/ClickCounting.h"
 #include "core/ClickThroughPolicy.h"
 #include "core/DragClassifier.h"
 #include "core/FrameScheduler.h"
@@ -23,6 +24,7 @@
 #include "persistence/AppState.h"
 #include "persistence/AppStateStore.h"
 #include "persistence/PersistenceScheduler.h"
+#include "platform/GlobalClickMonitor.h"
 #include "platform/SystemShell.h"
 #include "productui/ProductWindow.h"
 
@@ -208,6 +210,10 @@ private:
     void ApplyOpacityChoice(int rawPercent);   // se normaliza al conjunto {100,85,70,55}
     void ApplyLockPosition(bool locked);
     void ApplyUiLanguage(core::Language language);
+    // Block 11A. Quinto Apply*, con una diferencia deliberada: NO llama
+    // a PushShellState() — el menú rápido no expone esta preferencia
+    // (brief §10). Persiste el modo PEDIDO y reconcilia el monitor.
+    void ApplyClickCountingMode(core::ClickCountingMode mode);
 
     // Enruta un SettingsChange (venido de la sección Settings) al Apply*
     // que corresponde a su `field`.
@@ -218,13 +224,53 @@ private:
     // eligió y se derivó del locale, o por un override solo-DEV).
     core::Preferences CurrentPreferences() const;
 
-    // Empuja CurrentPreferences() a la sección Settings si el Product UI
-    // está abierto (no-op si no).
+    // Empuja CurrentPreferences() Y el estado genérico del conteo global
+    // a la sección Settings si el Product UI está abierto (no-op si no).
     void PushPreferencesToProductWindow();
 
     // Aplica ShellAction (llegado como SDL_EVENT_USER). `running` se
     // pone en false para kQuit.
     void HandleShellAction(int shellActionCode, bool& running);
+
+    // --- Block 11A: conteo de clics OPT-IN en todo el sistema --------
+    //
+    // EL ÚNICO punto de mutación del wallet por un clic, para las DOS
+    // fuentes (el pet local y el monitor global). Consulta la política
+    // pura (core::CountedClickShouldIncrement) y, solo si esa fuente
+    // cuenta en el modo EFECTIVO actual, incrementa `clickBalance`,
+    // marca dirty con el mismo debounce de siempre, y refresca el wallet
+    // canónico del Product UI. Es lo que hace imposible que un clic
+    // físico sobre el pet valga +2 en modo global (brief §4/§13).
+    void HandleCountedClick(core::ClickSource source, double nowMs);
+
+    // El modo EFECTIVO de esta sesión: `kGlobal` sii el owner pidió
+    // "Anywhere" Y el monitor está REALMENTE activo. Nunca se deduce de
+    // la preferencia sola (brief §5).
+    core::EffectiveClickCounting CurrentEffectiveClickCounting() const;
+
+    // Estado del adapter nativo (capacidad + permiso preflight + si
+    // corre). Consulta NO intrusiva: jamás provoca un diálogo del OS.
+    platform::GlobalClickStatus CurrentGlobalClickStatus() const;
+
+    // Reconcilia el monitor con la preferencia persistida: arranca sii
+    // el owner pidió "Anywhere", la plataforma puede, y el permiso YA
+    // está concedido (preflight). NUNCA pide permiso — por eso es seguro
+    // llamarla en Init() sin sorprender al owner con un prompt de TCC al
+    // arrancar (brief §8). Detiene el monitor en cualquier otro caso.
+    void SyncGlobalClickMonitor();
+
+    // Botones del flujo de permiso de Settings. `kContinue` es el ÚNICO
+    // camino de todo el programa que puede llamar a RequestPermission().
+    void HandleGlobalClickAction(productui::GlobalClickAction action);
+
+    // Callback del monitor nativo. **Corre en el hilo del monitor.** Lo
+    // único que hace es empujar un SDL_EVENT_USER vacío (sin código, sin
+    // datos: no hay nada que transportar) para que el hilo principal
+    // haga la mutación canónica. SDL documenta SDL_PushEvent como
+    // thread-safe, y en el backend Cocoa despierta el
+    // SDL_WaitEventTimeout del loop principal vía Cocoa_SendWakeupEvent
+    // (leído de la fuente pineada — ver docs/GLOBAL_CLICK_MODE.md §5).
+    static void OnGlobalPrimaryClick(void* userData);
 
     // Resultado de que el owner haya pedido activar un pet desde la
     // Collection: valida propiedad (incluida la variante exacta) vía el
@@ -500,6 +546,25 @@ private:
     // Tipo de SDL_EVENT_USER registrado para las acciones del menú
     // rápido — 0 si SDL_RegisterEvents falló o no hay shell nativo.
     std::uint32_t shellUserEventType_ = 0;
+
+    // --- Conteo de clics global, OPT-IN (Block 11A) -----------------
+    //
+    // El adapter nativo. Se CREA siempre (para que Settings pueda
+    // reportar la capacidad honestamente en cualquier plataforma), pero
+    // no instala nada hasta un Start() explícito.
+    std::unique_ptr<platform::GlobalClickMonitor> globalClickMonitor_;
+
+    // Tipo de SDL_EVENT_USER propio para un clic primario global — 0 si
+    // el registro falló. Separado del de las acciones del menú: así el
+    // espacio de `.code` de ShellAction no se comparte con nada, y un
+    // evento de clic global no lleva NINGÚN campo (ver
+    // OnGlobalPrimaryClick).
+    std::uint32_t globalClickUserEventType_ = 0;
+
+    // true mientras Settings muestra la explicación de primera parte,
+    // antes de pedir ningún permiso (brief §8). Estado de UI de esta
+    // sesión: NO se persiste.
+    bool globalClickExplanationVisible_ = false;
 
     // Si la ventana del pet está oculta por "Hide Nimvlet" (block brief
     // §17). NO se persiste: al reabrir la app el pet siempre arranca

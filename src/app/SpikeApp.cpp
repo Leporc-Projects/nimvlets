@@ -656,6 +656,25 @@ bool SpikeApp::Init() {
         SDL_SetWindowOpacity(window_, core::OpacityFraction(pct));
     }
 
+    // --- Monitor de clics globales, OPT-IN (Block 11A) --------------
+    //
+    // El adapter se CREA siempre (Settings tiene que poder reportar la
+    // capacidad real de esta plataforma), pero no instala absolutamente
+    // nada hasta un Start() explícito. SyncGlobalClickMonitor() más
+    // abajo solo arranca si el owner ya había pedido "Anywhere" Y el
+    // permiso YA está concedido — solo preflight, jamás un prompt al
+    // arrancar (brief §8).
+    globalClickMonitor_ = platform::CreateGlobalClickMonitor();
+    globalClickUserEventType_ = SDL_RegisterEvents(1);
+    if (globalClickUserEventType_ == static_cast<std::uint32_t>(-1)) {
+        globalClickUserEventType_ = 0;
+        SDL_Log("nimvlets: SDL_RegisterEvents failed -- global click counting disabled this run");
+    }
+    // Reconcilia con lo que el owner haya dejado persistido. Solo
+    // PREFLIGHT: si el permiso está, arranca; si no, cae a local y lo
+    // reporta. Sin diálogo de permiso al arrancar, nunca (brief §8).
+    SyncGlobalClickMonitor();
+
     // --- System Shell: menú rápido nativo (Block 06) ---
     shellUserEventType_ = SDL_RegisterEvents(1);
     if (shellUserEventType_ == 0 || shellUserEventType_ == static_cast<std::uint32_t>(-1)) {
@@ -1038,7 +1057,8 @@ void SpikeApp::PushShellState() {
 
 core::Preferences SpikeApp::CurrentPreferences() const {
     core::Preferences p = core::PreferencesFromStored(
-        appState_.sizeChoice, appState_.opacityPercent, appState_.lockPosition, appState_.language);
+        appState_.sizeChoice, appState_.opacityPercent, appState_.lockPosition, appState_.language,
+        appState_.clickCountingMode);
     // El idioma EFECTIVO de la sesión puede diferir de
     // appState_.language: vacío -> derivado del locale del OS sin
     // persistir; o un override solo-DEV. language_ manda para lo que se
@@ -1048,8 +1068,144 @@ core::Preferences SpikeApp::CurrentPreferences() const {
 }
 
 void SpikeApp::PushPreferencesToProductWindow() {
-    if (productWindow_.IsOpen()) {
-        productWindow_.SetPreferences(CurrentPreferences());
+    if (!productWindow_.IsOpen()) {
+        return;
+    }
+    const core::Preferences prefs = CurrentPreferences();
+    productWindow_.SetPreferences(prefs);
+    // Block 11A: junto con las preferencias va el estado GENÉRICO del
+    // conteo global (capacidad / permiso / actividad ya derivados a
+    // platform::GlobalClickUiState). Settings nunca consulta el adapter
+    // por su cuenta ni conoce la plataforma (brief §18).
+    productWindow_.SetGlobalClick(
+        platform::ResolveGlobalClickUiState(prefs.clickCounting, CurrentGlobalClickStatus()),
+        globalClickExplanationVisible_);
+}
+
+// --- Block 11A: conteo de clics OPT-IN en todo el sistema -----------
+
+platform::GlobalClickStatus SpikeApp::CurrentGlobalClickStatus() const {
+    if (!globalClickMonitor_) {
+        return platform::GlobalClickStatus{};  // kUnavailable
+    }
+    return globalClickMonitor_->QueryStatus();  // preflight: NUNCA muestra un diálogo
+}
+
+core::EffectiveClickCounting SpikeApp::CurrentEffectiveClickCounting() const {
+    const bool monitorActive = globalClickMonitor_ && globalClickMonitor_->IsActive();
+    return core::ResolveEffectiveClickCounting(
+        core::ParseClickCountingMode(appState_.clickCountingMode), monitorActive);
+}
+
+void SpikeApp::HandleCountedClick(core::ClickSource source, double nowMs) {
+    if (!core::CountedClickShouldIncrement(CurrentEffectiveClickCounting(), source)) {
+        // En modo global efectivo un clic sobre el pet NO suma: el
+        // monitor global ya vio ESE MISMO clic físico y lo va a contar
+        // una sola vez (brief §4). La reacción del pet no pasa por acá.
+        return;
+    }
+    // Misma mutación de siempre: uint64, mismo debounce de persistencia,
+    // mismo refresco del wallet canónico del Product UI. NO existe un
+    // segundo wallet ni un contador por fuente (brief §13).
+    ++appState_.clickBalance;
+    persistenceScheduler_.MarkDirty(nowMs);
+    PushModelsToProductWindow();
+}
+
+void SpikeApp::OnGlobalPrimaryClick(void* userData) {
+    // **Hilo del monitor.** Se hace lo mínimo indispensable: empujar un
+    // evento vacío. Nada de AppState, nada de persistencia, nada de UI.
+    auto* self = static_cast<SpikeApp*>(userData);
+    if (self == nullptr || self->globalClickUserEventType_ == 0) {
+        return;
+    }
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = self->globalClickUserEventType_;
+    event.user.type = self->globalClickUserEventType_;
+    SDL_PushEvent(&event);
+}
+
+void SpikeApp::SyncGlobalClickMonitor() {
+    if (!globalClickMonitor_) {
+        return;
+    }
+    const bool wantGlobal =
+        core::ParseClickCountingMode(appState_.clickCountingMode) == core::ClickCountingMode::kAnywhere;
+
+    if (!wantGlobal) {
+        if (globalClickMonitor_->IsActive()) {
+            globalClickMonitor_->Stop();
+            SDL_Log("nimvlets: global click monitor stopped (click counting -> Nimvlet only)");
+        }
+        return;
+    }
+    if (globalClickMonitor_->IsActive()) {
+        return;
+    }
+
+    const platform::GlobalClickStatus status = globalClickMonitor_->QueryStatus();
+    if (status.capability == platform::GlobalClickCapability::kUnavailable) {
+        SDL_Log("nimvlets: global click counting is not available on this system (see docs/GLOBAL_CLICK_MODE.md)");
+        return;
+    }
+    if (status.capability == platform::GlobalClickCapability::kSupportedNeedsPermission &&
+        status.permission != platform::GlobalClickPermission::kGranted) {
+        // PREFLIGHT solamente. Nunca se pide el permiso desde acá — por
+        // eso arrancar la app con "Anywhere" persistido y el permiso
+        // revocado NO muestra ningún prompt de TCC (brief §8): cae a
+        // modo local y Settings lo dice.
+        SDL_Log(
+            "nimvlets: global click counting requested but '%s' permission is not granted — "
+            "counting locally (see Settings)",
+            status.permissionName.c_str());
+        return;
+    }
+
+    if (globalClickUserEventType_ == 0) {
+        SDL_Log("nimvlets: global click monitor cannot start — no SDL user event type registered");
+        return;
+    }
+    if (globalClickMonitor_->Start(&SpikeApp::OnGlobalPrimaryClick, this)) {
+        SDL_Log("nimvlets: global click monitor ACTIVE — primary mouse presses anywhere now count");
+    } else {
+        SDL_Log("nimvlets: global click monitor failed to start — counting locally");
+    }
+}
+
+void SpikeApp::HandleGlobalClickAction(productui::GlobalClickAction action) {
+    switch (action) {
+        case productui::GlobalClickAction::kNone:
+            return;
+        case productui::GlobalClickAction::kNotNow:
+            // Se cierra la explicación y NO se pide nada. La preferencia
+            // sigue en "Nimvlet only" — nunca se cambió.
+            globalClickExplanationVisible_ = false;
+            PushPreferencesToProductWindow();
+            return;
+        case productui::GlobalClickAction::kContinue: {
+            globalClickExplanationVisible_ = false;
+            if (globalClickMonitor_) {
+                // EL ÚNICO llamado de todo el programa que puede
+                // provocar el diálogo de permiso del OS, y solo tras un
+                // "Continue" explícito del owner sobre la explicación.
+                globalClickMonitor_->RequestPermission();
+            }
+            // La elección del owner se PERSISTE aunque el permiso quede
+            // pendiente: en macOS el prompt solo ofrece abrir Ajustes
+            // del Sistema, así que "concedido ahora mismo" es la
+            // excepción, no la regla. Si se revirtiera la preferencia
+            // acá, el owner concedería el permiso y volvería a encontrar
+            // el control de vuelta en "Nimvlet only". Ver
+            // docs/GLOBAL_CLICK_MODE.md §4.
+            ApplyClickCountingMode(core::ClickCountingMode::kAnywhere);
+            return;
+        }
+        case productui::GlobalClickAction::kCheckAgain:
+            // Re-preflight + reintento de arranque. No pide permiso.
+            SyncGlobalClickMonitor();
+            PushPreferencesToProductWindow();
+            return;
     }
 }
 
@@ -1101,6 +1257,23 @@ void SpikeApp::ApplyUiLanguage(core::Language language) {
     PushPreferencesToProductWindow();
 }
 
+void SpikeApp::ApplyClickCountingMode(core::ClickCountingMode mode) {
+    const double nowMs = static_cast<double>(SDL_GetTicks());
+    appState_.clickCountingMode = core::ClickCountingModeId(mode);
+    persistenceScheduler_.MarkDirty(nowMs);
+    // Reconcilia el monitor con la preferencia recién escrita. Puede
+    // quedar INACTIVO con la preferencia en "anywhere" (permiso
+    // pendiente): eso es exactamente el modo pedido != modo efectivo, y
+    // Settings lo muestra.
+    SyncGlobalClickMonitor();
+    SDL_Log(
+        "nimvlets: click counting -> %s (effective: %s)", core::ClickCountingModeId(mode),
+        CurrentEffectiveClickCounting() == core::EffectiveClickCounting::kGlobal ? "global" : "local");
+    // A propósito SIN PushShellState(): el menú rápido no expone esta
+    // preferencia y no debe crecer con ella (brief §10).
+    PushPreferencesToProductWindow();
+}
+
 void SpikeApp::ApplyPreferenceChange(const productui::SettingsChange& change) {
     switch (change.field) {
         case core::PreferenceField::kSize:
@@ -1114,6 +1287,32 @@ void SpikeApp::ApplyPreferenceChange(const productui::SettingsChange& change) {
             break;
         case core::PreferenceField::kLanguage:
             ApplyUiLanguage(change.language);
+            break;
+        case core::PreferenceField::kClickCounting:
+            if (change.clickCounting == core::ClickCountingMode::kNimvletOnly) {
+                // Volver a local es inmediato y nunca necesita permiso.
+                globalClickExplanationVisible_ = false;
+                ApplyClickCountingMode(core::ClickCountingMode::kNimvletOnly);
+                break;
+            }
+            // Pedir "Anywhere" NO aplica nada todavía: primero se
+            // consulta la política pura de si hace falta explicar
+            // (brief §8). La preferencia solo cambia en kApplyDirectly o
+            // tras un "Continue" explícito.
+            switch (platform::EvaluateGlobalClickRequest(CurrentGlobalClickStatus())) {
+                case platform::GlobalClickRequestOutcome::kUnavailable:
+                    // No-op silencioso: Settings ya dibuja el segmento
+                    // apagado y dice "Not available on this system".
+                    break;
+                case platform::GlobalClickRequestOutcome::kApplyDirectly:
+                    globalClickExplanationVisible_ = false;
+                    ApplyClickCountingMode(core::ClickCountingMode::kAnywhere);
+                    break;
+                case platform::GlobalClickRequestOutcome::kNeedsExplanation:
+                    globalClickExplanationVisible_ = true;
+                    PushPreferencesToProductWindow();
+                    break;
+            }
             break;
     }
 }
@@ -1139,7 +1338,9 @@ void SpikeApp::OpenProductWindow() {
         return;
     }
     productWindow_.SetLanguage(language_);
-    productWindow_.SetPreferences(CurrentPreferences());  // Block 08: sección Settings
+    // Block 08 (preferencias) + Block 11A (estado del conteo global) —
+    // el mismo punto único que usa cualquier cambio posterior.
+    PushPreferencesToProductWindow();
     productWindow_.SetActivePreview(
         activeCatalogIdentity_.petId, activeCatalogIdentity_.variantId, CurrentRestFrame());
     productWindow_.SetModels(
@@ -1438,8 +1639,8 @@ void SpikeApp::RunDevClickSmokeTestIfRequested() {
     const double nowMs = static_cast<double>(SDL_GetTicks());
     for (std::size_t i = 0; i < count; ++i) {
         ++clickCount_;
-        ++appState_.clickBalance;
-        persistenceScheduler_.MarkDirty(nowMs);
+        // Mismo camino canónico que un clic real del owner sobre el pet.
+        HandleCountedClick(core::ClickSource::kLocalPet, nowMs);
         animController_->TriggerClick(NextUniformRandom01(), nowMs);
     }
     MarkNeedsRedraw(nowMs);
@@ -1554,6 +1755,17 @@ void SpikeApp::RunDevHoverSmokeTestIfRequested() {
 }
 
 void SpikeApp::Shutdown() {
+    // PRIMERO de todo: el monitor de clics globales (Block 11A). Stop()
+    // hace join del hilo del tap, así que al volver está GARANTIZADO que
+    // no puede llegar ningún callback nativo más — ni un SDL_PushEvent
+    // sobre un event loop que ya no corre, ni un HandleCountedClick
+    // sobre un AppState que se está por escribir (brief §19). Recién
+    // después se flushea el estado.
+    if (globalClickMonitor_) {
+        globalClickMonitor_->Stop();
+        globalClickMonitor_.reset();
+    }
+
     FlushPersistedState();
 
     // Product UI + System Shell primero: cada uno con su propio
@@ -1822,6 +2034,9 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
                 // rápido (block brief 08 §6).
                 ApplyPreferenceChange(pe.preferenceChange);
             }
+            if (pe.hasGlobalClickAction) {
+                HandleGlobalClickAction(pe.globalClickAction);
+            }
             if (pe.hasOnboardingSelection) {
                 HandleOnboardingSelection(pe.onboardingSelection);
             }
@@ -1843,6 +2058,14 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
     // hilo principal (ver platform::SystemShell).
     if (shellUserEventType_ != 0 && event.type == shellUserEventType_) {
         HandleShellAction(event.user.code, running);
+        return;
+    }
+
+    // Clic primario GLOBAL, reenviado por el monitor nativo desde su
+    // propio hilo (Block 11A). El evento no lleva NADA: solo su tipo. La
+    // mutación canónica del wallet ocurre acá, en el hilo principal.
+    if (globalClickUserEventType_ != 0 && event.type == globalClickUserEventType_) {
+        HandleCountedClick(core::ClickSource::kGlobalMonitor, static_cast<double>(SDL_GetTicks()));
         return;
     }
 
@@ -2001,20 +2224,22 @@ void SpikeApp::HandleEvent(const SDL_Event& event, bool& running) {
             // restores normal per-pixel behavior", brief §5).
             UpdateClickThrough(IsPointInsideWindow(localEnd), IsPointInteractive(localEnd));
             if (gesture == core::PointerGesture::kClick) {
-                ++clickCount_;
-                ++appState_.clickBalance;
-                persistenceScheduler_.MarkDirty(nowMs);
+                ++clickCount_;  // interacciones con el pet en esta sesión (diagnóstico, no moneda)
+                // La MONEDA pasa por el único punto canónico. En modo
+                // global efectivo esto NO suma: el monitor global ya vio
+                // este mismo clic físico (brief §4). La reacción de
+                // personalidad de abajo se dispara igual en los dos
+                // modos (brief §22).
+                HandleCountedClick(core::ClickSource::kLocalPet, nowMs);
                 animController_->TriggerClick(NextUniformRandom01(), nowMs);
                 MarkNeedsRedraw(nowMs);
                 RearmAmbientDeadline(nowMs);  // un click es una interacción real -- ver el comentario del campo
-                // Si el Product UI está abierto, el balance visible (y
-                // el estado asequible/insuficiente del Shop) se
-                // actualizan en vivo (brief §15/§16). No-op si está
-                // cerrado.
-                PushModelsToProductWindow();
                 SDL_Log(
-                    "nimvlets: click #%d this session (balance: %llu)",
-                    clickCount_, static_cast<unsigned long long>(appState_.clickBalance));
+                    "nimvlets: pet click #%d this session (balance: %llu, counting: %s)",
+                    clickCount_, static_cast<unsigned long long>(appState_.clickBalance),
+                    CurrentEffectiveClickCounting() == core::EffectiveClickCounting::kGlobal
+                        ? "global monitor"
+                        : "local");
             } else {
                 int endX = 0;
                 int endY = 0;
@@ -2106,6 +2331,37 @@ int SpikeApp::Run() {
             FlushPersistedState();
             SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_GRANT_CLICKS=%lld (balance now %llu)",
                     n, static_cast<unsigned long long>(appState_.clickBalance));
+        }
+    }
+
+    // Solo-DEV (Block 11A): empuja n eventos de clic primario GLOBAL por
+    // el MISMO camino que el monitor nativo (HandleCountedClick con
+    // ClickSource::kGlobalMonitor). NO finge que el OS concedió ningún
+    // permiso (brief §25): si el modo efectivo no es global, estos
+    // eventos se IGNORAN — que es justamente la mitad interesante del
+    // test. Sirve para verificar, sin permiso de TCC, que
+    //   - en modo local un evento global no suma nada;
+    //   - con el modo global REALMENTE activo cada evento suma 1.
+    // Ausente/vacía: no-op. Ver README.md.
+    if (const char* gc = std::getenv("NIMVLETS_DEV_GLOBAL_CLICKS"); gc != nullptr && gc[0] != '\0') {
+        char* end = nullptr;
+        const long long n = std::strtoll(gc, &end, 10);
+        if (end != gc && n > 0) {
+            const std::uint64_t before = appState_.clickBalance;
+            const double nowMs = static_cast<double>(SDL_GetTicks());
+            for (long long i = 0; i < n; ++i) {
+                HandleCountedClick(core::ClickSource::kGlobalMonitor, nowMs);
+            }
+            FlushPersistedState();
+            SDL_Log(
+                "nimvlets: DEV override active — NIMVLETS_DEV_GLOBAL_CLICKS=%lld (effective mode: %s, "
+                "balance %llu -> %llu, counted %llu)",
+                n,
+                CurrentEffectiveClickCounting() == core::EffectiveClickCounting::kGlobal ? "global"
+                                                                                         : "local",
+                static_cast<unsigned long long>(before),
+                static_cast<unsigned long long>(appState_.clickBalance),
+                static_cast<unsigned long long>(appState_.clickBalance - before));
         }
     }
 
@@ -2287,6 +2543,35 @@ int SpikeApp::Run() {
         if (const char* scc = std::getenv("NIMVLETS_DEV_STARTER_CONFIRM");
             scc != nullptr && scc[0] != '\0' && scc[0] != '0') {
             productWindow_.SetStarterConfirmingForQA(true);
+        }
+        // --- Block 11A: hooks de QA del conteo de clics global ------
+        // NIMVLETS_DEV_CLICK_COUNTING=nimvlet_only|anywhere — pide ese
+        // modo por el MISMO camino que un click del owner en Settings
+        // (ApplyPreferenceChange -> EvaluateGlobalClickRequest). Con
+        // "anywhere" y el permiso ausente, deja la explicación de primera
+        // parte VISIBLE — sin pedir nada todavía (brief §8).
+        if (const char* cc = std::getenv("NIMVLETS_DEV_CLICK_COUNTING");
+            cc != nullptr && cc[0] != '\0') {
+            productui::SettingsChange change;
+            change.field = core::PreferenceField::kClickCounting;
+            change.clickCounting = core::ParseClickCountingMode(cc);
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_CLICK_COUNTING='%s'", cc);
+            ApplyPreferenceChange(change);
+        }
+        // NIMVLETS_DEV_GLOBAL_CLICK_ACTION=continue|notnow|recheck —
+        // acciona un botón del flujo de permiso por su camino real.
+        // OJO: "continue" SÍ llama al pedido nativo (puede mostrar el
+        // diálogo del OS) — es exactamente lo que hace el botón.
+        if (const char* ga = std::getenv("NIMVLETS_DEV_GLOBAL_CLICK_ACTION");
+            ga != nullptr && ga[0] != '\0') {
+            const std::string actionSpec(ga);
+            const productui::GlobalClickAction action =
+                actionSpec == "continue"  ? productui::GlobalClickAction::kContinue
+                : actionSpec == "notnow"  ? productui::GlobalClickAction::kNotNow
+                : actionSpec == "recheck" ? productui::GlobalClickAction::kCheckAgain
+                                          : productui::GlobalClickAction::kNone;
+            SDL_Log("nimvlets: DEV override active — NIMVLETS_DEV_GLOBAL_CLICK_ACTION='%s'", ga);
+            HandleGlobalClickAction(action);
         }
         // NIMVLETS_DEV_SETTINGS_FOCUS=row:opacity — foco de teclado sobre
         // una fila de Settings (captura del anillo de foco).
