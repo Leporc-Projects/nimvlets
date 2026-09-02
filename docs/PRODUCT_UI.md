@@ -1,4 +1,4 @@
-# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C / 10 / 11A / 11B)
+# Nimvlets — Product Shell + Collection + Shop + Quick Menu (Block 06 / 06.1 / 06.2 / 07 / 09C / 10 / 11A / 11B / 12A)
 
 Este documento describe la capa de **producto** que Block 06 agrega
 sobre el runtime de pet de Block 01–05: una ventana de aplicación
@@ -48,6 +48,21 @@ variante poseída SÍ aparece (con la otra variante marcada no poseída,
 sin ruta de compra). Con un solo Nimvlet poseído la gallery queda vacía:
 sin divisor ni segundo plano, una sola línea quieta hacia el Shop
 (`kCollectionOnlyActive`). Ver §5, §6.3 y DEC-136.
+
+**Actualización Block 12A (fundación del sistema de diseño visual —
+DEC-142..DEC-145).** Pasada owner-directed de LENGUAJE VISUAL, sin tocar
+ningún flujo de producto: tokens visuales semánticos (`productui::tokens`),
+roles tipográficos (`type::role`), el `PetAccent` promovido al registro
+CENTRALIZADO de identidad por pet (`secondary` + costura `heroStage`),
+helpers de contraste, primitivas de ornamento procedurales
+(`DrawSparkle` / `DrawDiamond` / `DrawOrnamentalDivider` /
+`DrawAccentRule` / `DrawHeadingMotif` / `DrawSoftPanel`), un sistema de
+botones semántico (`ButtonRole` Primary/Secondary/Quiet con clamp de
+contraste), y su aplicación restringida: wordmark con spark, wallet
+**pill**, polish del tab activo de la nav, divisor ornamental (uno por
+pantalla), motivo de encabezado, y cards con panel enmarcado suave. **Sin
+imágenes, sin fuentes, sin dependencias, sin fondos escénicos (12C), sin
+favoritos, sin animación de UI.** Ver **§23**.
 
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
@@ -1590,3 +1605,182 @@ vez de permanente. Fijado en `tests/SettingsLayoutTest.cpp`.
 - El único permiso del sistema que este producto pide, se pide desde
   Settings y solo tras una acción explícita del owner — nunca al
   arrancar. Ver `docs/PRIVACY_SECURITY.md` §H.
+
+## 23. Sistema de diseño visual — la FUNDACIÓN (Block 12A)
+
+Block 12A es una pasada **owner-directed** de LENGUAJE VISUAL y
+primitivas de presentación reusables. **NO** rediseña ningún flujo de
+producto (§0 del brief los congela: Collection = solo poseído, Shop
+browse-first, confirmación explícita de compra, Starter Shop oculto
+invisible, Settings = configuración completa, EN/ES, una ProductWindow,
+wallet/economía/persistencia congelados). **NO** trae fondos escénicos
+del hero (eso es Block 12C), **NO** agrega imágenes, fuentes ni
+dependencias, y **NO** toca la política event-driven (§29 del brief: todo
+lo de 12A es estático salvo los redibujos de estado de input que ya
+existían). Ver DEC-142..DEC-145.
+
+### 23.1 Tokens visuales semánticos (`productui::tokens`, DEC-142)
+
+`src/productui/VisualTokens.h` (puro, `nimvlets_productui_core`) — una
+capa CHICA de intención nombrada sobre la paleta de blanco hueso cálido
+de Block 06, que se **evoluciona**, no se reemplaza:
+
+| Token | Rol | Evolución |
+|---|---|---|
+| `kCanvas` / `kSurface` | fondo de la app / superficie por defecto | `#F6F3EE` (== Block 06) |
+| `kSurfaceRaised` | panel / card que "levanta" un susurro | `#FBF9F4` (nuevo) |
+| `kSurfaceSoft` | plano de la gallery / rail, más profundo | `#F0EBE1` (== `kGalleryShelf`) |
+| `kBorder` | hairline cálido suave | `#E4DED3` (== `kHairline`) |
+| `kBorderInner` | highlight interior casi-blanco de un panel | `#FFFDF8` α242 (nuevo) |
+| `kTextPrimary` / `kTextSecondary` / `kTextMuted` | jerarquía de texto | `#26221E` / `#6E685C` / `#8A8172` (== Block 06.2) |
+| `kOrnamentNeutral` | oro viejo MUY restringido — spark, marca de nav, divisores | `#AE9469` (nuevo) |
+| `kFocus` | anillo de foco oscuro, independiente del pet | `#26221E` (nuevo nombre) |
+| `kHoverWash` | wash sutil al hover | `#EFEAE1` (== Block 06) |
+| `kWalletSurface` / `kWalletBorder` | la cápsula del wallet | `#F1ECE1` / `#E1D9C9` (nuevo) |
+
+`UiTheme.h` reexporta los tokens y conserva los nombres de Block 06
+(`theme::kBackground`, …) como **alias** definidos en términos de los
+tokens — las vistas viejas compilan sin tocar nada; el código nuevo usa
+`tokens::`. El oro es un acento de ORNAMENTO: nunca una segunda moneda,
+nunca domina un control. Los tokens **no cambian por pet** (el acento por
+pet vive aparte, §23.3).
+
+### 23.2 Roles tipográficos (`productui::type::role`, DEC-142)
+
+No es un proyecto de font-pack: sigue la rasterización nativa segura por
+plataforma (`platform::RasterizeText`), sin fuente empacada. Solo se
+agregan NOMBRES semánticos sobre la escala existente — `kBrand` (16),
+`kHeroTitle` (25), `kSectionTitle` (15), `kBody` (13.5), `kMetadata`
+(13), `kCaption` (11.5), `kButton` (13), `kWallet` (13). El look serif
+editorial del mockup es inspiración para la jerarquía y el aire, no un
+mandato de traer un serif macOS-only.
+
+### 23.3 Identidad visual por pet — el registro CENTRALIZADO (`productui::PetAccent`, DEC-143)
+
+El `PetAccent` de Block 06.1 se vuelve la **única identidad lógica por
+pet** — un registro de primera parte en `src/productui/PetAccent.cpp`, en
+vez de `if (petId == "nidir")` desparramado por las vistas. Campos:
+`line` (acento primario), **`secondary`** (acento complementario — nuevo
+en 12A: el lóbulo secundario del hero stage, futuros toques de mundo),
+`shapeTint` (forma pálida del hero stage), `softFill` + `deepInk`
+(relleno / tinta del botón Primary), **`heroStage`** (`HeroStageStyle`
+`kSoftOval` / `kFacetedRound` — nuevo: la COSTURA por la que un bloque
+futuro de mundo/hero puede pedir un tratamiento por pet sin rediseñar el
+Product UI ni inventar un campo de catálogo para una imagen que no
+existe — brief §28), `angularShape` (conservado, == `heroStage ==
+kFacetedRound`).
+
+| Pet | primario | secundario | hero stage |
+|---|---|---|---|
+| **Bunny** | apricot / crema cálida `#E09B63` | crema profunda `#C9A984` | óvalo |
+| **Nidir** | amatista / violeta frío `#9386BE` | índigo profundo `#4B4374` | facetado (dragón) |
+| **Frin** | azul hielo pálido `#8FAFC4` | plata / azul `#A9B8C6` | óvalo |
+| roster futuro (Rato · Rin Rin · Artu · Kyubi · Sweetie) | ids TENTATIVOS, tonos del brief §9 | — | — |
+| **desconocido / sin identidad** | terracota neutro `#B46E3C` | terracota claro `#C89A6E` | óvalo |
+
+Un id desconocido devuelve el neutro con **todos los campos poblados y
+legibles** — nunca crashea, nunca deja texto invisible (brief §10). El
+`deepInk` sobre `softFill` de CADA identidad (reales + neutro) cumple
+WCAG AA para texto normal (≥ 4.5:1), verificado con
+`productui::ContrastRatio` en `PetAccentTest`, no "a ojo".
+
+### 23.4 Helpers de contraste (`productui::Contrast`, DEC-143)
+
+`src/productui/Contrast.h` (puro, header-only): `RelativeLuminance`,
+`ContrastRatio` (WCAG, simétrico, [1, 21]), `Mix`, `Darken`,
+`EnsureContrastOn(fg, bg, minRatio)` — oscurece `fg` hacia el negro lo
+justo para alcanzar el objetivo, **nunca aclara**, nunca devuelve algo
+menos legible que la entrada. No es un framework de accesibilidad: es el
+guardrail para que un acento por pet nunca produzca una etiqueta
+ilegible.
+
+### 23.5 Primitivas de ornamento procedurales (`productui::Ornaments`, DEC-144)
+
+Conjunto CHICO, primera parte, **sin imágenes**, estático (sin
+animación), Retina-safe (componen los fills por-scanline de `UiPainter`,
+más `UiPainter::FillDiamond` nuevo — spans en espacio de píxel).
+Geometría pura testeable en `OrnamentGeometry.h`.
+
+- **`DrawSparkle(cx, cy, radius, color)`** — estrella de 4 puntas (✦):
+  dos rombos finos cruzados. Wordmark + wallet + (chico) nada más.
+- **`DrawDiamond(rect, color)`** — rombo lleno inscrito. Separadores de
+  nav, marca del tab activo.
+- **`DrawOrnamentalDivider(band, line, ornament)`** — `──── ◇ ────`. El
+  motivo del divisor de detalle (referencia D). **Uno por pantalla**: el
+  borde hero/gallery de la Collection y hero/rail del Shop / Starter
+  Shop. No se inserta en todas partes.
+- **`DrawAccentRule(rect, color)`** — la regla de acento corta de 2 pt
+  bajo el nombre del hero (nombrado, consistente).
+- **`DrawHeadingMotif(x, centerY, color) -> avance`** — tick + rombo, a
+  la izquierda de un encabezado contextual (referencia E). "Nimvlets you
+  can meet" del Shop y la línea "Conoce más Nimvlets en la Tienda" de la
+  Collection con un solo poseído. El copy NO cambia.
+- **`DrawSoftPanel(rect, radius, surface, border, innerHighlight)`** —
+  panel enmarcado suave: superficie cálida + hairline exterior +
+  highlight interior casi-blanco opcional. **Sin drop shadow, sin
+  glass.**
+
+### 23.6 Sistema de botones (`productui::ButtonRole`, DEC-144)
+
+`src/productui/ButtonStyle.{h,cpp}` (puro) — tres roles con uso real hoy
+(brief §16: no crear estilos sin uso):
+
+| Rol | Uso | Tratamiento |
+|---|---|---|
+| **Primary** | la acción más fuerte con contexto de pet (`Use <pet>`, `Get <pet>`, `Confirm`) | relleno `softFill` + borde `line` + tinta `deepInk` del acento del pet, **clampada a contraste legible** (`EnsureContrastOn`) si un pet futuro no llega — nunca casi-negro arbitrario (DEC-121) |
+| **Secondary** | Cancelar / neutral (`Cancel`, `Check again`) | contorno hairline + tinta secundaria, sin relleno |
+| **Quiet** | baja énfasis (`Not now`) | tinta secundaria, sin borde, solo wash al hover |
+
+`ResolveButtonVisual(role, accent?, state)` es PURO; `accent == nullptr`
+⇒ fallback neutro. El anillo de foco es **`tokens::kFocus`** (oscuro,
+independiente del pet): un ring desplazado es una pista de FORMA, no solo
+de color (brief §20). `DrawButton` en `Ornaments.cpp` lo dibuja. Settings
+estrena el sistema SOLO en el aviso del conteo global (Continue =
+Primary, Not now = Quiet, Check again = Secondary) — sigue siendo la
+sección más callada, sin motivos por fila (brief §23).
+
+### 23.7 Wordmark + wallet pill + polish de nav (DEC-145)
+
+Todo en la cabecera COMPARTIDA (`SectionHeaderView`), solo tratamiento
+visual — la arquitectura de navegación, los hit targets y el soporte de
+teclado NO cambian (brief §15):
+
+- **Wordmark**: un spark procedural chico a la izquierda del nombre
+  literal `Nimvlets` (referencia A). No es un logo de imagen; el nombre
+  de la app en la barra de título del SO **no se toca**.
+- **Wallet pill**: el balance pasa de texto flotante a una **cápsula
+  cálida discreta** con un spark chico (referencia B). Clicks siguen
+  siendo la única moneda; sin estilo de moneda premium. `header.clicksText`
+  sigue siendo el ÚNICO string de balance dibujado — el invariante del
+  wallet canónico (DEC-138) queda intacto. El ancho sale de
+  `productui::ComputeWalletPill(textWidth)` (puro), así la vista y su
+  test no pueden divergir; entra `0` / `1` / `500` / valores grandes en
+  EN y ES, y a 600 / 800 / 1200 de ancho.
+- **Nav**: los separadores `·` pasan a rombos minúsculos en el tono
+  ornamento; el tab activo gana una regla fina de 1.5 pt + un rombo chico
+  centrado (referencia C).
+
+### 23.8 Cards y items de gallery (brief §21/§22)
+
+**No** es la pasada de composición del Shop (12B) ni de la Collection
+(12B). Las tarjetas de browse y los items de la gallery adoptan el
+lenguaje compartido: `DrawSoftPanel` — una superficie que "levanta" un
+susurro sobre su plano + hairline, wash al hover, anillo de foco neutro.
+El pedestal con el tinte de identidad del pet detrás del arte se
+conserva. Geometría de la rejilla, modelo de contenido, semántica de
+hover / selección: **sin cambios**.
+
+### 23.9 Alcance NO tocado
+
+- **Sin fondos escénicos del hero** (Block 12C). No se sintetiza un
+  mundo falso procedural, no hay imagen de fondo temporal. La costura
+  `heroStage` es lo único que 12A prepara.
+- **Sin favoritos** — el mockup muestra iconos de estrella/corazón; NO
+  hay feature de favoritos y no se implementó ninguna (brief §26).
+- **Sin imágenes / fuentes / dependencias nuevas** (brief §4/§5).
+- **Onboarding, Global Click, Starter Shop oculto, precios, flujo de
+  compra, persistencia**: intactos.
+- **Event-driven**: sin loop de render, sin partículas, sin shimmer, sin
+  glow animado. `RenderIfNeeded()` sigue siendo no-op salvo
+  `dirty_`/`EXPOSED`; el `waitMs` del event loop del pet no gana ningún
+  término (DEC-112 intacto).

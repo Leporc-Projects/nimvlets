@@ -320,6 +320,14 @@ NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=frin/male \
   NIMVLETS_DEV_PRODUCT_SHOT=/tmp/collection.bmp \
   ./build/macos-debug/src/app/nimvlets_spike
 
+# QA (Block 12A): redimensionar la ventana ANTES de capturar, para
+# revisar cabecera / nav / wallet pill en el mínimo soportado y en un
+# viewport ancho (formato WxH en puntos lógicos).
+NIMVLETS_DEV_HIDE_PET=1 NIMVLETS_DEV_OPEN_COLLECTION=1 NIMVLETS_DEV_SECTION=shop \
+  NIMVLETS_DEV_SHOP_PET=nidir NIMVLETS_DEV_PRODUCT_SHOT_SIZE=600x460 \
+  NIMVLETS_DEV_PRODUCT_SHOT=/tmp/shop_min.bmp \
+  ./build/macos-debug/src/app/nimvlets_spike
+
 # --- Shop (Block 07 + 09C browse-first) / Settings (Block 08) --------
 # NIMVLETS_DEV_SECTION=shop|settings|collection -> sección visible al abrir.
 # NIMVLETS_DEV_SHOP_PET=<petId>         -> abre el Shop con ESE personaje

@@ -5963,3 +5963,235 @@ canónico en vivo (DEC-138/DEC-140); Collection owned-only (DEC-136); Shop
 browse-first (DEC-135); el Starter Shop oculto (DEC-137/DEC-138);
 onboarding (DEC-131..DEC-134); la política de compra; el catálogo de
 producción; el contenido de Nidir/Frin.
+
+---
+
+### DEC-142 — Block 12A: capa de tokens visuales SEMÁNTICOS + roles tipográficos, evolucionando la paleta de Block 06 (no reemplazándola)
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A · **Estado:** vigente ·
+**Depende de** DEC-108/DEC-117 (paleta y acento de Block 06/06.1),
+DEC-120 (nitidez Retina del texto), DEC-130/DEC-138 (ruta canónica de
+preferencias / wallet canónico). **NO** toca ningún flujo de producto,
+persistencia, catálogo, onboarding, Global Click, ni el runtime del pet.
+
+**Contexto.** El owner aprobó fuertemente el mockup del universo
+Nimvlets y quiere que el producto se sienta como un mundo chico y
+coherente ANTES de que el usuario haga nada. Block 12A es la
+**fundación** deliberada: NO los fondos escénicos (Block 12C), sino el
+sistema visual reusable que Collection / Shop / hero-world futuros van a
+consumir. Hasta ahora los colores vivían como constantes semi-semánticas
+en `UiTheme.h` (`theme::kBackground`, `kHairline`, …) y crecían ad-hoc.
+
+**Decisión.**
+
+1. **`productui::tokens` (`src/productui/VisualTokens.h`, puro,
+   `nimvlets_productui_core`).** Una capa CHICA de intención nombrada:
+   `kCanvas` / `kSurface` / `kSurfaceRaised` / `kSurfaceSoft`, `kBorder`
+   / `kBorderInner`, `kTextPrimary` / `kTextSecondary` / `kTextMuted`,
+   `kOrnamentNeutral`, `kFocus`, `kHoverWash`, `kWalletSurface` /
+   `kWalletBorder`. Pocos, todos semánticos — no es un design system de
+   cientos de variables. Los valores **evolucionan** la base de blanco
+   hueso cálido de Block 06: los tres tonos de texto y el hairline son
+   idénticos a Block 06.2; lo nuevo es `kSurfaceRaised` (`#FBF9F4`, un
+   susurro de profundidad), `kBorderInner` (highlight casi-blanco),
+   `kOrnamentNeutral` (`#AE9469`, oro viejo MUY restringido) y la
+   cápsula del wallet.
+
+2. **El oro es un acento de ORNAMENTO, no una segunda moneda.**
+   `kOrnamentNeutral` solo se usa en el spark del wordmark, el spark del
+   wallet, los rombos de la nav y los divisores ornamentales — nunca en
+   un control, nunca dominando. Clicks siguen siendo la única moneda.
+
+3. **Compatibilidad sin churn.** `UiTheme.h` reexporta `tokens` y
+   redefine `theme::kBackground` etc. como **alias** en términos de los
+   tokens. Las ~15 vistas existentes compilan sin tocarse; el código
+   nuevo/modificado usa `tokens::`.
+
+4. **Roles tipográficos (`productui::type::role`).** Nombres semánticos
+   sobre la escala existente — `kBrand`, `kHeroTitle`, `kSectionTitle`,
+   `kBody`, `kMetadata`, `kCaption`, `kButton`, `kWallet`. **No** es un
+   proyecto de font-pack: se sigue usando `platform::RasterizeText`
+   (nativo, seguro por plataforma), sin fuente empacada ni un serif
+   macOS-only que haría divergir Windows/Linux. El look serif editorial
+   del mockup es inspiración para jerarquía/aire, no un mandato.
+
+**Tests.** `ContrastTest` fija que los tres tonos de texto cumplen sus
+objetivos de contraste sobre `kCanvas` (primario ≥ 12:1, secundario ≥
+4.5:1 AA, muted ≥ 3:1, y jerarquía primario > secundario > muted) y que
+`kSurfaceRaised` > canvas > `kSurfaceSoft` en luminancia.
+
+**Congelado sin tocar:** todos los flujos de producto (§0 del brief),
+event-driven, EN/ES, persistencia, catálogo.
+
+---
+
+### DEC-143 — Block 12A: `PetAccent` promovido al registro CENTRALIZADO de identidad visual por pet (+ `secondary`, costura `heroStage`, helpers de contraste)
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A · **Estado:** vigente ·
+**Depende de** DEC-117 (`PetAccent` de Block 06.1), DEC-121 (botón de
+acción con relleno/tinta de acento, nunca casi-negro). **Amplía**
+`PetAccent` sin romper su interfaz: `angularShape` se conserva.
+
+**Contexto.** El brief §9/§10 pide UNA identidad lógica por pet,
+centralizada, con fallback seguro, y diseñada para más de tres pets — no
+`if (petId == "nidir")` desparramado. `PetAccent` de Block 06.1 ya era
+esa costura (una tabla pura en `src/productui/PetAccent.cpp`); Block 12A
+la enriquece y la nombra como el registro.
+
+**Decisión.**
+
+1. **`PetAccent` gana `secondary`** (un acento complementario del mismo
+   pet — el lóbulo secundario del hero stage hoy, toques de mundo
+   futuros) y **`heroStage`** (`enum class HeroStageStyle {
+   kSoftOval, kFacetedRound }`). `heroStage` es la COSTURA
+   future-facing (brief §28): un bloque de mundo/hero puede pedir un
+   tratamiento de stage por pet SIN rediseñar el Product UI y SIN
+   inventar un campo de catálogo para una imagen que todavía no existe.
+   No se toca el schema del catálogo ni del pack.
+
+2. **Fallback neutro COMPLETO.** Un id desconocido / `""` devuelve el
+   terracota neutro con **todos** los campos poblados y legibles — nunca
+   crashea, nunca deja texto invisible (brief §10). Los ids tentativos
+   del roster futuro (Rato, Rin Rin, Artu, Kyubi, Sweetie) siguen
+   registrados con los tonos del brief §9.
+
+3. **`productui::Contrast` (`src/productui/Contrast.h`, puro,
+   header-only):** `RelativeLuminance`, `ContrastRatio` (WCAG),
+   `Mix`, `Darken`, `EnsureContrastOn(fg, bg, minRatio)` — oscurece
+   hacia el negro lo justo, **nunca aclara**, nunca devuelve algo menos
+   legible que la entrada. No es un framework de accesibilidad: es el
+   guardrail para que un acento por pet no produzca una etiqueta
+   ilegible.
+
+**Tests.** `PetAccentTest`: `heroStage` consistente con `angularShape`
+para cada pet + el fallback; `secondary` opaco, poblado y distinto de
+`line` para las 10 identidades; **`deepInk` sobre `softFill` ≥ 4.5:1
+(WCAG AA) para CADA identidad real y el neutro, medido con
+`ContrastRatio`** — no "a ojo". `ContrastTest` cubre los helpers.
+
+**Congelado sin tocar:** el arte de los pets, `.nvpack`, `.nvprev`, los
+runtime animations, el schema del catálogo.
+
+---
+
+### DEC-144 — Block 12A: primitivas de ornamento procedurales de primera parte + panel enmarcado suave + sistema de botones semántico — SIN imágenes
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A · **Estado:** vigente ·
+**Depende de** DEC-121 (relleno/tinta de acento para el botón primario),
+DEC-143 (registro de identidad + helpers de contraste), DEC-142
+(tokens). **NO** agrega dependencias, imágenes, fuentes ni un motor de
+gráficos vectoriales.
+
+**Contexto.** El brief §4/§5/§11/§12/§16 pide un conjunto CHICO de
+primitivas geométricas de primera parte y estilos de botón semánticos,
+todo alcanzable con el path de texto nativo + dibujo procedural +
+geometría, sin ningún asset.
+
+**Decisión.**
+
+1. **`productui::Ornaments` (`src/productui/Ornaments.{h,cpp}`, capa
+   SDL).** `DrawSparkle` (✦, dos rombos finos cruzados), `DrawDiamond`,
+   `DrawOrnamentalDivider` (`──── ◇ ────`), `DrawAccentRule`,
+   `DrawHeadingMotif` (tick + rombo, devuelve el avance), `DrawSoftPanel`
+   (superficie + hairline + highlight interior opcional — **sin drop
+   shadow, sin glass**). Retina-safe: componen los fills por-scanline de
+   `UiPainter`, más `UiPainter::FillDiamond` nuevo (spans en espacio de
+   píxel, misma ruta nítida que `FillEllipse`). Geometría pura testeable
+   en `src/productui/OrnamentGeometry.h`. **Estáticas** — sin animación,
+   sin partículas (brief §29).
+
+2. **Sistema de botones (`productui::ButtonStyle.{h,cpp}`, puro).**
+   `enum class ButtonRole { kPrimary, kSecondary, kQuiet }` — tres roles,
+   todos con uso real hoy (brief §16). `ResolveButtonVisual(role,
+   accent?, state)` es PURO: **Primary** = `softFill` / `line` /
+   `deepInk` del acento del pet, con `EnsureContrastOn` para que un pet
+   claro futuro nunca dé una etiqueta ilegible (brief §17); `accent ==
+   nullptr` ⇒ fallback neutro. **Secondary** = contorno hairline + tinta
+   secundaria. **Quiet** = tinta secundaria, sin borde, wash al hover.
+   El anillo de foco es `tokens::kFocus` (oscuro, independiente del pet):
+   un ring desplazado es una pista de FORMA, no solo de color (brief
+   §20). `DrawButton` (en `Ornaments.cpp`) lo dibuja.
+
+3. **Aplicación RESTRINGIDA (no un rediseño de flujos).**
+   - Wordmark: `DrawSparkle` a la izquierda de `Nimvlets` literal.
+   - Wallet: cápsula (`DrawSoftPanel` implícito vía round-rect) +
+     `DrawSparkle` + balance — `header.clicksText` sigue siendo el ÚNICO
+     string de balance (DEC-138 intacto).
+   - Nav: separadores `·` → `DrawDiamond`; tab activo → regla fina +
+     `DrawDiamond` centrado.
+   - Divisor ornamental: **uno por pantalla** — borde hero/gallery
+     (Collection) y hero/rail (Shop / Starter Shop).
+   - Motivo de encabezado: "Nimvlets you can meet" (Shop) y la línea de
+     un-solo-poseído (Collection). El copy NO cambia.
+   - CTAs del hero + Cancel/Confirm + aviso del conteo global de
+     Settings → `DrawButton`.
+   - Cards de browse + items de gallery → `DrawSoftPanel` (superficie
+     que levanta + hairline). Geometría de rejilla, contenido y
+     semántica de hover/selección: SIN cambios.
+
+4. **NO se implementa:** ningún fondo escénico ni mundo procedural falso
+   (Block 12C); ningún favorito / estrella / corazón aunque el mockup
+   los muestre (brief §26); ningún estilo de botón sin uso.
+
+**Tests.** `OrnamentGeometryTest` (bounds del spark centrados y
+simétricos, perfil del semi-ancho del rombo, largo de la regla del
+divisor, avance del motivo). `ButtonStyleTest` (Primary usa el acento y
+queda ≥ 4.5:1 legible para cada pet + neutro; null → neutro; un acento
+sintético ilegible se clampa; Secondary/Quiet sin relleno en reposo;
+estados foco/hover/disabled).
+
+**Congelado sin tocar:** los hit targets, el orden de foco, la
+navegación, la política event-driven, el Starter Shop oculto (sus
+primitivas compartidas se aplican solas y no revelan la entrada — brief
+§25).
+
+---
+
+### DEC-145 — Block 12A: wordmark con spark, wallet PILL, polish del tab activo de la navegación — solo tratamiento visual de la cabecera compartida
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A · **Estado:** vigente ·
+**Depende de** DEC-127 (cabecera compartida + navegación por texto),
+DEC-134 (`NavTargetSection` — las tres pestañas ruteadas por una tabla),
+DEC-138 (wallet canónico: `header.clicksText` es el único string de
+balance). **NO** cambia la arquitectura de navegación, los hit targets
+ni el soporte de teclado (brief §14/§15).
+
+**Contexto.** Referencias A/B/C del brief: el owner quiere `✦ Nimvlets`
+como wordmark sutil (no un logo de imagen), el balance como una
+**pill/cápsula** discreta (no texto flotante, y no un contador de gemas
+premium), y un estado activo de la nav más pulido (regla fina + marca
+ornamental chica + separadores elegantes), conservando el carácter de
+navegación de TEXTO.
+
+**Decisión.**
+
+1. **Wordmark.** `DrawSparkle` chico a la izquierda del nombre literal
+   `Nimvlets`. NO es un logo de imagen; el nombre de la app en la barra
+   de título del SO **no se toca** (brief §14).
+
+2. **Wallet pill.** El balance pasa a una cápsula `kWalletSurface` +
+   borde `kWalletBorder` + un spark chico + el balance. `header.clicksText`
+   sigue siendo el ÚNICO string de balance dibujado — el invariante del
+   wallet canónico (DEC-138) queda intacto; la pill es puro tratamiento.
+   El ancho sale de `productui::ComputeWalletPill(textWidth)` (PURO, en
+   `SectionNav`): la vista mide el texto real y la función arma la
+   geometría, así la vista y su test no pueden divergir. Entra `0` / `1`
+   / `500` / valores grandes (`1 000 000 clics`) en EN y ES, y a 600 /
+   800 / 1200 de ancho, sin chocar con el wordmark ni con las pestañas
+   (que van en una fila más abajo).
+
+3. **Nav.** `·` → `DrawDiamond` minúsculo en `kOrnamentNeutral`
+   atenuado; el tab activo gana una regla de **1.5 pt** + un `DrawDiamond`
+   chico centrado. El anillo de foco de un tab pasa a `tokens::kFocus`.
+   Todo lo demás (hit rects, orden de foco, `NavTargetSection`,
+   focus-visible por modalidad) intacto.
+
+**Tests.** `SectionNavTest`: `ComputeWalletPill` es sana y monótona en el
+ancho del texto (spark y texto dentro de la pill, en orden, padding
+derecho constante); la cabecera compartida "aguanta" a 600/800/1200 en
+EN y ES con balance `1 000 000` (ancla derecha en el margen, pestañas a
+su izquierda, pill libre del wordmark).
+
+**Congelado sin tocar:** `header.clicksText` / `WalletDisplay` /
+`SetClickBalance` (DEC-138/DEC-140), el menú rápido de la barra, la
+semántica de las pestañas.
