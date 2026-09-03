@@ -23,6 +23,20 @@ void DrawDiamond(UiPainter& p, const UiRect& r, UiColor color) {
     p.FillDiamond(r, color);
 }
 
+void DrawBrandEmblem(UiPainter& p, float cx, float cy, float size, UiColor color) {
+    if (size <= 0.0f || color.a == 0) {
+        return;
+    }
+    // Jerarquía: spark principal centrado, spark chico arriba-derecha,
+    // rombo minúsculo abajo-izquierda. Composición fija y determinista.
+    const float main = size * 0.42f;
+    DrawSparkle(p, cx, cy, main, color);
+    DrawSparkle(p, cx + size * 0.34f, cy - size * 0.30f, size * 0.20f, color);
+    const float d = size * 0.14f;
+    p.FillDiamond(UiRect{cx - size * 0.36f - d * 0.5f, cy + size * 0.26f - d * 0.5f, d, d},
+                  color.WithAlpha(color.a > 190 ? 190 : color.a));
+}
+
 void DrawOrnamentalDivider(UiPainter& p, const UiRect& band, UiColor line, UiColor ornament) {
     const float cy = band.CenterY();
     constexpr float kDiamond = 6.0f;
@@ -71,17 +85,38 @@ void DrawSoftPanel(
 void DrawButton(
     UiPainter& p, TextCache& text, const UiRect& r, const std::string& label, const ButtonVisual& v,
     const type::FontRole& role) {
+    const float radius = v.pill ? r.h * 0.5f : 9.0f;
+
+    // Filo de oro cálido, POR FUERA del botón (referencia concepto).
+    if (v.edgeAccent.a != 0) {
+        p.StrokeRoundRect(r.Inset(-1.5f), radius + 1.5f, 1.0f, v.edgeAccent);
+    }
     if (v.fill.a != 0) {
-        p.FillRoundRect(r, 9.0f, v.fill);
+        p.FillRoundRect(r, radius, v.fill);
+    }
+    // 2-tono sutil: un hairline claro arriba + uno oscuro abajo, sin
+    // gradiente real ni filtro caro (sensación "levantada").
+    if (v.topHighlight.a != 0) {
+        p.FillRect(UiRect{r.x + radius, r.y + 1.0f, std::max(0.0f, r.w - 2.0f * radius), 1.0f},
+                   v.topHighlight);
+    }
+    if (v.bottomShade.a != 0) {
+        p.FillRect(UiRect{r.x + radius, r.Bottom() - 2.0f, std::max(0.0f, r.w - 2.0f * radius), 1.0f},
+                   v.bottomShade);
     }
     if (v.border.a != 0 && v.borderWidth > 0.0f) {
-        p.StrokeRoundRect(r, 9.0f, v.borderWidth, v.border);
+        p.StrokeRoundRect(r, radius, v.borderWidth, v.border);
     }
     if (v.drawFocusRing) {
-        p.StrokeRoundRect(r.Inset(-3.0f), 12.0f, 2.0f, tokens::kFocus);
+        p.StrokeRoundRect(r.Inset(-3.5f), radius + 3.5f, 2.0f, tokens::kFocus);
     }
+
+    const float labelCap = v.sparkle ? r.w - 34.0f : r.w - 6.0f;
     DrawText(p, text, label, role, v.ink, r.CenterX(), r.CenterY() + 4.5f, HAlign::kCenter,
-             static_cast<int>(r.w - 6.0f));
+             static_cast<int>(std::max(8.0f, labelCap)));
+    if (v.sparkle) {
+        DrawSparkle(p, r.Right() - 15.0f, r.CenterY(), 4.0f, v.ink);
+    }
 }
 
 }  // namespace nimvlets::productui

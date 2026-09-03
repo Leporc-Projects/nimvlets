@@ -149,6 +149,8 @@ class SettingsView {
     // ProductWindow) para que BuildLayout() lo pase a la cabecera
     // compartida — igual que Collection / Shop.
     std::uint64_t clickBalance_ = 0;
+    // Anchos MEDIDOS de los rótulos de nav (convergencia DEC-147).
+    float navLabelWidths_[3] = {0.0f, 0.0f, 0.0f};
 
     FocusList focus_;
 

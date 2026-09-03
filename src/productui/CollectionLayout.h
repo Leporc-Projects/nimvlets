@@ -71,7 +71,12 @@ struct CollectionHero {
     UiRect stagePrimary;    // óvalo/blob grande, se extiende bastante más que el arte
     UiRect stageSecondary;  // primitiva más chica, descentrada hacia el texto
     UiRect art;             // caja del arte grande
-    UiRect nameRule;        // línea de acento fina (2pt) bajo el nombre
+
+    // Panel enmarcado suave alrededor de TODO el hero (convergencia
+    // DEC-147) — "esto es mi compañero", no un producto de tienda.
+    UiRect heroPanel;
+    UiRect nameRule;          // DIVISOR 1: ancho de la columna, rombo central = acento del pet
+    UiRect detailDividerRect; // DIVISOR 2: identidad -> acción (rombo neutro); w == 0 si no hay descr.
 
     UiRect nameAnchor;         // ancla IZQUIERDA del nombre
     UiRect speciesAnchor;

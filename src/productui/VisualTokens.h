@@ -51,6 +51,12 @@ constexpr UiColor kOrnamentNeutral{0xAE, 0x94, 0x69, 0xFF}; // oro viejo MUY res
 constexpr UiColor kFocus{0x26, 0x22, 0x1E, 0xFF};           // anillo de foco — oscuro, independiente del pet (forma + contraste, nunca solo tono)
 constexpr UiColor kHoverWash{0xEF, 0xEA, 0xE1, 0xFF};       // wash sutil al pasar el mouse
 
+// --- Estado seleccionado de un control segmentado (Settings) ------
+// Marrón cálido PROFUNDO en vez de negro macizo (convergencia DEC-147):
+// inconfundible, pero armonizado con el resto de la paleta cálida.
+constexpr UiColor kSelectedFill{0x33, 0x2B, 0x22, 0xFF};
+constexpr UiColor kSelectedInk{0xF4, 0xEE, 0xE3, 0xFF};   // cream cálido — etiqueta sobre kSelectedFill
+
 // --- Cápsula del wallet (pill discreto — NO estilo de moneda premium) --
 constexpr UiColor kWalletSurface{0xF1, 0xEC, 0xE1, 0xFF};   // relleno cálido: la pill se lee como un objeto del mundo
 constexpr UiColor kWalletBorder{0xE1, 0xD9, 0xC9, 0xFF};    // borde cálido fino

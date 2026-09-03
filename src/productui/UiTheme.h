@@ -81,14 +81,18 @@ struct FontRole {
 namespace role {
 
 // DISPLAY / editorial -> SERIF del sistema.
-constexpr FontRole kBrand{16.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.2};
-constexpr FontRole kHeroTitle{25.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.0};
+constexpr FontRole kBrand{17.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.2};
+constexpr FontRole kHeroTitle{26.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.0};
 // Rótulos de sección + pestañas de navegación (el peso lo fija el
 // caller con WithWeight: semibold activa, regular inactiva).
 constexpr FontRole kSectionLabel{15.0, platform::TextWeight::kMedium, platform::TextFamily::kSerif, 0.3};
 // Títulos de grupo de Settings ("Companion" / "Language" / …) — chico,
 // apagado, un pelín más de interletraje para leerse como rótulo.
 constexpr FontRole kGroupTitle{12.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.6};
+// Nombres de personaje en las cards de browse / gallery (convergencia
+// DEC-147): serif chico, para que las cards se lean editoriales sin
+// perder legibilidad. El precio / estado de la card sigue en sans.
+constexpr FontRole kCardName{13.5, platform::TextWeight::kMedium, platform::TextFamily::kSerif, 0.0};
 
 // TEXTO -> SANS del sistema, sin cambios: legibilidad primero.
 constexpr FontRole kBody{13.5, platform::TextWeight::kRegular, platform::TextFamily::kSans, 0.0};
@@ -96,6 +100,9 @@ constexpr FontRole kMetadata{13.0, platform::TextWeight::kRegular, platform::Tex
 constexpr FontRole kCaption{11.5, platform::TextWeight::kRegular, platform::TextFamily::kSans, 0.0};
 constexpr FontRole kButton{13.0, platform::TextWeight::kSemibold, platform::TextFamily::kSans, 0.2};
 constexpr FontRole kWallet{13.0, platform::TextWeight::kMedium, platform::TextFamily::kSans, 0.0};
+// Precio del hero del Shop (referencia concepto: "✦ 300 clicks" más
+// confiado que el cuerpo). Sans numérico, como el wallet.
+constexpr FontRole kPrice{15.0, platform::TextWeight::kSemibold, platform::TextFamily::kSans, 0.0};
 
 }  // namespace role
 

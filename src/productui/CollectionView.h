@@ -104,6 +104,10 @@ class CollectionView {
     // camino de input — lo pase a la cabecera compartida.
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
+    // Anchos MEDIDOS de los rótulos de nav (serif): los fija Render()
+    // con TextCache y BuildLayout() los pasa a ReflowNavTabs para
+    // colocar las pestañas con precisión (convergencia DEC-147).
+    float navLabelWidths_[3] = {0.0f, 0.0f, 0.0f};
 
     FocusList focus_;
     // "" => el hero sigue al pet activo del modelo.

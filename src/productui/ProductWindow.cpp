@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "platform/TransparentWindowSupport.h"
+#include "productui/SectionHeaderView.h"
 #include "productui/UiPaint.h"
 
 namespace nimvlets::productui {
@@ -345,8 +346,15 @@ ProductSection ProductWindow::ClickNavTabForQA(ProductSection target) {
     int logicalH = kDefaultH;
     SDL_GetWindowSize(window_, &logicalW, &logicalH);
     // 40 pt = el kMargin compartido por Collection / Shop / Settings.
-    const SectionHeaderLayout header = BuildSectionHeaderLayout(
+    SectionHeaderLayout header = BuildSectionHeaderLayout(
         static_cast<float>(logicalW), 40.0f, 0.0f, section_, language_, wallet_.Value());
+    // Reflow con anchos medidos — el MISMO camino que la vista real, para
+    // que el click sintético caiga donde el owner realmente la ve.
+    float nlw[3] = {0.0f, 0.0f, 0.0f};
+    if (text_) {
+        MeasureNavLabels(*text_, language_, scale_, nlw);
+    }
+    ReflowNavTabs(header, nlw, static_cast<float>(logicalW), 40.0f);
     const SectionTab* tab = nullptr;
     for (const SectionTab& t : header.tabs) {
         if (t.section == target) {

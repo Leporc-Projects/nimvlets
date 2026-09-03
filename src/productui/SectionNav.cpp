@@ -103,6 +103,28 @@ SectionHeaderLayout BuildSectionHeaderLayout(
     return out;
 }
 
+void ReflowNavTabs(SectionHeaderLayout& header, const float w[3], float viewportW, float marginX) {
+    if (header.tabs.size() != 3 || w[0] <= 0.5f || w[1] <= 0.5f || w[2] <= 0.5f) {
+        return;  // sin medidas -> se queda la aproximación de BuildSectionHeaderLayout
+    }
+    const float contentW = viewportW - 2.0f * marginX;
+    const float blockW = w[0] + w[1] + w[2] + 2.0f * kTabGap;
+    // Centrado en el ancho de contenido; si no entra, anclado al margen.
+    float x = marginX + std::max(0.0f, (contentW - blockW) * 0.5f);
+    const float tabY = header.tabs[0].labelAnchor.y;
+
+    for (std::size_t i = 0; i < 3; ++i) {
+        SectionTab& tab = header.tabs[i];
+        const float lw = w[i];
+        tab.labelAnchor = UiRect{x, tabY, lw, kTabsH};
+        tab.hitRect = UiRect{x - kTabPadX, tabY - kTabHitPadY, lw + 2.0f * kTabPadX,
+                             kTabsH + 2.0f * kTabHitPadY};
+        tab.underline = tab.active ? UiRect{x, tabY + kTabsH - 2.0f, lw, 2.0f}
+                                   : UiRect{x, tabY + kTabsH - 2.0f, 0.0f, 2.0f};
+        x += lw + kTabGap;
+    }
+}
+
 WalletPillMetrics ComputeWalletPill(float textWidth) {
     // spark + hueco + balance, con aire igual a cada lado. Valores
     // elegidos para que "1 000 000 clics" (el caso grande del brief §32)

@@ -42,21 +42,28 @@ constexpr float kBrowsePadBottom = 10.0f;
 // --- Hero (kSelected) — mismas proporciones que la Collection --------
 constexpr float kHeroArt = 216.0f;
 constexpr float kHeroTextGap = 40.0f;
-constexpr float kHeroNameH = 32.0f;
-constexpr float kHeroRuleGap = 12.0f;
-constexpr float kHeroRuleW = 46.0f;
+constexpr float kHeroNameH = 34.0f;
+constexpr float kHeroRuleGap = 14.0f;   // nombre -> divisor 1
 constexpr float kHeroRuleH = 2.0f;
 constexpr float kSpeciesGap = 12.0f;
 constexpr float kSpeciesH = 16.0f;
-constexpr float kDescGap = 8.0f;
+constexpr float kDescGap = 10.0f;
 constexpr float kDescLineH = 17.0f;
 constexpr int kDescMaxLines = 3;
-constexpr float kBlockGap = 14.0f;
-constexpr float kPriceH = 17.0f;
+// Espacio "identidad -> economía": divisor 2 con aire a ambos lados
+// (solo si hay descripción; si no, un gap chico).
+constexpr float kPreDivider2 = 16.0f;
+constexpr float kDivider2H = 10.0f;
+constexpr float kPostDivider2 = 16.0f;
+constexpr float kBlockGapNoDesc = 14.0f;
+constexpr float kPriceH = 22.0f;
 constexpr float kPriceToAction = 12.0f;
-constexpr float kHeroButtonH = 36.0f;
-constexpr float kHeroButtonPadX = 22.0f;
+constexpr float kHeroButtonH = 42.0f;   // pill más generosa (referencia CTA)
+constexpr float kHeroButtonPadX = 30.0f;
+constexpr float kHeroButtonSparkRoom = 18.0f;  // spark a la derecha de la CTA
 constexpr float kHeroStatusH = 18.0f;
+// Panel enmarcado del hero: aire alrededor de todo el bloque.
+constexpr float kHeroPanelPad = 16.0f;
 
 constexpr float kConfirmPromptH = 34.0f;   // hasta 2 líneas
 constexpr float kConfirmGap = 12.0f;
@@ -261,6 +268,7 @@ float LayoutShopHero(
 
     const bool hasSpecies = !h.speciesText.empty();
     const bool hasDesc = !h.descriptionText.empty();
+    const float blockGap2 = hasDesc ? (kPreDivider2 + kDivider2H + kPostDivider2) : kBlockGapNoDesc;
 
     float blockH = kHeroNameH + kHeroRuleGap + kHeroRuleH;
     if (hasSpecies) {
@@ -269,7 +277,7 @@ float LayoutShopHero(
     if (hasDesc) {
         blockH += kDescGap + kDescLineH * static_cast<float>(kDescMaxLines);
     }
-    blockH += kBlockGap;
+    blockH += blockGap2;
     if (!owned) {
         blockH += kPriceH + kPriceToAction;
     }
@@ -292,7 +300,8 @@ float LayoutShopHero(
     float y = blockTop;
     h.nameAnchor = UiRect{textX, y, textW, kHeroNameH};
     y += kHeroNameH + kHeroRuleGap;
-    h.nameRule = UiRect{textX, y, kHeroRuleW, kHeroRuleH};
+    // Divisor 1: ancho de la columna (rombo central = acento del pet).
+    h.nameRule = UiRect{textX, y, textW, kHeroRuleH};
     y += kHeroRuleH;
     if (hasSpecies) {
         y += kSpeciesGap;
@@ -304,7 +313,14 @@ float LayoutShopHero(
         h.descriptionAnchor = UiRect{textX, y, textW, kDescLineH * static_cast<float>(kDescMaxLines)};
         y += kDescLineH * static_cast<float>(kDescMaxLines);
     }
-    y += kBlockGap;
+    // Divisor 2: identidad/descripción -> precio/acción (rombo neutro).
+    if (hasDesc) {
+        y += kPreDivider2;
+        h.detailDividerRect = UiRect{textX, y, textW, kDivider2H};
+        y += kDivider2H + kPostDivider2;
+    } else {
+        y += kBlockGapNoDesc;
+    }
 
     if (!owned) {
         h.priceAnchor = UiRect{textX, y, textW, kPriceH};
@@ -325,8 +341,9 @@ float LayoutShopHero(
         focusOrder.push_back(h.confirm.confirmFocusId);
         y += kConfirmButtonH;
     } else if (h.actionEnabled) {
-        const float buttonW =
-            kHeroButtonPadX * 2.0f + static_cast<float>(h.actionLabel.size()) * kApproxCharW;
+        const float buttonW = kHeroButtonPadX * 2.0f +
+                              static_cast<float>(h.actionLabel.size()) * kApproxCharW +
+                              kHeroButtonSparkRoom;
         h.actionButton = UiRect{textX, y, buttonW, kHeroButtonH};
         focusOrder.push_back(h.actionFocusId);
         y += kHeroButtonH;
@@ -335,7 +352,14 @@ float LayoutShopHero(
         y += kHeroStatusH;
     }
 
-    return std::max(h.art.Bottom(), y);
+    const float heroBottom = std::max(h.art.Bottom(), y);
+    // Panel enmarcado suave alrededor de TODO el hero (arte + detalle).
+    // El borde SUPERIOR se mantiene por debajo del clip de la vista
+    // (kHeaderClipTop): un pad chico arriba, generoso abajo/lados.
+    constexpr float kHeroPanelTopPad = 4.0f;
+    h.heroPanel = UiRect{kMargin - 6.0f, heroTop - kHeroPanelTopPad, contentW + 12.0f,
+                         (heroBottom - heroTop) + kHeroPanelTopPad + kHeroPanelPad};
+    return heroBottom;
 }
 
 // --- Miembros de ShopLayout -----------------------------------------

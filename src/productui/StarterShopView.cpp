@@ -16,10 +16,8 @@ using platform::TextWeight;
 
 namespace {
 
-constexpr float kHeaderClipTop = 106.0f;
+constexpr float kHeaderClipTop = 100.0f;  // deja lugar al borde superior del panel enmarcado del hero (convergencia DEC-147)
 constexpr float kWheelStep = 48.0f;
-constexpr unsigned char kPedestalAlpha = 52;
-constexpr unsigned char kRailPedestalAlpha = 44;
 
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
@@ -78,7 +76,9 @@ StarterShopLayout StarterShopView::BuildLayout(float w, float h) const {
     in.selectedFocusId = selectedFocusId_;
     in.hoverFocusId = hoverId_;
     in.confirming = confirming_;
-    return BuildStarterShopLayout(model_, in);
+    StarterShopLayout layout = BuildStarterShopLayout(model_, in);
+    ReflowNavTabs(layout.header, navLabelWidths_, w, 40.0f);
+    return layout;
 }
 
 void StarterShopView::SyncFocusList(const StarterShopLayout& layout) {
@@ -289,6 +289,7 @@ void StarterShopView::Render(
     viewportW_ = viewportW;
     viewportH_ = viewportH;
     clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow
+    MeasureNavLabels(text, language_, painter.Scale(), navLabelWidths_);
 
     const StarterShopLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -321,25 +322,21 @@ void StarterShopView::Render(
         for (const ShopTile& t : layout.tiles) {
             const bool hovered = hoverId_ == t.focusId;
             const bool focused = focusedId == t.focusId;
-            DrawShopTile(painter, text, previews, t, type::kGalleryName, kPedestalAlpha, hovered,
-                         focused, /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
+            DrawShopTile(painter, text, previews, t, type::role::kCardName, hovered, focused,
+                         /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
         }
         painter.PopClip();
         return;
     }
 
-    // SELECTED.
+    // SELECTED — el panel del hero ya separa hero y rail (convergencia DEC-147).
     painter.FillRect(layout.shelfBackground, tokens::kSurfaceSoft);
     DrawShopHero(painter, text, previews, layout.hero, focusedId);
-    DrawOrnamentalDivider(
-        painter,
-        UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
-        tokens::kBorder, tokens::kOrnamentNeutral);
     for (const ShopTile& t : layout.rail) {
         const bool hovered = hoverId_ == t.focusId;
         const bool focused = focusedId == t.focusId;
-        DrawShopTile(painter, text, previews, t, type::kGalleryStatus, kRailPedestalAlpha, hovered,
-                     focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
+        DrawShopTile(painter, text, previews, t, type::role::kCardName.WithSize(11.5),
+                     hovered, focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
     }
     painter.PopClip();
 }

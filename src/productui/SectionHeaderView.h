@@ -35,4 +35,12 @@ void DrawSectionHeader(
     const std::string& hoverFocusId,
     const std::string& keyboardFocusId);
 
+// Mide los tres rótulos de navegación localizados
+// (Collection / Shop / Settings) con la tipografía real (serif, rol
+// `type::role::kSectionLabel`) a la escala dada, y escribe sus anchos
+// lógicos en `outW[0..2]`. La vista lo llama una vez por render y pasa
+// el resultado a `ReflowNavTabs` para colocar las pestañas con
+// precisión (convergencia DEC-147).
+void MeasureNavLabels(TextCache& text, core::Language lang, float scale, float outW[3]);
+
 }  // namespace nimvlets::productui

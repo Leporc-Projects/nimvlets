@@ -28,8 +28,7 @@ constexpr float kHeroArt = 216.0f;
 constexpr float kHeroTextGap = 40.0f;   // arte -> columna de texto
 
 constexpr float kHeroNameH = 32.0f;
-constexpr float kHeroRuleGap = 12.0f;   // base del nombre -> regla de acento
-constexpr float kHeroRuleW = 46.0f;
+constexpr float kHeroRuleGap = 12.0f;   // base del nombre -> divisor 1
 constexpr float kHeroRuleH = 2.0f;
 constexpr float kSpeciesGap = 12.0f;
 constexpr float kSpeciesH = 16.0f;
@@ -40,14 +39,26 @@ constexpr float kDescGap = 8.0f;
 // descriptionAnchor.w.
 constexpr float kDescLineH = 17.0f;
 constexpr int kDescLines = 3;
-constexpr float kBlockGap = 14.0f;      // texto -> chips/acción
+// "identidad -> acción": divisor 2 SOLO cuando hay descripción Y NO hay
+// selector de variante (Bunny/Nidir). Con chips el propio selector ya
+// hace de transición y el hero no entra en 800x560 (Frin). Gaps
+// contenidos para no forzar scroll (brief §7: respetar el layout).
+constexpr float kPreDivider2 = 10.0f;
+constexpr float kDivider2H = 8.0f;
+constexpr float kPostDivider2 = 10.0f;
+constexpr float kBlockGapNoDivider = 14.0f;
 constexpr float kHeroChipH = 26.0f;
 constexpr float kHeroChipPadX = 10.0f;
 constexpr float kHeroChipGap = 22.0f;   // incluye el "·" separador
 constexpr float kChipToAction = 16.0f;
+// La CTA "Use <pet>" comparte la FAMILIA de la del Shop (pill,
+// relleno de acento, filo de oro) pero SIN el spark de economía y con
+// el alto original — Collection no es una tienda (brief §12/§20).
 constexpr float kHeroButtonH = 36.0f;
-constexpr float kHeroButtonPadX = 22.0f;
+constexpr float kHeroButtonPadX = 30.0f;
 constexpr float kHeroStatusH = 18.0f;
+constexpr float kHeroPanelPad = 16.0f;  // aire del panel enmarcado (lados/abajo)
+constexpr float kHeroPanelTopPad = 4.0f;
 
 constexpr float kDividerGap = 24.0f;
 constexpr float kGalleryGap = 22.0f;
@@ -222,6 +233,9 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
 
     // Alto del bloque de texto, para centrarlo verticalmente contra el
     // arte (así el hero no queda pesado arriba — brief §8/§26).
+    const bool useDivider2 = hasDesc && !hasChips;
+    const float blockGap2 =
+        useDivider2 ? (kPreDivider2 + kDivider2H + kPostDivider2) : kBlockGapNoDivider;
     float blockH = kHeroNameH + kHeroRuleGap + kHeroRuleH;
     if (hasSpecies) {
         blockH += kSpeciesGap + kSpeciesH;
@@ -229,7 +243,7 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     if (hasDesc) {
         blockH += kDescGap + kDescLineH * static_cast<float>(kDescLines);
     }
-    blockH += kBlockGap;
+    blockH += blockGap2;
     if (hasChips) {
         blockH += kHeroChipH + kChipToAction;
     }
@@ -253,7 +267,8 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     float y = blockTop;
     h.nameAnchor = UiRect{textX, y, textW, kHeroNameH};
     y += kHeroNameH + kHeroRuleGap;
-    h.nameRule = UiRect{textX, y, kHeroRuleW, kHeroRuleH};
+    // DIVISOR 1: ancho de la columna (rombo central = acento del pet).
+    h.nameRule = UiRect{textX, y, textW, kHeroRuleH};
     y += kHeroRuleH;
     if (hasSpecies) {
         y += kSpeciesGap;
@@ -265,7 +280,15 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
         h.descriptionAnchor = UiRect{textX, y, textW, kDescLineH * static_cast<float>(kDescLines)};
         y += kDescLineH * static_cast<float>(kDescLines);
     }
-    y += kBlockGap;
+    // DIVISOR 2: identidad/descripción -> acción (rombo neutro). Solo
+    // Bunny/Nidir (sin selector de variante).
+    if (useDivider2) {
+        y += kPreDivider2;
+        h.detailDividerRect = UiRect{textX, y, textW, kDivider2H};
+        y += kDivider2H + kPostDivider2;
+    } else {
+        y += kBlockGapNoDivider;
+    }
 
     if (hasChips) {
         float chipX = textX;
@@ -300,6 +323,9 @@ CollectionLayout BuildCollectionLayout(const CollectionModel& model, const Colle
     }
 
     const float heroBottom = std::max(h.art.Bottom(), y);
+    // Panel enmarcado suave alrededor de TODO el hero.
+    h.heroPanel = UiRect{kMargin - 6.0f, heroTop - kHeroPanelTopPad, contentW + 12.0f,
+                         (heroBottom - heroTop) + kHeroPanelTopPad + kHeroPanelPad};
 
     // --- Gallery: todos los pets POSEÍDOS menos el hero (el modelo ya
     //     excluye los no poseídos — DEC-136) ---

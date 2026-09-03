@@ -51,6 +51,40 @@ inline UiColor Darken(UiColor c, double amount) {
     return Mix(c, UiColor{0, 0, 0, c.a}, amount);
 }
 
+// Aclara `c` moviéndolo `amount` (0..1) hacia el blanco.
+inline UiColor Lighten(UiColor c, double amount) {
+    return Mix(c, UiColor{255, 255, 255, c.a}, amount);
+}
+
+// Elige entre una tinta OSCURA y una CLARA candidatas la que da mejor
+// contraste sobre `bg`; si la ganadora aún no llega a `minRatio`, la
+// empuja al extremo (negro o blanco) lo justo (Block 12A convergencia —
+// DEC-147). Para un botón cuyo relleno puede ser claro (etiqueta
+// oscura) u oscuro (etiqueta cream) según el pet. Determinista.
+inline UiColor BestForeground(UiColor bg, UiColor darkCandidate, UiColor lightCandidate,
+                              double minRatio) {
+    const double d = ContrastRatio(darkCandidate, bg);
+    const double l = ContrastRatio(lightCandidate, bg);
+    if (d >= l) {
+        UiColor best = darkCandidate;
+        for (int i = 0; i <= 20; ++i) {
+            best = Darken(darkCandidate, static_cast<double>(i) * 0.05);
+            if (ContrastRatio(best, bg) >= minRatio) {
+                return best;
+            }
+        }
+        return best;
+    }
+    UiColor best = lightCandidate;
+    for (int i = 0; i <= 20; ++i) {
+        best = Lighten(lightCandidate, static_cast<double>(i) * 0.05);
+        if (ContrastRatio(best, bg) >= minRatio) {
+            return best;
+        }
+    }
+    return best;
+}
+
 // Devuelve `fg` oscurecido lo justo para alcanzar `minRatio` contra
 // `bg` (pasos hacia el negro), o el paso más oscuro probado si ni el
 // negro alcanza. NUNCA aclara, nunca devuelve algo MENOS legible que la

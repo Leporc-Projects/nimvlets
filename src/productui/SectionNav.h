@@ -77,10 +77,31 @@ struct SectionHeaderLayout {
 // Construye la cabecera. `scrollY` se resta de todas las y (la vista la
 // dibuja fuera de su clip de scroll, igual que la Collection de Block
 // 06). `clickBalance` es el balance CANÓNICO (de ProductWindow) — se
-// formatea acá a `clicksText`. Puro y determinista.
+// formatea acá a `clicksText`. Puro y determinista. Las pestañas se
+// posicionan con un ANCHO APROXIMADO por carácter; la vista, que sí
+// puede medir texto, llama después a `ReflowNavTabs` para colocarlas
+// con precisión (ver abajo).
 SectionHeaderLayout BuildSectionHeaderLayout(
     float viewportW, float marginX, float scrollY, ProductSection active, core::Language lang,
     std::uint64_t clickBalance);
+
+// --- Reflow de las pestañas con ANCHOS MEDIDOS (convergencia DEC-147) --
+//
+// `BuildSectionHeaderLayout` usa un ancho aproximado por carácter, que
+// con la tipografía serif hace que los rombos separadores y la regla
+// del indicador activo queden un poco corridos. La VISTA mide los tres
+// rótulos (serif, rol kSectionLabel) con `TextCache` y llama a esta
+// función pura — que recoloca `labelAnchor` / `hitRect` / `underline`
+// de las tres pestañas con esos anchos reales y, si entra, **centra**
+// el bloque de navegación en el ancho de contenido (referencia
+// concepto). El comportamiento (focusIds, ruteo, orden) NO cambia:
+// solo se mueven los rectángulos. Con `w = {0,0,0}` es un no-op
+// (sigue valiendo la aproximación) — así los tests y los hooks de QA
+// que no miden texto no se rompen.
+//
+// `w[0..2]` = ancho medido de {Collection, Shop, Settings} en puntos
+// lógicos (<= 0 en cualquiera => se ignora TODO el reflow).
+void ReflowNavTabs(SectionHeaderLayout& header, const float w[3], float viewportW, float marginX);
 
 // --- Métricas de la pill del wallet (Block 12A) ---------------------
 //

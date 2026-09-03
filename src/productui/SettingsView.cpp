@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "productui/ButtonStyle.h"
+#include "productui/Contrast.h"
 #include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
@@ -141,7 +142,9 @@ SettingsLayout SettingsView::BuildLayout(float w, float h) const {
     in.petShown = petShown_;
     in.positionResetAvailable = positionResetAvailable_;
     in.clickBalance = clickBalance_;  // cache empujado por ProductWindow en cada Render
-    return BuildSettingsLayout(in);
+    SettingsLayout layout = BuildSettingsLayout(in);
+    ReflowNavTabs(layout.header, navLabelWidths_, w, 40.0f);
+    return layout;
 }
 
 void SettingsView::SyncFocusList(const SettingsLayout& layout) {
@@ -467,6 +470,7 @@ void SettingsView::Render(
     // Block 10): antes Settings pasaba `0` hard-codeado y su cabecera
     // mostraba "0 clicks" mientras Collection / Shop mostraban el real.
     clickBalance_ = clickBalance;
+    MeasureNavLabels(text, prefs_.language, painter.Scale(), navLabelWidths_);
 
     const SettingsLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -500,18 +504,23 @@ void SettingsView::Render(
             for (const SettingsSegment& seg : row.segments) {
                 const bool hovered = seg.enabled && hoverId_ == seg.focusId;
                 if (seg.selected) {
-                    painter.FillRoundRect(seg.rect, 7.0f, theme::kText);
+                    // Marrón cálido profundo + un borde interior sutil —
+                    // menos "pill negra maciza", más parte del sistema
+                    // cálido (owner QA — DEC-147).
+                    painter.FillRoundRect(seg.rect, 8.0f, tokens::kSelectedFill);
+                    painter.StrokeRoundRect(seg.rect.Inset(1.0f), 7.0f, 1.0f,
+                                            Lighten(tokens::kSelectedFill, 0.22));
                 } else {
                     if (hovered) {
-                        painter.FillRoundRect(seg.rect, 7.0f, theme::kHoverWash);
+                        painter.FillRoundRect(seg.rect, 8.0f, theme::kHoverWash);
                     }
-                    painter.StrokeRoundRect(seg.rect, 7.0f, 1.25f, theme::kHairline);
+                    painter.StrokeRoundRect(seg.rect, 8.0f, 1.25f, theme::kHairline);
                 }
                 // Un segmento apagado ("Anywhere" sin capacidad de
                 // plataforma) se dibuja con la tinta más tenue del tema:
                 // se ve que la opción EXISTE, y la línea de estado de
                 // abajo explica por qué no se puede elegir acá.
-                const UiColor segInk = seg.selected      ? theme::kBackground
+                const UiColor segInk = seg.selected      ? tokens::kSelectedInk
                                        : seg.enabled     ? theme::kTextMuted
                                                          : theme::kHairline;
                 DrawText(painter, text, seg.label, type::kButton,

@@ -136,7 +136,18 @@ struct ShopHero {
     UiRect stagePrimary;
     UiRect stageSecondary;
     UiRect art;
+
+    // Panel enmarcado suave alrededor de TODO el hero (arte + detalle) —
+    // la "editorial panel" de la referencia (convergencia DEC-147).
+    UiRect heroPanel;
+
+    // Divisor 1: bajo el nombre, ancho de la columna de texto, rombo
+    // central en el ACENTO DEL PET (identidad).
     UiRect nameRule;
+    // Divisor 2: entre la descripción y el precio/acción, ancho de la
+    // columna, rombo central NEUTRO (separa identidad de economía —
+    // brief §8). w == 0 si no hay descripción (no se dibuja).
+    UiRect detailDividerRect;
 
     UiRect nameAnchor;
     UiRect speciesAnchor;

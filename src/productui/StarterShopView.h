@@ -99,6 +99,8 @@ class StarterShopView {
     // ProductWindow) para que BuildLayout() lo pase a la cabecera.
     std::uint64_t clickBalance_ = 0;
     core::Language language_ = core::Language::kEn;
+    // Anchos MEDIDOS de los rótulos de nav (convergencia DEC-147).
+    float navLabelWidths_[3] = {0.0f, 0.0f, 0.0f};
 
     FocusList focus_;
     std::string selectedFocusId_;  // "" => modo BROWSE

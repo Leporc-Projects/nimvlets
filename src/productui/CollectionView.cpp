@@ -17,7 +17,7 @@ using platform::TextWeight;
 
 namespace {
 
-constexpr float kHeaderClipTop = 106.0f;  // el hero stage arranca en ~96; arriba de acá no se recorta
+constexpr float kHeaderClipTop = 100.0f;  // deja lugar al borde superior del panel enmarcado del hero (convergencia DEC-147)
 constexpr float kWheelStep = 48.0f;
 
 // Alpha de las primitivas del hero stage: el stage "apoya" el arte,
@@ -29,11 +29,6 @@ constexpr unsigned char kStageSecondaryAlpha = 52;
 // Alpha del arte de un pet locked: visible pero más callado, NO
 // grayscale/opacidad agresiva (brief §12/§13).
 constexpr unsigned char kLockedArtAlpha = 150;
-
-// Pedestal del arte en la gallery: un tinte de identidad MUY tenue en
-// vez del mismo cuadrado neutro para todos (brief §20).
-constexpr unsigned char kPedestalAlpha = 52;
-constexpr unsigned char kPedestalAlphaLocked = 30;
 
 bool StartsWith(const std::string& s, const char* prefix) {
     return s.rfind(prefix, 0) == 0;
@@ -103,7 +98,11 @@ CollectionLayout CollectionView::BuildLayout(float w, float h) const {
     in.selectedPetId = selectedPetId_;
     in.selectedVariantId = selectedVariantId_;
     in.hoverPetId = HoverPetId();
-    return BuildCollectionLayout(model_, in);
+    CollectionLayout layout = BuildCollectionLayout(model_, in);
+    // Coloca las pestañas con anchos MEDIDOS (serif) — no-op si Render
+    // todavía no midió (navLabelWidths_ en 0). kMargin = 40 (compartido).
+    ReflowNavTabs(layout.header, navLabelWidths_, w, 40.0f);
+    return layout;
 }
 
 void CollectionView::SyncFocusList(const CollectionLayout& layout) {
@@ -254,6 +253,7 @@ void CollectionView::Render(
     viewportW_ = viewportW;
     viewportH_ = viewportH;
     clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow — la única fuente
+    MeasureNavLabels(text, language_, painter.Scale(), navLabelWidths_);
 
     const CollectionLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -279,6 +279,11 @@ void CollectionView::Render(
     // --- Hero ---
     const CollectionHero& h = layout.hero;
     if (!h.petId.empty()) {
+        // Panel enmarcado suave alrededor de TODO el hero (convergencia
+        // DEC-147) — "esto es mi compañero".
+        DrawSoftPanel(painter, h.heroPanel, 16.0f, tokens::kSurfaceRaised, tokens::kBorder,
+                      /*innerHighlight=*/true);
+
         // Hero stage: primaria grande + secundaria descentrada, teñidas
         // con el shapeTint del pet a alpha bajo (brief §11).
         FillStagePrimitive(painter, h.stageSecondary, h.accent.angularShape,
@@ -292,12 +297,18 @@ void CollectionView::Render(
 
         DrawText(painter, text, h.displayName, type::role::kHeroTitle, tokens::kTextPrimary,
                  h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
-        // Regla de acento fina bajo el nombre — el tono del pet, sin caja.
-        painter.FillRect(h.nameRule, h.accent.line);
+        // DIVISOR 1: bajo el nombre, rombo central = acento del pet
+        // (identidad). Acotado para no estirarse por el lado vacío.
+        DrawOrnamentalDivider(
+            painter,
+            UiRect{h.nameRule.x, h.nameRule.y - 3.5f, std::min(h.nameRule.w, 360.0f), 8.0f},
+            tokens::kBorder, h.accent.line);
 
         if (!h.speciesText.empty()) {
-            DrawText(painter, text, h.speciesText, type::kHeroSpecies, TextWeight::kRegular,
-                     theme::kTextMuted, h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
+            // Especie en el TONO del pet (metadata, pero especial).
+            DrawText(painter, text, h.speciesText,
+                     type::role::kMetadata.WithWeight(TextWeight::kMedium), h.accent.deepInk,
+                     h.speciesAnchor.x, h.speciesAnchor.y + 12.0f, HAlign::kLeft);
         }
         if (!h.descriptionText.empty()) {
             // Block 07: la descripción es un par de frases -> word-wrap
@@ -305,6 +316,14 @@ void CollectionView::Render(
             DrawTextWrapped(painter, text, h.descriptionText, type::kHeroBody, TextWeight::kRegular,
                             theme::kText, h.descriptionAnchor.x, h.descriptionAnchor.y + 13.0f,
                             h.descriptionAnchor.w, 17.0f, 3);
+        }
+
+        // DIVISOR 2: identidad/descripción -> acción (rombo neutro).
+        if (h.detailDividerRect.w > 0.0f) {
+            DrawOrnamentalDivider(painter,
+                                  UiRect{h.detailDividerRect.x, h.detailDividerRect.CenterY() - 4.0f,
+                                         std::min(h.detailDividerRect.w, 360.0f), 8.0f},
+                                  tokens::kBorder, tokens::kOrnamentNeutral);
         }
 
         // Selector de variante tipográfico: "Male · Female" con
@@ -336,15 +355,15 @@ void CollectionView::Render(
         }
 
         if (h.actionEnabled) {
-            // Botón primario con la identidad del pet (Block 12A —
-            // sistema de botones): relleno tenue del acento + tinta
-            // oscura del acento, clampada a contraste legible si un pet
-            // futuro no llega — NUNCA casi-negro arbitrario (DEC-121).
-            DrawButton(painter, text, h.actionButton, h.actionLabel,
-                       ResolveButtonVisual(ButtonRole::kPrimary, &h.accent,
-                                           ButtonStateFlags{false, false,
-                                                            focusedId == h.actionFocusId, false}),
-                       type::role::kButton);
+            // "Use <pet>": la MISMA familia de CTA que el Shop (pill
+            // generosa, relleno de acento, filo de oro) pero SIN el spark
+            // de economía — Collection no es una tienda (brief §12 /
+            // convergencia DEC-147).
+            ButtonVisual v = ResolveButtonVisual(
+                ButtonRole::kPrimaryCta, &h.accent,
+                ButtonStateFlags{false, false, focusedId == h.actionFocusId, false});
+            v.sparkle = false;
+            DrawButton(painter, text, h.actionButton, h.actionLabel, v, type::role::kButton);
         } else if (h.showStatusLine) {
             // ACTIVO: "● On desktop". LOCKED: "Not in your collection",
             // sin punto. Sin botón, sin duplicar (brief §18).
@@ -380,35 +399,29 @@ void CollectionView::Render(
         UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
         tokens::kBorder, tokens::kOrnamentNeutral);
 
-    // --- Gallery ---
+    // --- Gallery — UNA card coherente por Nimvlet poseído ---------
+    // Sin pedestal-caja detrás del arte (convergencia DEC-147): el arte
+    // va directo sobre la superficie de la card. Nombre en serif; el
+    // hint "Use" / "On desktop" en sans, con el tono del pet.
     for (const GalleryItem& g : layout.gallery) {
         const bool hovered = hoverId_ == g.focusId;
         const bool focused = focusedId == g.focusId;
-        // Item de gallery = el mismo panel enmarcado suave que las cards
-        // del Shop (brief §22): superficie que "levanta" sobre el
-        // segundo plano + hairline, wash al hover, anillo de foco
-        // neutro. Owned-only / hero activo / "Use" / variantes de Frin
-        // SIN cambios.
-        DrawSoftPanel(painter, g.cell.Inset(2.0f), 12.0f,
-                      hovered ? tokens::kHoverWash : tokens::kSurfaceRaised, tokens::kBorder,
-                      /*innerHighlight=*/false);
+        const UiRect card = g.cell.Inset(2.0f);
+        painter.FillRoundRect(card, 12.0f, hovered ? tokens::kHoverWash : tokens::kSurfaceRaised);
+        painter.StrokeRoundRect(card, 12.0f, 1.0f, tokens::kBorder);
         if (focused) {
-            painter.StrokeRoundRect(g.cell.Inset(2.0f), 12.0f, 2.0f, tokens::kFocus);
+            painter.StrokeRoundRect(card.Inset(-3.5f), 15.5f, 2.0f, tokens::kFocus);
         }
-
-        const unsigned char pedAlpha =
-            g.status == OwnershipStatus::kLocked ? kPedestalAlphaLocked : kPedestalAlpha;
-        painter.FillRoundRect(g.art.Inset(-5.0f), 12.0f, g.pedestalTint.WithAlpha(pedAlpha));
 
         SDL_Texture* art = previews.Get(g.petId, g.previewVariantId);
         painter.DrawTextureContained(
             art, g.art, g.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255);
 
-        DrawText(painter, text, g.displayName, type::kGalleryName, TextWeight::kMedium, theme::kText,
-                 g.name.CenterX(), g.name.y + 13.0f, HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
-        DrawText(painter, text, g.statusText, type::kGalleryStatus, TextWeight::kRegular,
+        DrawText(painter, text, g.displayName, type::role::kCardName, theme::kText, g.name.CenterX(),
+                 g.name.y + 13.0f, HAlign::kCenter, static_cast<int>(card.w - 8.0f));
+        DrawText(painter, text, g.statusText, type::role::kCaption,
                  StatusColor(g.status, g.accentLine), g.status_.CenterX(), g.status_.y + 11.0f,
-                 HAlign::kCenter, static_cast<int>(g.cell.w - 6.0f));
+                 HAlign::kCenter, static_cast<int>(card.w - 8.0f));
     }
 
     painter.PopClip();

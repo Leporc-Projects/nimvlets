@@ -17,11 +17,8 @@ using platform::TextWeight;
 
 namespace {
 
-constexpr float kHeaderClipTop = 106.0f;
+constexpr float kHeaderClipTop = 100.0f;  // deja lugar al borde superior del panel enmarcado del hero (convergencia DEC-147)
 constexpr float kWheelStep = 48.0f;
-
-constexpr unsigned char kPedestalAlpha = 52;
-constexpr unsigned char kRailPedestalAlpha = 44;
 
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
@@ -96,7 +93,9 @@ ShopLayout ShopView::BuildLayout(float w, float h) const {
     in.hoverPetId = HoverPetId();
     in.confirming = confirming_;
     in.starterHotspotArmed = starterHotspotArmed_;
-    return BuildShopLayout(model_, in);
+    ShopLayout layout = BuildShopLayout(model_, in);
+    ReflowNavTabs(layout.header, navLabelWidths_, w, 40.0f);
+    return layout;
 }
 
 void ShopView::SyncFocusList(const ShopLayout& layout) {
@@ -291,6 +290,7 @@ void ShopView::Render(
     viewportW_ = viewportW;
     viewportH_ = viewportH;
     clickBalance_ = clickBalance;  // balance CANÓNICO de ProductWindow
+    MeasureNavLabels(text, language_, painter.Scale(), navLabelWidths_);
 
     const ShopLayout layout = BuildLayout(viewportW, viewportH);
     lastContentHeight_ = layout.contentHeight;
@@ -325,30 +325,26 @@ void ShopView::Render(
             const bool focused = focusedId == t.focusId;
             // El hover / foco revela la info liviana (precio o propiedad);
             // sin hover, la tarjeta es solo arte + nombre (brief §5/§6).
-            DrawShopTile(painter, text, previews, t, type::kGalleryName, kPedestalAlpha, hovered,
-                         focused, /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
+            DrawShopTile(painter, text, previews, t, type::role::kCardName, hovered, focused,
+                         /*revealVisible=*/hovered || focused, /*selectedMark=*/false);
         }
         painter.PopClip();
         return;
     }
 
-    // --- SELECTED: hero grande + rail compacto de la estantería ----
+    // --- SELECTED: hero (panel enmarcado) + rail compacto ----------
+    // El panel del hero ya SEPARA hero y rail: no hace falta un divisor
+    // ornamental extra ahí (los dos divisores editoriales viven DENTRO
+    // del panel — convergencia DEC-147). Solo el segundo plano cálido.
     painter.FillRect(layout.shelfBackground, tokens::kSurfaceSoft);
 
     DrawShopHero(painter, text, previews, layout.hero, focusedId);
 
-    // Divisor ornamental (── ◇ ──) entre el detalle del personaje y la
-    // estantería (referencia D) — un motivo quieto, uno por pantalla.
-    DrawOrnamentalDivider(
-        painter,
-        UiRect{layout.dividerRect.x, layout.dividerRect.y - 3.5f, layout.dividerRect.w, 8.0f},
-        tokens::kBorder, tokens::kOrnamentNeutral);
-
     for (const ShopTile& t : layout.rail) {
         const bool hovered = hoverId_ == t.focusId;
         const bool focused = focusedId == t.focusId;
-        DrawShopTile(painter, text, previews, t, type::kGalleryStatus, kRailPedestalAlpha, hovered,
-                     focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
+        DrawShopTile(painter, text, previews, t, type::role::kCardName.WithSize(11.5),
+                     hovered, focused, /*revealVisible=*/false, /*selectedMark=*/t.selected);
     }
 
     painter.PopClip();

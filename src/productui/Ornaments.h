@@ -22,6 +22,13 @@ namespace nimvlets::productui {
 // la punta. Dos rombos finos cruzados.
 void DrawSparkle(UiPainter& p, float cx, float cy, float radius, UiColor color);
 
+// Emblema del wordmark (convergencia DEC-147): un clúster COMPUESTO de
+// geometría procedural con jerarquía de escala — un spark principal, un
+// spark chico descentrado y un rombo minúsculo. Se lee como "la
+// marquita de Nimvlets", no como un único sparkle Unicode al azar.
+// `size` = ancho aproximado del clúster (puntos), centrado en (cx, cy).
+void DrawBrandEmblem(UiPainter& p, float cx, float cy, float size, UiColor color);
+
 // Rombo lleno inscrito en `r` (thin wrapper de UiPainter::FillDiamond,
 // para simetría de API con el resto de los ornamentos).
 void DrawDiamond(UiPainter& p, const UiRect& r, UiColor color);

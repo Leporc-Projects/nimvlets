@@ -22,15 +22,15 @@ namespace nimvlets::productui {
 // Óvalo (o round-rect si el acento del pet es "angular") del hero stage.
 void FillShopStagePrimitive(UiPainter& painter, const UiRect& r, bool angular, UiColor color);
 
-// Dibuja una tarjeta de personaje (rejilla de browse o rail). Resuelve
-// la preview `.nvprev` por (petId, variantId) — la variante importa para
-// el Starter Shop de Frin. `revealVisible` pinta la línea de info
-// liviana (precio / propiedad); `selectedMark` subraya la tarjeta cuyo
-// personaje es el hero abierto.
+// Dibuja UNA tarjeta de personaje coherente (rejilla de browse o rail).
+// Resuelve la preview `.nvprev` por (petId, variantId). `nameRole` = rol
+// de fuente del nombre (serif). `revealVisible` pinta la línea de info
+// liviana (precio / propiedad); `selectedMark` da a la tarjeta el
+// tratamiento de identidad del pet (borde + tinte + regla de acento).
+// Sin pedestal-caja detrás del arte (convergencia DEC-147).
 void DrawShopTile(
     UiPainter& painter, TextCache& text, PetPreviewCache& previews, const ShopTile& t,
-    double nameSize, unsigned char pedestalAlpha, bool hovered, bool focused, bool revealVisible,
-    bool selectedMark);
+    const type::FontRole& nameRole, bool hovered, bool focused, bool revealVisible, bool selectedMark);
 
 // Dibuja el hero (stage + arte + nombre + regla + especie + descripción
 // + precio + acción/estado/confirmación). `focusedId` dibuja el anillo
