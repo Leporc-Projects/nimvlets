@@ -75,6 +75,7 @@ bool ProductWindow::Open(const catalog::PetCatalog& catalog) {
     starterShopSubmode_ = false;
 
     RecomputeScale();
+    PushNavMetrics();  // mide los rótulos de nav antes del primer hit-test
     pendingExpose_ = true;
     FocusWindow();
 
@@ -194,7 +195,20 @@ void ProductWindow::RecomputeScale() {
         if (text_) {
             text_->Clear();  // los bitmaps de texto son específicos de la escala
         }
+        PushNavMetrics();  // las métricas de nav son en píxeles -> dependen de la escala
     }
+}
+
+void ProductWindow::PushNavMetrics() {
+    if (text_ == nullptr) {
+        return;
+    }
+    float w[3] = {0.0f, 0.0f, 0.0f};
+    MeasureNavLabels(*text_, language_, scale_, w);
+    view_.SetNavLabelWidths(w);
+    shopView_.SetNavLabelWidths(w);
+    settingsView_.SetNavLabelWidths(w);
+    starterShopView_.SetNavLabelWidths(w);
 }
 
 void ProductWindow::SetModels(
@@ -251,6 +265,7 @@ void ProductWindow::SetLanguage(core::Language language) {
     starterShopView_.SetLanguage(language);
     settingsView_.SetLanguage(language);
     onboardingView_.SetLanguage(language);
+    PushNavMetrics();  // los rótulos localizados cambian de ancho
 }
 
 void ProductWindow::SetPreferences(const core::Preferences& prefs) {

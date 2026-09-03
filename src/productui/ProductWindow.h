@@ -285,6 +285,11 @@ class ProductWindow {
  private:
     void RecomputeScale();
     void DestroyResources();
+    // Mide los rótulos de nav (serif) UNA vez y los empuja a las cuatro
+    // vistas, para que ReflowNavTabs coloque las pestañas igual sin
+    // importar el timing del render (convergencia DEC-147). Se llama al
+    // abrir y cuando cambian idioma / escala.
+    void PushNavMetrics();
     void DrawFrame();  // dibuja la sección activa al backbuffer, SIN presentar
     bool ActiveViewDirty() const;
 

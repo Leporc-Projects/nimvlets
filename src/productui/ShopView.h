@@ -70,6 +70,15 @@ class ShopView {
     void SetModel(catalog::ShopModel model);
     void SetLanguage(core::Language language);
 
+    // Anchos MEDIDOS de los rótulos de nav (serif), empujados por
+    // ProductWindow cuando cambian idioma/escala (convergencia DEC-147).
+    // BuildLayout() los pasa a ReflowNavTabs.
+    void SetNavLabelWidths(const float w[3]) {
+        navLabelWidths_[0] = w[0];
+        navLabelWidths_[1] = w[1];
+        navLabelWidths_[2] = w[2];
+    }
+
     // Block 10 (corrección de QA del owner): ¿ARMAR el HOTSPOT INVISIBLE
     // de la esquina inf-der que abre el Shop oculto de starters? src/app
     // lo pone en true SOLO cuando el StarterShopModel oculto tiene >= 1

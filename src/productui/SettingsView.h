@@ -75,6 +75,15 @@ class SettingsView {
     // resto de campos.
     void SetLanguage(core::Language language);
 
+    // Anchos MEDIDOS de los rótulos de nav (serif), empujados por
+    // ProductWindow cuando cambian idioma/escala (convergencia DEC-147).
+    // BuildLayout() los pasa a ReflowNavTabs.
+    void SetNavLabelWidths(const float w[3]) {
+        navLabelWidths_[0] = w[0];
+        navLabelWidths_[1] = w[1];
+        navLabelWidths_[2] = w[2];
+    }
+
     // Estado GENÉRICO del monitor de clics globales + si la explicación
     // de primera parte está visible (Block 11A). Lo empuja src/app: la
     // vista NUNCA enciende la explicación sola ni deduce el estado del
