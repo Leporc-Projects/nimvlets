@@ -6292,3 +6292,146 @@ selección en Settings; el sistema de tint del hero; los botones de
 CTA / confirmación / Use (solo cambian de familia de etiqueta a través
 del `FontRole`, sin rediseño); el fondo / la paleta; el shop oculto;
 todo el comportamiento de producto.
+
+---
+
+### DEC-147 — Block 12A convergencia con el concept image: navegación medida/centrada, hero como panel editorial con doble divisor, CTA grande, cards de una pieza, profundidad de superficie
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A (pase de convergencia) ·
+**Estado:** vigente · **Depende de** DEC-142 (tokens + roles de fuente),
+DEC-143 (identidad por pet + contraste), DEC-144 (ornamentos + botones),
+DEC-145 (wordmark + wallet pill + nav), DEC-146 (refinamiento owner-QA:
+serif del sistema, `── ◇ ──`, rótulos flanqueados). **NO** implementa
+fondos escénicos (Block 12C), **NO** agрega favoritos, **NO** cambia
+comportamiento / lógica / persistencia / economía / conteo de clics /
+shop oculto / onboarding / EN-ES / Global Click. El wallet pill se
+mantiene **tal cual** (aprobado).
+
+**Contexto.** El owner comparó el UI real de 12A con el concept image
+aprobado de Nimvlets/Nidir y juzgó que el concept se siente
+"sustancialmente mejor" — no principalmente por el fondo escénico, sino
+por: tipografía más rica pero contenida, espaciado editorial,
+superficies cálidas en capas, detalles de acento por personaje,
+divisores ornamentales, una CTA más fuerte, cards más intencionales, y
+varios tonos de superficie en vez de una hoja de crema infinita. Este
+pase adopta esos PRINCIPIOS por tratamiento de UI. El concept image
+queda registrado como la **estrella polar** — principios, no una
+dependencia; ningún archivo de imagen es requerido para build/runtime.
+
+**1. Navegación: anchos MEDIDOS + centrada.** `BuildSectionHeaderLayout`
+usa un ancho aproximado por carácter que con la tipografía serif corría
+los separadores y la regla del indicador activo. `SectionHeaderView::
+MeasureNavLabels` mide los tres rótulos localizados con `TextCache` y
+`productui::ReflowNavTabs` (PURO) recoloca `labelAnchor` / `hitRect` /
+`underline` con esos anchos reales y **centra** el bloque de navegación
+en el ancho de contenido (wordmark izq / nav centro / wallet der —
+como el concept), anclándolo al margen si no entra. `w = {0,0,0}` es un
+no-op (sigue valiendo la aproximación) → los tests / hooks de QA que no
+miden no se rompen. `ProductWindow::PushNavMetrics()` mide UNA vez y
+empuja a las cuatro vistas al abrir / cambiar idioma / cambiar escala,
+así el hit-test **nunca** depende del timing del render (un bug que el
+smoke `NIMVLETS_DEV_UI_NAV_SMOKE` encontró: sin el push, un click
+sintético caía en la posición centrada mientras el `HitTest` de la vista
+seguía en la aproximación izquierda). Ruteo, `NavTargetSection`,
+focusIds y teclado **intactos**.
+
+**2. Indicador de tab activo `── ◇ ──`.** Dos segmentos de regla fina en
+`tokens::kOrnamentNeutral` que se extienden un poco MÁS ALLÁ del rótulo,
+con un rombo del mismo tono en el hueco central. Nunca una línea negra;
+la distinción "activa" también la cargan el peso semibold y el color de
+texto principal.
+
+**3. Emblema del wordmark** (`DrawBrandEmblem`): un clúster COMPUESTO —
+spark principal + spark chico descentrado + rombo minúsculo, con
+jerarquía de escala — en vez de un solo sparkle. Se lee como "la
+marquita de Nimvlets". Marca serif +1 pt. Sigue siendo procedural, sin
+asset, y no toca el nombre de la app en el SO.
+
+**4. Hero seleccionado = PANEL EDITORIAL.** `DrawSoftPanel` (superficie
+que levanta + hairline + highlight interior, sin sombra ni glass)
+alrededor de TODO el hero (arte + columna de detalle) en Shop y
+Collection. `kHeaderClipTop` bajó de 106 a 100 en las vistas con hero
+para que el borde superior del panel se vea.
+
+**5. DOS divisores en el hero** (referencia D). DIVISOR 1: bajo el
+nombre, ancho de la columna, rombo central en el **ACENTO DEL PET**
+(identidad). DIVISOR 2: entre la descripción y el precio/acción, rombo
+central **NEUTRO** (`kOrnamentNeutral`) — separa "quién es" de
+"economía / acción" (brief §8). El Shop siempre lo lleva; la Collection
+solo para pets **sin selector de variante** (Bunny/Nidir) — con el
+selector de Frin no entra en 800×560 y el propio selector ya hace de
+transición. Ambos divisores se acotan (~360 pt) para no estirarse por
+el lado vacío del panel. El divisor ornamental hero↔rail de DEC-144 se
+**retira** en el Shop seleccionado: el panel ya separa hero y rail.
+
+**6. Especie en el tono del pet.** `speciesText` pasa de `kTextMuted` a
+`accent.deepInk` (versión oscura y legible del tono del pet) — "metadata,
+pero especial", como el "Black dragon" violeta del concept.
+
+**7. Precio del Shop.** `✦ 300 clicks` — un `DrawSparkle` de moneda
+(mismo motivo que el wallet, distinta forma: sin pill) + el rol nuevo
+`type::role::kPrice` (15 pt semibold sans, más confiado que el cuerpo).
+Localización singular/plural intacta. Un pet poseído NO muestra precio.
+
+**8. CTA `ButtonRole::kPrimaryCta`.** La acción grande: pill generosa
+(radio = alto/2), relleno de acento un poco más saturado que el
+`softFill` pálido del `kPrimary` contenido (`Mix(softFill, line, 0.35)`
+— funciona claro para Bunny/Nidir/Frin, NUNCA un negro arbitrario,
+DEC-121), un **filo de oro cálido tenue por fuera** del botón, hairlines
+2-tono arriba/abajo (sensación "levantada", sin gradiente ni filtro
+caro), un **spark chico a la derecha**, y la tinta elegida por contraste
+entre `deepInk` oscuro y un cream claro (`Contrast::BestForeground`,
+nuevo — elige el candidato de mejor contraste y lo empuja al extremo si
+hace falta). El Shop "Get <pet>" la usa entera. La Collection "Use
+<pet>" usa la misma familia **sin el spark de economía** — Collection no
+es una tienda (brief §12). `Confirm` sigue en `kPrimary` (relleno de
+acento + borde, radio 9, sin pill/spark/filo — fuerte pero no compite
+con la CTA principal, brief §11); `Cancel` en `kSecondary` (contorno
+hairline).
+
+**9. Cards de UNA pieza.** Se elimina el pedestal-caja teñido detrás del
+arte (creaba el "marco dentro de un marco" que el owner rechazó). El
+arte va directo sobre la superficie de la card. Nombres en serif
+(`type::role::kCardName`). La card **seleccionada** del rail toma el
+tratamiento de identidad del pet: superficie con un tinte suave del
+acento (`Mix(kSurfaceRaised, pedestalTint, 0.55)`) + borde de acento
+2 pt + regla de acento bajo el nombre — más fuerte que el hover, aún
+legible, no un rectángulo púrpura saturado. Bunny/Frin/desconocido
+reciben su tratamiento correspondiente por el mismo camino.
+
+**10. Profundidad de superficie.** Los paneles `kSurfaceRaised` +
+`kBorderInner` de highlight interior dan capas sin cambiar la paleta
+global (owner: "que ya no se sienta como una sola hoja de crema"). En
+Settings, el segmento **seleccionado** pasa de un negro macizo
+(`theme::kText`) a `tokens::kSelectedFill` (marrón cálido profundo
+`#332B22`) + un borde interior sutil + tinta cream (`tokens::kSelectedInk`)
+— inconfundible pero armonizado con el sistema cálido. Sin acento por
+pet en Settings, sin rediseño estructural del control.
+
+**Bug corregido de paso.** Los campos nuevos de `ButtonVisual`
+(`topHighlight` / `bottomShade` / `edgeAccent`) se default-inicializaban
+a `{0,0,0,255}` (negro OPACO), así que TODO botón `kPrimary` / `kSecondary`
+/ `kQuiet` habría dibujado hairlines negros. Ahora son transparentes por
+defecto — solo `kPrimaryCta` los enciende.
+
+**Tests.** `SectionNavTest` (ReflowNavTabs: no-op sin medidas, usa
+medidas + centra, clampa al margen; ruteo intacto). `ButtonStyleTest`
+(kPrimaryCta trae los adornos y una etiqueta ≥ 4.5:1 para cada pet +
+neutro, relleno distinto del kPrimary; disabled los apaga).
+`ContrastTest` (BestForeground elige y alcanza el objetivo; Lighten).
+`ShopLayoutTest` / `CollectionLayoutTest` (el hero trae `heroPanel` que
+contiene el arte + `detailDividerRect`; en Collection el divisor 2 es
+condicional al selector de variante y Frin sigue entrando en 800×560).
+593 tests C++.
+
+**Rendimiento / event-driven:** intacto. Todo sigue procedural, cacheado
+(el serif y las métricas de nav se cachean igual que la sans), y
+event-driven — 0 % CPU en reposo con el Product UI abierto. Sin loop de
+render, sin animación de ornamento, sin blur, sin sombra cara, sin
+textura nueva. `RenderIfNeeded()` sigue siendo no-op salvo
+`dirty_`/`EXPOSED`; el `waitMs` del pet no gana ningún término (DEC-112).
+
+**Congelado sin tocar:** el wallet pill; los flujos de producto (§26 del
+brief de convergencia); el arte / preview / runtime de Nidir (golden);
+el catálogo; AppState; el hotspot invisible del Starter Shop; Global
+Click; onboarding; el menú rápido.

@@ -49,8 +49,8 @@ sin ruta de compra). Con un solo Nimvlet poseído la gallery queda vacía:
 sin divisor ni segundo plano, una sola línea quieta hacia el Shop
 (`kCollectionOnlyActive`). Ver §5, §6.3 y DEC-136.
 
-**Actualización Block 12A (fundación del sistema de diseño visual —
-DEC-142..DEC-146).** Pasada owner-directed de LENGUAJE VISUAL, sin tocar
+**Actualización Block 12A (sistema de diseño visual —
+DEC-142..DEC-147).** Pasada owner-directed de LENGUAJE VISUAL, sin tocar
 ningún flujo de producto: tokens visuales semánticos (`productui::tokens`),
 roles DE FUENTE tokenizados (`type::FontRole` / `type::role`), el
 `PetAccent` promovido al registro CENTRALIZADO de identidad por pet
@@ -68,7 +68,16 @@ serif del sistema* (New York en macOS, SIN asset); el cuerpo sigue en
 sans. **Sin imágenes, sin fuentes empacadas, sin dependencias, sin fondos
 escénicos (12C), sin favoritos, sin animación de UI.** El refinamiento
 owner-QA (DEC-146) ajustó el indicador de nav, los rótulos de sección y
-la tipografía; el wallet pill se aprobó tal cual. Ver **§23**.
+la tipografía; el wallet pill se aprobó tal cual. La **convergencia con
+el concept image** (DEC-147) acercó el UI real al mockup aprobado por
+tratamiento de UI: nav medida y centrada, indicador `── ◇ ──`, emblema
+de marca compuesto, hero como panel editorial con DOS divisores
+(identidad = rombo de acento del pet / economía = rombo neutro),
+especie en el tono del pet, precio con spark, CTA `kPrimaryCta` (pill
+generosa + filo de oro), cards de una pieza, y profundidad de superficie
+— todo sin fondo escénico (el concept image es la ESTRELLA POLAR de
+principios, nunca una dependencia). Ver **§23** (§23.10 para la
+convergencia).
 
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
@@ -1612,7 +1621,7 @@ vez de permanente. Fijado en `tests/SettingsLayoutTest.cpp`.
   Settings y solo tras una acción explícita del owner — nunca al
   arrancar. Ver `docs/PRIVACY_SECURITY.md` §H.
 
-## 23. Sistema de diseño visual — la FUNDACIÓN (Block 12A + refinamiento owner-QA DEC-146)
+## 23. Sistema de diseño visual (Block 12A: fundación DEC-142..DEC-145 · refinamiento owner-QA DEC-146 · convergencia con el concept image DEC-147)
 
 Block 12A es una pasada **owner-directed** de LENGUAJE VISUAL y
 primitivas de presentación reusables. **NO** rediseña ningún flujo de
@@ -1815,11 +1824,69 @@ El pedestal con el tinte de identidad del pet detrás del arte se
 conserva. Geometría de la rejilla, modelo de contenido, semántica de
 hover / selección: **sin cambios**.
 
-### 23.9 Alcance NO tocado
+### 23.10 Pasada de CONVERGENCIA con el concept image (DEC-147)
+
+Pase owner-directed para acercar el Product UI real al concept image
+aprobado **por tratamiento de UI**, sin fondo escénico y sin tocar
+comportamiento. Extiende (no reemplaza) todo lo anterior.
+
+- **Navegación medida + centrada.** `SectionHeaderView::MeasureNavLabels`
+  mide los tres rótulos serif con `TextCache`; `productui::ReflowNavTabs`
+  (puro) recoloca las pestañas con esos anchos REALES y **centra** el
+  bloque de nav en el ancho de contenido (wordmark izq / nav centro /
+  wallet der). `ProductWindow::PushNavMetrics()` mide una vez y empuja a
+  las cuatro vistas al abrir / cambiar idioma / cambiar escala — así el
+  hit-test nunca depende del timing del render. Ruteo, focusIds y
+  soporte de teclado intactos.
+- **Indicador de tab activo `── ◇ ──`.** Dos segmentos de regla fina en
+  `tokens::kOrnamentNeutral` que se extienden un poco MÁS ALLÁ del
+  rótulo, con un rombo en el hueco. Nada de línea negra.
+- **Emblema del wordmark** (`DrawBrandEmblem`): un clúster compuesto
+  (spark principal + spark chico + rombo minúsculo) en vez de un solo
+  sparkle. Marca serif +1 pt.
+- **Hero seleccionado = panel editorial** (`DrawSoftPanel` alrededor de
+  arte + detalle) con `kHeaderClipTop` bajado a 100 para que el borde
+  superior se vea.
+- **Dos divisores en el hero** (referencia D): DIVISOR 1 bajo el nombre
+  con el rombo central en el **acento del pet** (identidad); DIVISOR 2
+  entre descripción y precio/acción con rombo **neutro** (economía /
+  acción). El Shop siempre; la Collection solo para pets sin selector de
+  variante (mantiene el hero de Frin dentro de 800×560). Acotados para
+  no estirarse por el lado vacío del panel.
+- **Especie en el tono del pet** (`accent.deepInk`) — "metadata, pero
+  especial".
+- **Precio del Shop**: `✦ 300 clicks` con spark de moneda + rol
+  `type::role::kPrice` (sans semibold, más confiado que el cuerpo). Sin
+  precio para un pet poseído.
+- **CTA `ButtonRole::kPrimaryCta`**: pill generosa, relleno de acento un
+  poco más saturado (`Mix(softFill, line, .35)`), filo de oro tenue por
+  fuera, hairlines 2-tono arriba/abajo, spark chico a la derecha, tinta
+  elegida por contraste (`BestForeground`, entre deepInk oscuro y cream
+  claro). El Shop "Get <pet>" la usa entera; la Collection "Use <pet>"
+  la usa **sin el spark de economía**. `Confirm` sigue en `kPrimary`
+  (fuerte pero contenido — brief §11); `Cancel` en `kSecondary`.
+- **Cards de UNA pieza**: se quita el pedestal-caja teñido detrás del
+  arte (el "marco dentro de un marco"). Nombres en serif
+  (`type::role::kCardName`). La card seleccionada del rail toma el
+  acento del pet (superficie teñida + borde de acento + regla de
+  acento).
+- **Profundidad de superficie**: los paneles `kSurfaceRaised` +
+  `kBorderInner` de highlight dan capas sin cambiar la paleta. Settings:
+  el segmento seleccionado pasa de un negro macizo a `tokens::kSelectedFill`
+  (marrón cálido profundo) + borde interior sutil + tinta cream
+  (`tokens::kSelectedInk`) — sin acento por pet, sin rediseño estructural.
+- **Bug corregido de paso**: los campos nuevos de `ButtonVisual`
+  (`topHighlight` / `bottomShade` / `edgeAccent`) tenían default negro
+  opaco → todo botón Primary/Confirm habría dibujado hairlines negros.
+  Ahora default transparente.
+
+### 23.11 Alcance NO tocado
 
 - **Sin fondos escénicos del hero** (Block 12C). No se sintetiza un
   mundo falso procedural, no hay imagen de fondo temporal. La costura
-  `heroStage` es lo único que 12A prepara.
+  `heroStage` es lo único que 12A prepara. El concept image queda como
+  la **estrella polar** de principios (no una dependencia): ningún
+  archivo de imagen es requerido para build/runtime.
 - **Sin favoritos** — el mockup muestra iconos de estrella/corazón; NO
   hay feature de favoritos y no se implementó ninguna (brief §26).
 - **Sin imágenes / fuentes / dependencias nuevas** (brief §4/§5).
