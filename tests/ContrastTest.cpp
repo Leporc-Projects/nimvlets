@@ -3,9 +3,11 @@
 #include "productui/Contrast.h"
 #include "productui/VisualTokens.h"
 
+using nimvlets::productui::BestForeground;
 using nimvlets::productui::ContrastRatio;
 using nimvlets::productui::Darken;
 using nimvlets::productui::EnsureContrastOn;
+using nimvlets::productui::Lighten;
 using nimvlets::productui::Mix;
 using nimvlets::productui::RelativeLuminance;
 using nimvlets::productui::UiColor;
@@ -92,9 +94,49 @@ bool TestEnsureContrastReachesTargetAndNeverLightens() {
     return true;
 }
 
+// Convergencia DEC-147: BestForeground elige entre una tinta oscura y
+// una clara la de mejor contraste sobre `bg`, y si hace falta la empuja
+// al extremo para alcanzar el objetivo.
+bool TestBestForegroundPicksAndReaches() {
+    const UiColor darkInk{0x30, 0x2A, 0x22, 255};
+    const UiColor lightInk{0xF4, 0xEE, 0xE3, 255};
+
+    // Relleno CLARO -> gana la tinta oscura, ya legible.
+    const UiColor lightFill{0xE9, 0xC8, 0xA2, 255};
+    const UiColor onLight = BestForeground(lightFill, darkInk, lightInk, 4.5);
+    NIMVLETS_CHECK(onLight == darkInk);
+    NIMVLETS_CHECK(ContrastRatio(onLight, lightFill) >= 4.5);
+
+    // Relleno OSCURO -> gana la tinta clara.
+    const UiColor darkFill{0x3A, 0x2E, 0x55, 255};
+    const UiColor onDark = BestForeground(darkFill, darkInk, lightInk, 4.5);
+    NIMVLETS_CHECK(ContrastRatio(onDark, darkFill) >= 4.5);
+    NIMVLETS_CHECK(RelativeLuminance(onDark) > RelativeLuminance(darkFill));
+
+    // Ninguna candidata llega -> se empuja al extremo y AUN ASÍ cumple
+    // (o hace su mejor esfuerzo) — nunca un par ilegible por elección.
+    const UiColor midFill{0x8C, 0x8C, 0x8C, 255};
+    const UiColor onMid = BestForeground(midFill, UiColor{0x70, 0x70, 0x70, 255},
+                                         UiColor{0xA0, 0xA0, 0xA0, 255}, 4.5);
+    NIMVLETS_CHECK(ContrastRatio(onMid, midFill) >= 4.5);
+    return true;
+}
+
+bool TestLightenEndpointsAndAlpha() {
+    NIMVLETS_CHECK(Lighten(kBlack, 0.0) == kBlack);
+    NIMVLETS_CHECK(Lighten(kBlack, 1.0) == kWhite);
+    const UiColor c{0x33, 0x2B, 0x22, 200};
+    const UiColor l = Lighten(c, 0.25);
+    NIMVLETS_CHECK(l.a == 200);
+    NIMVLETS_CHECK(l.r > c.r && l.g > c.g && l.b > c.b);
+    return true;
+}
+
 }  // namespace
 
 void RegisterContrastTests(testing::TestRunner& runner) {
+    runner.Add("Contrast/BestForegroundPicksAndReaches", TestBestForegroundPicksAndReaches);
+    runner.Add("Contrast/LightenEndpointsAndAlpha", TestLightenEndpointsAndAlpha);
     runner.Add("Contrast/LuminanceEndpointsAndOrder", TestLuminanceEndpointsAndOrder);
     runner.Add("Contrast/ContrastRatioRangeAndSymmetry", TestContrastRatioRangeAndSymmetry);
     runner.Add("Contrast/SemanticTextTokensMeetTheirTargets", TestSemanticTextTokensMeetTheirTargets);

@@ -161,6 +161,63 @@ bool TestHeaderHoldsAtResizeAndLargeBalance() {
     return true;
 }
 
+// Convergencia DEC-147: ReflowNavTabs coloca las pestañas con anchos
+// MEDIDOS (serif) — separadores y regla del indicador activo precisos —
+// y centra el bloque de nav si entra. Con `w = {0,0,0}` es un no-op
+// (sigue valiendo la aproximación).
+bool TestReflowNavTabsNoOpWithoutMeasuredWidths() {
+    const SectionHeaderLayout base = BuildSectionHeaderLayout(
+        800.0f, 40.0f, 0.0f, ProductSection::kShop, Language::kEn, 0);
+    SectionHeaderLayout h = base;
+    const float zeros[3] = {0.0f, 0.0f, 0.0f};
+    ReflowNavTabs(h, zeros, 800.0f, 40.0f);
+    for (std::size_t i = 0; i < 3; ++i) {
+        NIMVLETS_CHECK(std::abs(h.tabs[i].labelAnchor.x - base.tabs[i].labelAnchor.x) < 1e-3f);
+        NIMVLETS_CHECK(std::abs(h.tabs[i].hitRect.w - base.tabs[i].hitRect.w) < 1e-3f);
+    }
+    return true;
+}
+
+bool TestReflowNavTabsUsesMeasuredWidthsAndCenters() {
+    SectionHeaderLayout h = BuildSectionHeaderLayout(
+        800.0f, 40.0f, 0.0f, ProductSection::kShop, Language::kEn, 0);
+    const float w[3] = {92.0f, 46.0f, 68.0f};  // anchos medidos ficticios
+    ReflowNavTabs(h, w, 800.0f, 40.0f);
+
+    // Cada pestaña adopta su ancho medido.
+    for (std::size_t i = 0; i < 3; ++i) {
+        NIMVLETS_CHECK(std::abs(h.tabs[i].labelAnchor.w - w[i]) < 1e-3f);
+    }
+    // El bloque (w0 + w1 + w2 + 2*gap) queda centrado en el ancho de
+    // contenido: el centro del bloque coincide con el centro del área.
+    const float blockLeft = h.tabs[0].labelAnchor.x;
+    const float blockRight = h.tabs[2].labelAnchor.Right();
+    const float areaCenter = 40.0f + (800.0f - 80.0f) * 0.5f;
+    NIMVLETS_CHECK(std::abs(0.5f * (blockLeft + blockRight) - areaCenter) < 1.0f);
+    // Las pestañas no se solapan y van en orden.
+    NIMVLETS_CHECK(h.tabs[0].labelAnchor.Right() < h.tabs[1].labelAnchor.x);
+    NIMVLETS_CHECK(h.tabs[1].labelAnchor.Right() < h.tabs[2].labelAnchor.x);
+    // El indicador activo (Shop) sigue el ancho medido de esa pestaña.
+    NIMVLETS_CHECK(std::abs(h.tabs[1].underline.w - w[1]) < 1e-3f);
+    NIMVLETS_CHECK(h.tabs[0].underline.w == 0.0f && h.tabs[2].underline.w == 0.0f);
+    // Ida y vuelta del ruteo intacto tras el reflow.
+    for (const SectionTab& tab : h.tabs) {
+        ProductSection routed = ProductSection::kCollection;
+        NIMVLETS_CHECK(NavTargetSection(tab.focusId, routed) && routed == tab.section);
+    }
+    return true;
+}
+
+bool TestReflowNavTabsClampsToMarginWhenTooWide() {
+    SectionHeaderLayout h = BuildSectionHeaderLayout(
+        520.0f, 40.0f, 0.0f, ProductSection::kCollection, Language::kEs, 0);
+    const float w[3] = {150.0f, 120.0f, 130.0f};  // no entra centrado a 520
+    ReflowNavTabs(h, w, 520.0f, 40.0f);
+    // Anclado al margen izquierdo (no negativo, no fuera de pantalla).
+    NIMVLETS_CHECK(std::abs(h.tabs[0].labelAnchor.x - 40.0f) < 1e-3f);
+    return true;
+}
+
 }  // namespace
 
 void RegisterSectionNavTests(testing::TestRunner& runner) {
@@ -171,6 +228,12 @@ void RegisterSectionNavTests(testing::TestRunner& runner) {
     runner.Add("SectionNav/HeaderFormatsCanonicalBalance", TestHeaderFormatsCanonicalBalance);
     runner.Add("SectionNav/WalletPillMetricsAreSaneAndMonotonic",
                TestWalletPillMetricsAreSaneAndMonotonic);
+    runner.Add("SectionNav/ReflowNavTabsNoOpWithoutMeasuredWidths",
+               TestReflowNavTabsNoOpWithoutMeasuredWidths);
+    runner.Add("SectionNav/ReflowNavTabsUsesMeasuredWidthsAndCenters",
+               TestReflowNavTabsUsesMeasuredWidthsAndCenters);
+    runner.Add("SectionNav/ReflowNavTabsClampsToMarginWhenTooWide",
+               TestReflowNavTabsClampsToMarginWhenTooWide);
     runner.Add("SectionNav/HeaderHoldsAtResizeAndLargeBalance",
                TestHeaderHoldsAtResizeAndLargeBalance);
 }

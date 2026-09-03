@@ -91,9 +91,46 @@ bool TestInteractionStates() {
     return true;
 }
 
+// Convergencia DEC-147: kPrimaryCta — la CTA grande. Trae los adornos
+// (pill, spark, filo de oro, 2-tono) y una etiqueta LEGIBLE sobre su
+// relleno para cada pet real + el neutro. El relleno es distinto (más
+// saturado) del Primary contenido.
+bool TestPrimaryCtaHasOrnamentsAndReadableInk() {
+    for (const char* id : {"bunny", "nidir", "frin", "kyubi", "does_not_exist"}) {
+        const PetAccent acc = PetAccentFor(id);
+        const ButtonVisual cta = ResolveButtonVisual(ButtonRole::kPrimaryCta, &acc, Rest());
+        NIMVLETS_CHECK(cta.pill);
+        NIMVLETS_CHECK(cta.sparkle);
+        NIMVLETS_CHECK(cta.edgeAccent.a != 0);
+        NIMVLETS_CHECK(cta.topHighlight.a != 0 && cta.bottomShade.a != 0);
+        NIMVLETS_CHECK(cta.fill.a == 255 && cta.ink.a == 255);
+        NIMVLETS_CHECK(ContrastRatio(cta.ink, cta.fill) >= 4.5);
+        // Relleno de la CTA != relleno del Primary contenido (más color).
+        const ButtonVisual plain = ResolveButtonVisual(ButtonRole::kPrimary, &acc, Rest());
+        NIMVLETS_CHECK(!(cta.fill == plain.fill));
+        NIMVLETS_CHECK(!plain.pill && !plain.sparkle && plain.edgeAccent.a == 0);
+    }
+    return true;
+}
+
+// kPrimaryCta disabled: sin adornos, legible-pero-apagada, sin anillo.
+bool TestPrimaryCtaDisabledDropsOrnaments() {
+    const PetAccent bunny = PetAccentFor("bunny");
+    const ButtonVisual d = ResolveButtonVisual(
+        ButtonRole::kPrimaryCta, &bunny, ButtonStateFlags{true, false, true, true});
+    NIMVLETS_CHECK(!d.sparkle);
+    NIMVLETS_CHECK(d.edgeAccent.a == 0 && d.topHighlight.a == 0 && d.bottomShade.a == 0);
+    NIMVLETS_CHECK(!d.drawFocusRing);
+    NIMVLETS_CHECK(d.ink == tokens::kTextMuted);
+    return true;
+}
+
 }  // namespace
 
 void RegisterButtonStyleTests(testing::TestRunner& runner) {
+    runner.Add("ButtonStyle/PrimaryCtaHasOrnamentsAndReadableInk",
+               TestPrimaryCtaHasOrnamentsAndReadableInk);
+    runner.Add("ButtonStyle/PrimaryCtaDisabledDropsOrnaments", TestPrimaryCtaDisabledDropsOrnaments);
     runner.Add("ButtonStyle/PrimaryUsesPetAccentAndStaysReadable",
                TestPrimaryUsesPetAccentAndStaysReadable);
     runner.Add("ButtonStyle/PrimaryNullAccentFallsBackToNeutral",

@@ -15,6 +15,7 @@ using nimvlets::catalog::PetIdentity;
 using nimvlets::catalog::ShopModel;
 using nimvlets::core::Language;
 using nimvlets::productui::BuildShopLayout;
+using nimvlets::productui::ShopHero;
 using nimvlets::productui::ShopLayout;
 using nimvlets::productui::ShopLayoutInput;
 using nimvlets::productui::ShopPresentation;
@@ -317,6 +318,30 @@ bool TestSelectionPromotesHero() {
     NIMVLETS_CHECK(railBunny != nullptr && !railBunny->selected);
     // El hero es sustancialmente más grande que una tarjeta del rail.
     NIMVLETS_CHECK(l.hero.art.w > railNidir->art.w * 2.0f);
+    return true;
+}
+
+// Convergencia DEC-147: el hero seleccionado trae un PANEL enmarcado
+// que contiene el arte y la columna de detalle, y un SEGUNDO divisor
+// entre la descripción y el precio/acción.
+bool TestHeroPanelAndDetailDivider() {
+    const ShopLayout l = Layout(500, {NoVar("bunny")}, /*selected=*/"nidir");
+    NIMVLETS_CHECK(l.presentation == ShopPresentation::kSelected);
+    const ShopHero& h = l.hero;
+
+    // El panel contiene el arte y el ancla del nombre.
+    NIMVLETS_CHECK(h.heroPanel.w > 0.0f && h.heroPanel.h > 0.0f);
+    NIMVLETS_CHECK(h.heroPanel.x <= h.art.x && h.heroPanel.Right() >= h.art.Right());
+    NIMVLETS_CHECK(h.heroPanel.y <= h.art.y && h.heroPanel.Bottom() >= h.art.Bottom());
+    NIMVLETS_CHECK(h.heroPanel.y <= h.nameAnchor.y);
+
+    // Divisor 1 (bajo el nombre) es ancho de columna; divisor 2 existe
+    // (Nidir tiene descripción) y va DESPUÉS de la descripción y ANTES
+    // del precio.
+    NIMVLETS_CHECK(h.nameRule.w > 100.0f);
+    NIMVLETS_CHECK(h.detailDividerRect.w > 100.0f);
+    NIMVLETS_CHECK(h.detailDividerRect.y >= h.descriptionAnchor.Bottom());
+    NIMVLETS_CHECK(h.detailDividerRect.Bottom() <= h.priceAnchor.y);
     return true;
 }
 
@@ -643,6 +668,7 @@ void RegisterShopLayoutTests(testing::TestRunner& runner) {
     runner.Add("ShopLayout/HoverDoesNotSelect", TestHoverDoesNotSelect);
     runner.Add("ShopLayout/HitTestBrowse", TestHitTestBrowse);
     runner.Add("ShopLayout/SelectionPromotesHero", TestSelectionPromotesHero);
+    runner.Add("ShopLayout/HeroPanelAndDetailDivider", TestHeroPanelAndDetailDivider);
     runner.Add("ShopLayout/SelectingAnotherReplaces", TestSelectingAnotherReplaces);
     runner.Add("ShopLayout/UnknownOrPrivateSelectionFallsToBrowse", TestUnknownOrPrivateSelectionFallsToBrowse);
     runner.Add("ShopLayout/SelectedAffordableShowsGetButton", TestSelectedAffordableShowsGetButton);

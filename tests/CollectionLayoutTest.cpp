@@ -408,10 +408,35 @@ bool TestScrollShiftsContentUp() {
 
 // El contenido cabe en la ventana por defecto (800x560): no hace falta
 // scroll para ver el hero + la gallery, incluso con la descripción
-// editorial más larga de Block 07 (brief §19).
+// editorial más larga de Block 07 (brief §19). Frin (con selector de
+// variante) sigue entrando tras la convergencia DEC-147 porque NO
+// recibe el segundo divisor.
 bool TestDefaultLayoutFitsWithoutScroll() {
     const CollectionLayout layout = BuildCollectionLayout(DevModel("frin", "male"), CollectionLayoutInput{});
     NIMVLETS_CHECK(layout.contentHeight <= 560.0f + 1.0f);
+    return true;
+}
+
+// Convergencia DEC-147: el hero de la Collection trae un PANEL enmarcado
+// que contiene el arte; el DIVISOR 2 aparece SOLO para pets sin selector
+// de variante (Bunny/Nidir), no para Frin.
+bool TestCollectionHeroPanelAndConditionalDivider() {
+    // Bunny (activo, con descripción, SIN chips) -> divisor 2 presente.
+    const CollectionLayout bunny =
+        BuildCollectionLayout(DevModel("bunny"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(bunny.hero.heroPanel.w > 0.0f && bunny.hero.heroPanel.h > 0.0f);
+    NIMVLETS_CHECK(bunny.hero.heroPanel.x <= bunny.hero.art.x);
+    NIMVLETS_CHECK(bunny.hero.heroPanel.Bottom() >= bunny.hero.art.Bottom());
+    NIMVLETS_CHECK(bunny.hero.nameRule.w > 100.0f);  // divisor 1 ancho de columna
+    NIMVLETS_CHECK(bunny.hero.detailDividerRect.w > 100.0f);
+    NIMVLETS_CHECK(bunny.hero.detailDividerRect.y >= bunny.hero.descriptionAnchor.Bottom());
+
+    // Frin (con selector Male/Female) -> divisor 2 AUSENTE.
+    const CollectionLayout frin =
+        BuildCollectionLayout(DevModel("frin", "male"), CollectionLayoutInput{});
+    NIMVLETS_CHECK(!frin.hero.variants.empty());
+    NIMVLETS_CHECK(frin.hero.heroPanel.w > 0.0f);
+    NIMVLETS_CHECK(frin.hero.detailDividerRect.w == 0.0f);
     return true;
 }
 
@@ -510,6 +535,8 @@ void RegisterCollectionLayoutTests(testing::TestRunner& runner) {
     runner.Add("CollectionLayout/HoverLiftShiftsGalleryItemUp", TestHoverLiftShiftsGalleryItemUp);
     runner.Add("CollectionLayout/ScrollShiftsContentUp", TestScrollShiftsContentUp);
     runner.Add("CollectionLayout/DefaultLayoutFitsWithoutScroll", TestDefaultLayoutFitsWithoutScroll);
+    runner.Add("CollectionLayout/HeroPanelAndConditionalDivider",
+               TestCollectionHeroPanelAndConditionalDivider);
     runner.Add("CollectionLayout/SectionNavTabs", TestSectionNavTabs);
     runner.Add("CollectionLayout/UnownedVariantHasRestrainedStateNoAction",
                TestUnownedVariantHasRestrainedStateNoAction);

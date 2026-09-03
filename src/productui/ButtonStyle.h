@@ -26,18 +26,20 @@ struct ButtonStateFlags {
 };
 
 struct ButtonVisual {
-    UiColor fill;                // a == 0 -> sin relleno
-    UiColor border;              // a == 0 -> sin borde
+    UiColor fill{0, 0, 0, 0};    // a == 0 -> sin relleno
+    UiColor border{0, 0, 0, 0};  // a == 0 -> sin borde
     UiColor ink;                 // color de la etiqueta
     float borderWidth = 1.5f;
     bool drawFocusRing = false;  // el caller dibuja un anillo desplazado en tokens::kFocus
 
     // --- Detalles de la CTA (convergencia DEC-147) — a==0 / false los apaga ---
-    UiColor topHighlight;   // hairline interior superior 1pt (sensación "levantada")
-    UiColor bottomShade;    // hairline interior inferior 1pt
-    UiColor edgeAccent;     // hairline exterior tenue (filo de oro cálido)
-    bool pill = false;      // radio = alto/2 en vez de 9pt
-    bool sparkle = false;   // spark procedural chico a la derecha, en `ink`
+    // Por defecto TRANSPARENTES: un Primary / Secondary / Quiet normal
+    // no dibuja ninguno de estos.
+    UiColor topHighlight{0, 0, 0, 0};  // hairline interior superior 1pt (sensación "levantada")
+    UiColor bottomShade{0, 0, 0, 0};   // hairline interior inferior 1pt
+    UiColor edgeAccent{0, 0, 0, 0};    // hairline exterior tenue (filo de oro cálido)
+    bool pill = false;                 // radio = alto/2 en vez de 9pt
+    bool sparkle = false;              // spark procedural chico a la derecha, en `ink`
 };
 
 // `accent` puede ser null (sin contexto de pet) — usa entonces el
