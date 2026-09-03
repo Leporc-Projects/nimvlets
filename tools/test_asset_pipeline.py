@@ -1286,6 +1286,99 @@ class CanonicalPetGeometryTest(unittest.TestCase):
                     self.assertEqual(len({(f["width"], f["height"]) for f in anim["frames"]}), 1)
 
 
+def _read_nvprev_pixels(path: str) -> tuple[int, int, bytes]:
+    """Lee un artefacto NVPREV1 (ver src/productui/PreviewArtifact.cpp) y
+    devuelve (width, height, rgba). Chico a propósito -- solo lo que la
+    regresión de orientación necesita."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    assert data[:8] == b"NVPREV1\x00", f"{path}: bad magic {data[:8]!r}"
+    off = 8
+    (version,) = struct.unpack_from("<I", data, off)
+    off += 4
+    assert version == 1, f"{path}: unsupported preview version {version}"
+
+    def _str() -> str:
+        nonlocal off
+        (n,) = struct.unpack_from("<I", data, off)
+        off += 4
+        s = data[off:off + n].decode()
+        off += n
+        return s
+
+    _str()  # pet_id
+    _str()  # variant_id
+    _str()  # source_pack
+    width, height, pixel_bytes = struct.unpack_from("<III", data, off)
+    off += 12
+    return width, height, data[off:off + pixel_bytes]
+
+
+class HeroPreviewOrientationTest(unittest.TestCase):
+    """POLÍTICA de orientación del hero del Product UI (Block 12A / DEC-148).
+
+    El hero del pet ACTIVO se dibuja desde `SpikeApp::CurrentRestFrame()`,
+    que resuelve el frame de reposo del estado base en
+    `Direction::kRight` -- la orientación CANÓNICA, deliberadamente
+    independiente de la `direction_` en vivo del compañero de escritorio.
+    Las tarjetas de browse / rail dibujan el `.nvprev` que
+    `tools/compile_pet_preview.py` hornea con la MISMA regla.
+
+    Esta regresión fija que las dos rutas coinciden EXACTAMENTE, pixel a
+    pixel, para cada pack enviado: el hero del pet activo y su tarjeta
+    nunca pueden "voltearse" una respecto de la otra. Si alguien hace que
+    el hero siga `direction_`, o cambia una de las dos reglas de
+    resolución, este test lo caza."""
+
+    PACKS = ("assets/dev/nidir_pack.nvpack", "assets/dev/bunny_pack.nvpack",
+             "assets/dev/frin_male_pack.nvpack", "assets/dev/frin_female_pack.nvpack")
+
+    def _canonical_rest_frame(self, pack: dict) -> dict:
+        # Igual que SpikeApp::CurrentRestFrame(): states[0], animación
+        # base, Direction::kRight.
+        state = pack["states"][0]
+        anim = read_pet_pack.resolve_animation(
+            state["base_animation"], state["base_animation_direction_overrides"], "right")
+        return anim["frames"][0]
+
+    def test_hero_rest_frame_matches_the_bundled_preview_pixel_for_pixel(self) -> None:
+        for rel in self.PACKS:
+            pack_path = os.path.join(_REPO_ROOT, rel)
+            prev_path = pack_path[:-len(".nvpack")] + ".nvprev" if rel.endswith(".nvpack") \
+                else pack_path + ".nvprev"
+            with self.subTest(pack=os.path.basename(rel)):
+                self.assertTrue(os.path.isfile(prev_path), f"missing preview {prev_path}")
+                frame = self._canonical_rest_frame(read_pet_pack.read_pack(pack_path))
+                pw, ph, prgba = _read_nvprev_pixels(prev_path)
+                self.assertEqual(
+                    (frame["width"], frame["height"]), (pw, ph),
+                    "hero rest frame and bundled preview differ in size -- the Product UI "
+                    "hero and the browse card would not be the same image")
+                self.assertEqual(
+                    bytes(frame["pixels"]), prgba,
+                    f"{os.path.basename(rel)}: the Direction::kRight rest frame is NOT "
+                    "pixel-identical to its .nvprev -- the active-pet hero would show a "
+                    "different (possibly mirrored) orientation than the browse/rail card")
+
+    def test_the_left_override_is_a_genuinely_different_image(self) -> None:
+        # Prueba de cordura: la política solo tiene sentido si `kLeft` es
+        # de verdad otra orientación. Si un pack perdiera su override
+        # izquierdo, "canónico == izquierdo" pasaría trivialmente y la
+        # regresión de arriba dejaría de significar algo.
+        for rel in self.PACKS:
+            pack = read_pet_pack.read_pack(os.path.join(_REPO_ROOT, rel))
+            state = pack["states"][0]
+            overrides = state["base_animation_direction_overrides"]
+            with self.subTest(pack=os.path.basename(rel)):
+                left = [o for o in overrides if o["direction"] == "left"]
+                self.assertEqual(len(left), 1, "expected exactly one 'left' base override")
+                canonical_px = bytes(state["base_animation"]["frames"][0]["pixels"])
+                left_px = bytes(left[0]["animation"]["frames"][0]["pixels"])
+                self.assertNotEqual(canonical_px, left_px,
+                                    "canonical and left rest frames are identical -- the "
+                                    "directional set is degenerate")
+
+
 class LieToSitTerminalTranslationTest(unittest.TestCase):
     """`terminal_rigid_translation` (DEC-105) -- reemplaza la
     sustitución de cola (`stable_pose_tail_frames`, DEC-101) por una

@@ -1017,6 +1017,20 @@ content::FrameDefinition SpikeApp::CurrentRestFrame() const {
     if (pet_.states.empty()) {
         return content::FrameDefinition{};
     }
+    // POLÍTICA de presentación del hero del Product UI (Block 12A / DEC-148):
+    // el hero SIEMPRE muestra el frame de reposo del estado base en
+    // `Direction::kRight` — la orientación CANÓNICA de reposo del pet,
+    // deliberadamente INDEPENDIENTE de la `direction_` en vivo del
+    // compañero de escritorio (que sigue la mitad de pantalla). Tras las
+    // correcciones de dirección de Block 04.3 / Block 05, `kRight` es la
+    // orientación real dibujada por el artista para TODOS los pets
+    // enviados (Bunny mira a la izquierda, Nidir con el hocico a la
+    // izquierda, Frin de frente) — y coincide EXACTAMENTE, pixel a pixel,
+    // con lo que `tools/compile_pet_preview.py` hornea en el `.nvprev`
+    // que usan las tarjetas de browse y del rail. Así el hero del pet
+    // activo y su tarjeta nunca se contradicen (ni "voltean"). No aplicar
+    // espejado en runtime; no seguir `direction_`. `tools/test_asset_pipeline.py`
+    // (HeroPreviewOrientationTest) fija esta igualdad para cada pack.
     const content::BehaviorState& state = pet_.states.front();
     const content::AnimationDefinition& anim = content::ResolveAnimation(
         state.baseAnimation, state.baseAnimationDirectionOverrides, content::Direction::kRight);
