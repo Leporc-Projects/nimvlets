@@ -7,8 +7,10 @@ namespace {
 // Constructor chico para no depender del orden posicional del agregado
 // (Block 12A agregó `secondary` y `heroStage` en el medio). `faceted`
 // == round-rect apenas angular (Nidir); si no, óvalo orgánico.
+// `emphasis` = tratamiento de acento en CTA / card seleccionada
+// (default seguro kSoft — DEC-148).
 PetAccent Make(UiColor line, UiColor secondary, UiColor shapeTint, UiColor softFill, UiColor deepInk,
-               bool faceted = false) {
+               bool faceted = false, AccentEmphasis emphasis = AccentEmphasis::kSoft) {
     PetAccent a;
     a.line = line;
     a.secondary = secondary;
@@ -17,6 +19,7 @@ PetAccent Make(UiColor line, UiColor secondary, UiColor shapeTint, UiColor softF
     a.deepInk = deepInk;
     a.heroStage = faceted ? HeroStageStyle::kFacetedRound : HeroStageStyle::kSoftOval;
     a.angularShape = faceted;
+    a.emphasis = emphasis;
     return a;
 }
 
@@ -44,10 +47,11 @@ PetAccent PetAccentFor(const std::string& petId) {
     }
     if (petId == "nidir") {
         // Amatista / violeta frío; secundario índigo profundo. Dragón ->
-        // hero stage facetado.
+        // hero stage facetado + acento HONDO (el CTA violeta saturado y la
+        // card seleccionada del concept — DEC-148).
         return Make(UiColor{0x93, 0x86, 0xBE, 0xFF}, UiColor{0x4B, 0x43, 0x74, 0xFF},
                     UiColor{0xE7, 0xE2, 0xEF, 0xFF}, UiColor{0xE1, 0xD9, 0xEE, 0xFF},
-                    UiColor{0x40, 0x35, 0x6A, 0xFF}, /*faceted=*/true);
+                    UiColor{0x40, 0x35, 0x6A, 0xFF}, /*faceted=*/true, AccentEmphasis::kDeep);
     }
     if (petId == "frin") {
         // Azul hielo pálido; secundario plata/azul (lobo blanco).
@@ -76,7 +80,7 @@ PetAccent PetAccentFor(const std::string& petId) {
     if (petId == "kyubi") {
         return Make(UiColor{0x7A, 0x5A, 0x9E, 0xFF}, UiColor{0x4E, 0x3B, 0x6E, 0xFF},
                     UiColor{0xE2, 0xDA, 0xEC, 0xFF}, UiColor{0xDB, 0xCF, 0xEA, 0xFF},
-                    UiColor{0x3C, 0x2C, 0x5C, 0xFF}, /*faceted=*/true);
+                    UiColor{0x3C, 0x2C, 0x5C, 0xFF}, /*faceted=*/true, AccentEmphasis::kDeep);
     }
     if (petId == "sweetie") {
         return Make(UiColor{0xD0, 0x6A, 0x45, 0xFF}, UiColor{0xC9, 0x8E, 0x77, 0xFF},

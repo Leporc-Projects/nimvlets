@@ -31,6 +31,20 @@ enum class HeroStageStyle {
     kFacetedRound, // round-rect apenas más angular — Nidir (dragón)
 };
 
+// Énfasis del tratamiento de ACENTO de un pet en sus superficies fuertes
+// — la gran CTA del Shop / Collection y la card seleccionada del rail
+// (convergencia con el concept image — DEC-148). NO es un color; es una
+// ESTRATEGIA centralizada (brief §18/§25/§33): un pet dramático puede
+// pedir un relleno de acento hondo con tinta cream (como el CTA violeta
+// del concept para Nidir), sin que las vistas esparzan `if (petId ==
+// ...)`. `ButtonStyle` / la card resuelven el color final y GARANTIZAN
+// el contraste (`BestForeground`), así que un pet futuro sin perfil
+// completo cae al valor seguro `kSoft` y nunca produce texto ilegible.
+enum class AccentEmphasis {
+    kSoft,  // relleno claro del tono del pet + tinta oscura (Bunny, Frin, el neutro)
+    kDeep,  // relleno saturado del tono + tinta cream (Nidir; personajes dramáticos)
+};
+
 struct PetAccent {
     // Color de identidad primario, saturación media: trazo de selección
     // de variante, regla de acento bajo el nombre, punto de "On desktop".
@@ -62,6 +76,12 @@ struct PetAccent {
     // no tocar las vistas que ya lo consultan.
     HeroStageStyle heroStage = HeroStageStyle::kSoftOval;
     bool angularShape = false;
+
+    // Énfasis del acento en las superficies fuertes (CTA grande + card
+    // seleccionada del rail). Default seguro `kSoft` — un pet sin perfil
+    // completo nunca produce un par ilegible (ver AccentEmphasis, brief
+    // §18/§25/§33/§34).
+    AccentEmphasis emphasis = AccentEmphasis::kSoft;
 };
 
 // Acento para `petId` (el id de catálogo: "bunny", "nidir", "frin",

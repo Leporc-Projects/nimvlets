@@ -335,8 +335,14 @@ void ShopView::Render(
     // --- SELECTED: hero (panel enmarcado) + rail compacto ----------
     // El panel del hero ya SEPARA hero y rail: no hace falta un divisor
     // ornamental extra ahí (los dos divisores editoriales viven DENTRO
-    // del panel — convergencia DEC-147). Solo el segundo plano cálido.
+    // del panel — convergencia DEC-147). El segundo plano cálido de la
+    // banda "Meet more Nimvlets" es ahora un escalón más hondo + un
+    // hairline en su borde superior, para que se lea como una región
+    // aparte a distancia normal (brief §7 / DEC-148).
     painter.FillRect(layout.shelfBackground, tokens::kSurfaceSoft);
+    painter.FillRect(UiRect{layout.shelfBackground.x, layout.shelfBackground.y,
+                            layout.shelfBackground.w, 1.0f},
+                     tokens::kBorder);
 
     DrawShopHero(painter, text, previews, layout.hero, focusedId);
 

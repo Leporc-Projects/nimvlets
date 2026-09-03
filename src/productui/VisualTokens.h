@@ -32,10 +32,17 @@ namespace nimvlets::productui {
 namespace tokens {
 
 // --- Planos / superficies ------------------------------------------
-constexpr UiColor kCanvas{0xF6, 0xF3, 0xEE, 0xFF};        // pergamino cálido — el fondo de la app
-constexpr UiColor kSurface{0xF6, 0xF3, 0xEE, 0xFF};       // superficie por defecto (== canvas)
-constexpr UiColor kSurfaceRaised{0xFB, 0xF9, 0xF4, 0xFF}; // un susurro más claro — panel/card que "levanta"
-constexpr UiColor kSurfaceSoft{0xF0, 0xEB, 0xE1, 0xFF};   // neutro cálido un poco más profundo — plano de la gallery / rail
+// Convergencia con el concept image (DEC-148): el owner pidió que la
+// ventana NO se lea como "una sola hoja de crema infinita". Los tres
+// tonos se separan un paso más — sigue siendo cálido/parchment, sin
+// textura ni sombra, pero la jerarquía de plano se percibe a distancia
+// normal. El orden de luminancia (raised > canvas > soft) que fija
+// ContrastTest se conserva, ahora con más aire entre cada escalón.
+constexpr UiColor kCanvas{0xF5, 0xF1, 0xEA, 0xFF};        // pergamino cálido — el fondo de la app
+constexpr UiColor kSurface{0xF5, 0xF1, 0xEA, 0xFF};       // superficie por defecto (== canvas)
+constexpr UiColor kSurfaceRaised{0xFC, 0xFA, 0xF6, 0xFF}; // panel/card que "levanta" — claramente sobre el canvas
+constexpr UiColor kSurfaceSoft{0xEC, 0xE4, 0xD6, 0xFF};   // plano de la gallery / rail — banda cálida más honda
+constexpr UiColor kSurfaceSunken{0xE3, 0xD8, 0xC3, 0xFF}; // el escalón más hondo — pie de la ventana bajo la banda
 
 // --- Líneas ------------------------------------------------------
 constexpr UiColor kBorder{0xE4, 0xDE, 0xD3, 0xFF};        // hairline cálido suave (borde exterior / divisor)
@@ -52,9 +59,14 @@ constexpr UiColor kFocus{0x26, 0x22, 0x1E, 0xFF};           // anillo de foco �
 constexpr UiColor kHoverWash{0xEF, 0xEA, 0xE1, 0xFF};       // wash sutil al pasar el mouse
 
 // --- Estado seleccionado de un control segmentado (Settings) ------
-// Marrón cálido PROFUNDO en vez de negro macizo (convergencia DEC-147):
-// inconfundible, pero armonizado con el resto de la paleta cálida.
+// Marrón cálido PROFUNDO en vez de negro macizo (convergencia DEC-147).
+// El owner rechazó el borde interior CLARO que Block 12A le ponía encima
+// (leía como un "marco embutido" / anillo blanco — DEC-148): el segmento
+// seleccionado es UNA superficie limpia — relleno hondo + UN solo borde
+// (un pelín más oscuro que el relleno, mismo grosor que el hairline de
+// los no seleccionados) + tinta cream. Sin anillo pálido.
 constexpr UiColor kSelectedFill{0x33, 0x2B, 0x22, 0xFF};
+constexpr UiColor kSelectedBorder{0x24, 0x1D, 0x15, 0xFF}; // borde ÚNICO, apenas más oscuro que el relleno
 constexpr UiColor kSelectedInk{0xF4, 0xEE, 0xE3, 0xFF};   // cream cálido — etiqueta sobre kSelectedFill
 
 // --- Cápsula del wallet (pill discreto — NO estilo de moneda premium) --

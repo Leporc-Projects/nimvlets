@@ -27,13 +27,15 @@ void DrawBrandEmblem(UiPainter& p, float cx, float cy, float size, UiColor color
     if (size <= 0.0f || color.a == 0) {
         return;
     }
-    // Jerarquía: spark principal centrado, spark chico arriba-derecha,
-    // rombo minúsculo abajo-izquierda. Composición fija y determinista.
-    const float main = size * 0.42f;
+    // Jerarquía: spark principal centrado (dominante), spark chico
+    // arriba-derecha, rombo minúsculo abajo-izquierda. Composición fija y
+    // determinista — se lee como "la marquita de Nimvlets", no un sparkle
+    // suelto (concept / DEC-148).
+    const float main = size * 0.46f;
     DrawSparkle(p, cx, cy, main, color);
-    DrawSparkle(p, cx + size * 0.34f, cy - size * 0.30f, size * 0.20f, color);
-    const float d = size * 0.14f;
-    p.FillDiamond(UiRect{cx - size * 0.36f - d * 0.5f, cy + size * 0.26f - d * 0.5f, d, d},
+    DrawSparkle(p, cx + size * 0.36f, cy - size * 0.32f, size * 0.22f, color);
+    const float d = size * 0.15f;
+    p.FillDiamond(UiRect{cx - size * 0.38f - d * 0.5f, cy + size * 0.28f - d * 0.5f, d, d},
                   color.WithAlpha(color.a > 190 ? 190 : color.a));
 }
 

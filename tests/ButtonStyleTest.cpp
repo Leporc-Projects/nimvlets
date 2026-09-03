@@ -5,12 +5,14 @@
 #include "productui/PetAccent.h"
 #include "productui/VisualTokens.h"
 
+using nimvlets::productui::AccentEmphasis;
 using nimvlets::productui::ButtonRole;
 using nimvlets::productui::ButtonStateFlags;
 using nimvlets::productui::ButtonVisual;
 using nimvlets::productui::ContrastRatio;
 using nimvlets::productui::PetAccent;
 using nimvlets::productui::PetAccentFor;
+using nimvlets::productui::RelativeLuminance;
 using nimvlets::productui::ResolveButtonVisual;
 namespace tokens = nimvlets::productui::tokens;
 
@@ -113,6 +115,36 @@ bool TestPrimaryCtaHasOrnamentsAndReadableInk() {
     return true;
 }
 
+// DEC-148: la estrategia centralizada de ÉNFASIS del CTA. Un pet "hondo"
+// (Nidir) recibe un relleno de acento SATURADO y OSCURO (el CTA violeta
+// del concept) con tinta cream; un pet "suave" (Bunny) recibe el relleno
+// claro con tinta oscura. Los dos SIEMPRE ≥ 4.5:1 (BestForeground), y el
+// relleno hondo es netamente más oscuro que el suave.
+bool TestPrimaryCtaEmphasisStrategy() {
+    const PetAccent nidir = PetAccentFor("nidir");
+    const PetAccent bunny = PetAccentFor("bunny");
+    NIMVLETS_CHECK(nidir.emphasis == AccentEmphasis::kDeep);
+    NIMVLETS_CHECK(bunny.emphasis == AccentEmphasis::kSoft);
+
+    const ButtonVisual deep = ResolveButtonVisual(ButtonRole::kPrimaryCta, &nidir, Rest());
+    const ButtonVisual soft = ResolveButtonVisual(ButtonRole::kPrimaryCta, &bunny, Rest());
+
+    // Los dos: legibles y con el filo de oro + 2-tono + pill + spark.
+    for (const ButtonVisual& v : {deep, soft}) {
+        NIMVLETS_CHECK(ContrastRatio(v.ink, v.fill) >= 4.5);
+        NIMVLETS_CHECK(v.pill && v.sparkle && v.edgeAccent.a != 0);
+    }
+    // El relleno hondo de Nidir es marcadamente más oscuro que el suave
+    // de Bunny, y su tinta es CLARA (cream) — no la tinta oscura del suave.
+    NIMVLETS_CHECK(RelativeLuminance(deep.fill) < RelativeLuminance(soft.fill) - 0.15);
+    NIMVLETS_CHECK(RelativeLuminance(deep.ink) > RelativeLuminance(deep.fill));   // tinta clara sobre relleno hondo
+    NIMVLETS_CHECK(RelativeLuminance(soft.ink) < RelativeLuminance(soft.fill));   // tinta oscura sobre relleno claro
+    // El contorno interior del hondo es MÁS OSCURO que su relleno (filo
+    // limpio, nunca un anillo pálido — brief §19).
+    NIMVLETS_CHECK(RelativeLuminance(deep.border) < RelativeLuminance(deep.fill));
+    return true;
+}
+
 // kPrimaryCta disabled: sin adornos, legible-pero-apagada, sin anillo.
 bool TestPrimaryCtaDisabledDropsOrnaments() {
     const PetAccent bunny = PetAccentFor("bunny");
@@ -130,6 +162,7 @@ bool TestPrimaryCtaDisabledDropsOrnaments() {
 void RegisterButtonStyleTests(testing::TestRunner& runner) {
     runner.Add("ButtonStyle/PrimaryCtaHasOrnamentsAndReadableInk",
                TestPrimaryCtaHasOrnamentsAndReadableInk);
+    runner.Add("ButtonStyle/PrimaryCtaEmphasisStrategy", TestPrimaryCtaEmphasisStrategy);
     runner.Add("ButtonStyle/PrimaryCtaDisabledDropsOrnaments", TestPrimaryCtaDisabledDropsOrnaments);
     runner.Add("ButtonStyle/PrimaryUsesPetAccentAndStaysReadable",
                TestPrimaryUsesPetAccentAndStaysReadable);

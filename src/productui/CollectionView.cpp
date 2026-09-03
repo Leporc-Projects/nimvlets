@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "productui/ButtonStyle.h"
+#include "productui/Contrast.h"
 #include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
@@ -274,6 +275,9 @@ void CollectionView::Render(
     const bool hasGallery = !layout.gallery.empty();
     if (hasGallery) {
         painter.FillRect(layout.galleryShelf, theme::kGalleryShelf);
+        painter.FillRect(
+            UiRect{layout.galleryShelf.x, layout.galleryShelf.y, layout.galleryShelf.w, 1.0f},
+            tokens::kBorder);
     }
 
     // --- Hero ---
@@ -285,10 +289,13 @@ void CollectionView::Render(
                       /*innerHighlight=*/true);
 
         // Hero stage: primaria grande + secundaria descentrada, teñidas
-        // con el shapeTint del pet a alpha bajo (brief §11).
-        FillStagePrimitive(painter, h.stageSecondary, h.accent.angularShape,
+        // con el shapeTint del pet a alpha bajo (brief §11). Recortadas al
+        // panel enmarcado — con las superficies en capas de DEC-148 el
+        // halo ya no puede "asomar" por fuera del panel (brief §8).
+        const UiRect stageBounds = h.heroPanel.Inset(2.0f);
+        FillStagePrimitive(painter, h.stageSecondary.ClampedTo(stageBounds), h.accent.angularShape,
                            h.accent.shapeTint.WithAlpha(kStageSecondaryAlpha));
-        FillStagePrimitive(painter, h.stagePrimary, h.accent.angularShape,
+        FillStagePrimitive(painter, h.stagePrimary.ClampedTo(stageBounds), h.accent.angularShape,
                            h.accent.shapeTint.WithAlpha(kStagePrimaryAlpha));
 
         SDL_Texture* art = previews.Get(h.petId, h.selectedVariantId);
@@ -301,7 +308,7 @@ void CollectionView::Render(
         // (identidad). Acotado para no estirarse por el lado vacío.
         DrawOrnamentalDivider(
             painter,
-            UiRect{h.nameRule.x, h.nameRule.y - 3.5f, std::min(h.nameRule.w, 360.0f), 8.0f},
+            UiRect{h.nameRule.x, h.nameRule.y - 3.5f, std::min(h.nameRule.w, 430.0f), 8.0f},
             tokens::kBorder, h.accent.line);
 
         if (!h.speciesText.empty()) {
@@ -322,7 +329,7 @@ void CollectionView::Render(
         if (h.detailDividerRect.w > 0.0f) {
             DrawOrnamentalDivider(painter,
                                   UiRect{h.detailDividerRect.x, h.detailDividerRect.CenterY() - 4.0f,
-                                         std::min(h.detailDividerRect.w, 360.0f), 8.0f},
+                                         std::min(h.detailDividerRect.w, 430.0f), 8.0f},
                                   tokens::kBorder, tokens::kOrnamentNeutral);
         }
 
@@ -408,7 +415,10 @@ void CollectionView::Render(
         const bool focused = focusedId == g.focusId;
         const UiRect card = g.cell.Inset(2.0f);
         painter.FillRoundRect(card, 12.0f, hovered ? tokens::kHoverWash : tokens::kSurfaceRaised);
-        painter.StrokeRoundRect(card, 12.0f, 1.0f, tokens::kBorder);
+        // Un hairline con una PIZCA del tono del pet (brief §24) — sutil,
+        // sigue en el universo cálido común.
+        painter.StrokeRoundRect(card, 12.0f, 1.0f,
+                                hovered ? tokens::kBorder : Mix(tokens::kBorder, g.accentLine, 0.16));
         if (focused) {
             painter.StrokeRoundRect(card.Inset(-3.5f), 15.5f, 2.0f, tokens::kFocus);
         }

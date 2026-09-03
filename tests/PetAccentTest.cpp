@@ -3,6 +3,7 @@
 #include "productui/Contrast.h"
 #include "productui/PetAccent.h"
 
+using nimvlets::productui::AccentEmphasis;
 using nimvlets::productui::ContrastRatio;
 using nimvlets::productui::HeroStageStyle;
 using nimvlets::productui::PetAccent;
@@ -121,6 +122,30 @@ bool TestButtonSoftFillIsLightAndDeepInkIsDark() {
     return true;
 }
 
+// DEC-148: cada identidad trae un `emphasis` válido; el fallback neutro
+// y cualquier id desconocido caen al valor SEGURO kSoft (nunca kDeep sin
+// un perfil que lo justifique — brief §34).
+bool TestAccentEmphasisPopulatedAndSafeFallback() {
+    for (const char* id : {"bunny", "nidir", "frin", "rato", "rin_rin", "artu", "kyubi", "sweetie",
+                           "", "does_not_exist"}) {
+        const PetAccent a = PetAccentFor(id);
+        NIMVLETS_CHECK(a.emphasis == AccentEmphasis::kSoft || a.emphasis == AccentEmphasis::kDeep);
+    }
+    NIMVLETS_CHECK(PetAccentFor("").emphasis == AccentEmphasis::kSoft);
+    NIMVLETS_CHECK(PetAccentFor("does_not_exist").emphasis == AccentEmphasis::kSoft);
+    return true;
+}
+
+// El owner quiere el CTA / la card violeta HONDA para Nidir (concept),
+// mientras Bunny / Frin quedan en el tratamiento suave.
+bool TestDramaticPetsUseDeepEmphasis() {
+    NIMVLETS_CHECK(PetAccentFor("nidir").emphasis == AccentEmphasis::kDeep);
+    NIMVLETS_CHECK(PetAccentFor("kyubi").emphasis == AccentEmphasis::kDeep);
+    NIMVLETS_CHECK(PetAccentFor("bunny").emphasis == AccentEmphasis::kSoft);
+    NIMVLETS_CHECK(PetAccentFor("frin").emphasis == AccentEmphasis::kSoft);
+    return true;
+}
+
 // El tono del softFill sigue la familia de color del pet (Bunny cálido,
 // Frin frío) — no es un gris genérico.
 bool TestButtonFillKeepsPetHue() {
@@ -145,6 +170,9 @@ void RegisterPetAccentTests(testing::TestRunner& runner) {
     runner.Add("PetAccent/ShapeTintIsPalerThanLine", TestShapeTintIsPalerThanLine);
     runner.Add("PetAccent/ButtonSoftFillIsLightAndDeepInkIsDark", TestButtonSoftFillIsLightAndDeepInkIsDark);
     runner.Add("PetAccent/ButtonFillKeepsPetHue", TestButtonFillKeepsPetHue);
+    runner.Add("PetAccent/AccentEmphasisPopulatedAndSafeFallback",
+               TestAccentEmphasisPopulatedAndSafeFallback);
+    runner.Add("PetAccent/DramaticPetsUseDeepEmphasis", TestDramaticPetsUseDeepEmphasis);
 }
 
 }  // namespace nimvlets::tests

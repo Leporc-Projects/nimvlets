@@ -57,11 +57,23 @@ void DrawShopTile(
     UiColor border = tokens::kBorder;
     float borderW = 1.0f;
     if (selectedMark) {
-        surface = Mix(tokens::kSurfaceRaised, t.pedestalTint, 0.55);
-        border = t.accentLine;
+        // La card seleccionada toma la identidad del pet. Un pet "hondo"
+        // (Nidir) recibe una superficie de acento MÁS RICA — la card
+        // violeta del concept — vía la MISMA estrategia centralizada que
+        // el CTA (DEC-148); el resto, el tinte suave de siempre. El
+        // nombre (kTextPrimary) queda ≥ 7:1 sobre cualquiera de las dos.
+        const bool deep = t.emphasis == AccentEmphasis::kDeep;
+        surface = deep ? Mix(tokens::kSurfaceRaised, t.accentSecondary, 0.36)
+                       : Mix(tokens::kSurfaceRaised, t.pedestalTint, 0.55);
+        border = deep ? Lighten(t.accentLine, 0.16) : t.accentLine;
         borderW = 2.0f;
     } else if (hovered) {
         surface = tokens::kHoverWash;
+    } else {
+        // Card NO seleccionada: una PIZCA de personalidad — un hairline
+        // inferior con el tono del pet, muy tenue (brief §24). Sigue
+        // perteneciendo al universo cálido común; no son cinco temas.
+        border = Mix(tokens::kBorder, t.accentLine, 0.16);
     }
     painter.FillRoundRect(card, 12.0f, surface);
     painter.StrokeRoundRect(card, 12.0f, borderW, border);
@@ -102,9 +114,12 @@ void DrawShopHero(
     DrawSoftPanel(painter, h.heroPanel, 16.0f, tokens::kSurfaceRaised, tokens::kBorder,
                   /*innerHighlight=*/true);
 
-    FillShopStagePrimitive(painter, h.stageSecondary, h.accent.angularShape,
+    // Stage recortado al panel — el halo teñido no "asoma" por fuera del
+    // marco del hero (brief §8 / DEC-148).
+    const UiRect stageBounds = h.heroPanel.Inset(2.0f);
+    FillShopStagePrimitive(painter, h.stageSecondary.ClampedTo(stageBounds), h.accent.angularShape,
                            h.accent.shapeTint.WithAlpha(kStageSecondaryAlpha));
-    FillShopStagePrimitive(painter, h.stagePrimary, h.accent.angularShape,
+    FillShopStagePrimitive(painter, h.stagePrimary.ClampedTo(stageBounds), h.accent.angularShape,
                            h.accent.shapeTint.WithAlpha(kStagePrimaryAlpha));
 
     SDL_Texture* art = previews.Get(h.petId, h.variantId);
@@ -112,8 +127,10 @@ void DrawShopHero(
                                  h.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255);
 
     // Nombre (serif editorial) + DIVISOR 1: rombo central = acento del
-    // pet. La regla se acota para no estirarse por el lado vacío del panel.
-    constexpr float kHeroDividerMaxW = 360.0f;
+    // pet. La regla llega casi al ancho de la columna de detalle (como el
+    // concept), pero no cruza al lado del arte — `nameRule.w` YA es solo
+    // la columna de texto (DEC-148).
+    constexpr float kHeroDividerMaxW = 430.0f;
     DrawText(painter, text, h.displayName, type::role::kHeroTitle, tokens::kTextPrimary,
              h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
     DrawOrnamentalDivider(
@@ -142,12 +159,13 @@ void DrawShopHero(
     }
 
     // Precio con el spark de moneda (referencia: "✦ 300 clicks", más
-    // confiado que el cuerpo). Sans numérico, como el wallet.
+    // confiado que el cuerpo). Sans numérico, como el wallet — spark un
+    // pelín más grande y con más aire hasta el número (DEC-148).
     if (h.status != ShopItemStatus::kOwned) {
-        DrawSparkle(painter, h.priceAnchor.x + 6.0f, h.priceAnchor.y + h.priceAnchor.h * 0.5f, 5.0f,
+        DrawSparkle(painter, h.priceAnchor.x + 7.0f, h.priceAnchor.y + h.priceAnchor.h * 0.5f, 6.0f,
                     tokens::kOrnamentNeutral);
         DrawText(painter, text, h.priceText, type::role::kPrice, tokens::kTextPrimary,
-                 h.priceAnchor.x + 18.0f, h.priceAnchor.y + 15.0f, HAlign::kLeft);
+                 h.priceAnchor.x + 22.0f, h.priceAnchor.y + 15.0f, HAlign::kLeft);
     }
 
     if (h.confirm.visible) {

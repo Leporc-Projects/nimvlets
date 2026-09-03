@@ -15,8 +15,8 @@ namespace {
 // literal del producto (referencia A / convergencia DEC-147). No es un
 // logo de imagen; el nombre de la app en la barra de título del SO NO
 // se toca.
-constexpr float kBrandEmblem = 15.0f;   // ancho aprox. del clúster
-constexpr float kBrandGap = 9.0f;       // emblema -> "Nimvlets"
+constexpr float kBrandEmblem = 17.0f;   // ancho aprox. del clúster — más presencia (concept, DEC-148)
+constexpr float kBrandGap = 10.0f;      // emblema -> "Nimvlets"
 
 }  // namespace
 
@@ -89,10 +89,13 @@ void DrawSectionHeader(
                  tab.active ? tokens::kTextPrimary : tokens::kTextSecondary, tab.labelAnchor.x,
                  tab.labelAnchor.y + 16.0f, HAlign::kLeft);
         if (tab.underline.w > 0.0f) {
-            constexpr float kExt = 6.0f;    // la regla sobresale del texto a cada lado
-            constexpr float kDiamond = 6.0f;
-            constexpr float kGap = 5.0f;    // hueco de la regla a cada lado del rombo
-            const float ruleY = tab.underline.y + 1.0f;
+            // Indicador "── ◇ ──" del concept: rombo CHICO, segmentos de
+            // regla que sobresalen más del texto, y más aire respecto del
+            // rótulo (DEC-148). Nunca una barra negra.
+            constexpr float kExt = 10.0f;   // la regla sobresale del texto a cada lado
+            constexpr float kDiamond = 5.0f;
+            constexpr float kGap = 4.0f;    // hueco chico de la regla a cada lado del rombo
+            const float ruleY = tab.underline.y + 4.5f;
             const float cx = tab.underline.CenterX();
             const float leftEdge = tab.underline.x - kExt;
             const float rightEdge = tab.underline.Right() + kExt;

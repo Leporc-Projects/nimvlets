@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "productui/ButtonStyle.h"
-#include "productui/Contrast.h"
 #include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
@@ -504,12 +503,12 @@ void SettingsView::Render(
             for (const SettingsSegment& seg : row.segments) {
                 const bool hovered = seg.enabled && hoverId_ == seg.focusId;
                 if (seg.selected) {
-                    // Marrón cálido profundo + un borde interior sutil —
-                    // menos "pill negra maciza", más parte del sistema
-                    // cálido (owner QA — DEC-147).
+                    // UNA superficie limpia: relleno cálido hondo + UN solo
+                    // borde (apenas más oscuro que el relleno, mismo grosor
+                    // que el hairline de los no seleccionados). Sin el
+                    // anillo pálido interior que el owner rechazó — DEC-148.
                     painter.FillRoundRect(seg.rect, 8.0f, tokens::kSelectedFill);
-                    painter.StrokeRoundRect(seg.rect.Inset(1.0f), 7.0f, 1.0f,
-                                            Lighten(tokens::kSelectedFill, 0.22));
+                    painter.StrokeRoundRect(seg.rect, 8.0f, 1.25f, tokens::kSelectedBorder);
                 } else {
                     if (hovered) {
                         painter.FillRoundRect(seg.rect, 8.0f, theme::kHoverWash);

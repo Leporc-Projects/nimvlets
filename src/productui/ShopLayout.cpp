@@ -122,6 +122,8 @@ ShopTile MakeTile(const ShopItem& item, Language lang, bool selected) {
     const PetAccent accent = PetAccentFor(item.petId);
     t.accentLine = accent.line;
     t.pedestalTint = accent.shapeTint;
+    t.accentSecondary = accent.secondary;
+    t.emphasis = accent.emphasis;
     t.selected = selected;
     t.focusId = "shopitem:" + item.petId;
     return t;

@@ -12,11 +12,17 @@ namespace {
 // futuro con un acento claro y para el fallback neutro.
 constexpr double kMinLabelContrast = 4.5;
 
-// Relleno de la CTA: un pelín más saturado que el softFill pálido del
-// Primary contenido — más "confiado" pero todavía claro, así funciona
-// para Bunny (apricot) / Nidir (violeta) / Frin (hielo) por igual sin
-// volverse un negro arbitrario (DEC-121).
-UiColor CtaFill(const PetAccent& acc) { return Mix(acc.softFill, acc.line, 0.35); }
+// Relleno de la CTA según el ÉNFASIS centralizado del pet (DEC-148):
+//   kSoft — un pelín más saturado que el softFill pálido del Primary
+//           contenido: confiado pero claro, tinta oscura (Bunny/Frin/neutro).
+//   kDeep — relleno de acento HONDO (el CTA violeta saturado del concept
+//           para Nidir): line mezclada a mitad con deepInk, tinta cream.
+// En los dos casos el color de la etiqueta pasa por BestForeground, así
+// que un pet futuro sin perfil no puede dar un par ilegible (DEC-121).
+UiColor CtaFill(const PetAccent& acc) {
+    return acc.emphasis == AccentEmphasis::kDeep ? Mix(acc.line, acc.deepInk, 0.5)
+                                                 : Mix(acc.softFill, acc.line, 0.35);
+}
 
 }  // namespace
 
@@ -29,18 +35,22 @@ ButtonVisual ResolveButtonVisual(ButtonRole role, const PetAccent* accent, Butto
     ButtonVisual v;
     switch (role) {
         case ButtonRole::kPrimaryCta: {
+            const bool deep = acc.emphasis == AccentEmphasis::kDeep;
             const UiColor fill = CtaFill(acc);
             v.fill = fill;
-            v.border = acc.line;
+            // Contorno interior LIMPIO e intencional (brief §19 — nada de
+            // anillo pálido accidental): sobre un relleno hondo el borde
+            // es un tono MÁS OSCURO del mismo relleno (se lee como filo);
+            // sobre un relleno claro es la `line` del pet (borde de acento).
+            v.border = deep ? Darken(fill, 0.28) : acc.line;
             v.borderWidth = 1.5f;
             // Etiqueta: la mejor de {deepInk oscuro, cream claro} sobre el
-            // relleno — para casi todos los pets gana deepInk (relleno
-            // claro), pero si un pet futuro trae un relleno oscuro elige
-            // el cream y lo aclara lo justo.
-            v.ink = BestForeground(fill, acc.deepInk, Lighten(tokens::kCanvas, 0.55), kMinLabelContrast);
-            v.topHighlight = Lighten(fill, 0.35);
-            v.bottomShade = Darken(fill, 0.10);
-            v.edgeAccent = tokens::kOrnamentNeutral.WithAlpha(150);
+            // relleno — kSoft gana deepInk (relleno claro), kDeep gana el
+            // cream y lo aclara lo justo para llegar a AA.
+            v.ink = BestForeground(fill, acc.deepInk, Lighten(tokens::kCanvas, 0.58), kMinLabelContrast);
+            v.topHighlight = Lighten(fill, deep ? 0.20 : 0.35);
+            v.bottomShade = Darken(fill, deep ? 0.14 : 0.10);
+            v.edgeAccent = tokens::kOrnamentNeutral.WithAlpha(deep ? 175 : 150);
             v.pill = true;
             v.sparkle = true;
             break;

@@ -62,6 +62,11 @@ struct ShopTile {
     std::string revealText;
     UiColor accentLine;
     UiColor pedestalTint;
+    // Acento secundario del pet + su ÉNFASIS centralizado (DEC-148): la
+    // card SELECCIONADA del rail de un pet "hondo" (Nidir) toma una
+    // superficie de acento más rica, como la card violeta del concept.
+    UiColor accentSecondary;
+    AccentEmphasis emphasis = AccentEmphasis::kSoft;
 
     // Solo en el rail (kSelected): marca la tarjeta cuyo personaje es el
     // hero abierto ahora mismo.
