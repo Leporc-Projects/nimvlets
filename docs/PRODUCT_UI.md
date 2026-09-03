@@ -1621,7 +1621,7 @@ vez de permanente. Fijado en `tests/SettingsLayoutTest.cpp`.
   Settings y solo tras una acción explícita del owner — nunca al
   arrancar. Ver `docs/PRIVACY_SECURITY.md` §H.
 
-## 23. Sistema de diseño visual (Block 12A: fundación DEC-142..DEC-145 · refinamiento owner-QA DEC-146 · convergencia con el concept image DEC-147)
+## 23. Sistema de diseño visual (Block 12A: fundación DEC-142..DEC-145 · refinamiento owner-QA DEC-146 · convergencia con el concept image DEC-147 · pasada final de fidelidad DEC-148)
 
 Block 12A es una pasada **owner-directed** de LENGUAJE VISUAL y
 primitivas de presentación reusables. **NO** rediseña ningún flujo de
@@ -1879,6 +1879,61 @@ comportamiento. Extiende (no reemplaza) todo lo anterior.
   (`topHighlight` / `bottomShade` / `edgeAccent`) tenían default negro
   opaco → todo botón Primary/Confirm habría dibujado hairlines negros.
   Ahora default transparente.
+
+### 23.12 Pasada FINAL de fidelidad con el concept image (DEC-148)
+
+Tras la QA lado a lado del owner, el **concept image aprobado es la
+estrella polar de fidelidad visual para el CHROME del Product UI**,
+excluyendo los fondos escénicos de personaje hasta Block 12C. Extiende
+(no reemplaza) DEC-142..DEC-147.
+
+- **`PetAccent` gana `AccentEmphasis emphasis` (`kSoft` / `kDeep`)** — la
+  costura CENTRALIZADA de "este pet se lee dramático vs. suave" (brief
+  §18/§25/§33). **Nidir / Kyubi** = `kDeep`; el resto — incluido el
+  fallback neutro y cualquier id desconocido — = `kSoft` (default
+  seguro, brief §34). No es un color: `ButtonStyle` / la card resuelven
+  el color final y GARANTIZAN el contraste (`BestForeground` / `Mix`
+  acotado). Las vistas NO ganan `if (petId == …)`.
+- **CTA `kPrimaryCta` por énfasis.** `kDeep` -> relleno `Mix(line,
+  deepInk, 0.5)` (violeta hondo, tinta cream ~5.2:1 en Nidir) + contorno
+  interior `Darken(fill, 0.28)` (filo limpio, nunca un anillo pálido —
+  brief §19) + filo de oro exterior un poco más presente. `kSoft` -> el
+  relleno claro + tinta oscura de DEC-147. `Use <pet>` sigue sin el
+  spark de economía.
+- **Card SELECCIONADA del rail por énfasis** (`ShopTile` gana
+  `accentSecondary` + `emphasis`): `kDeep` -> superficie `Mix(kSurfaceRaised,
+  secondary, 0.36)` (lavanda rica) + borde `Lighten(line, 0.16)` 2 pt —
+  la card violeta del concept. Cards NO seleccionadas: un hairline con
+  una **pizca** del tono del pet (`Mix(kBorder, accentLine, 0.16)`) —
+  personalidad muy tenue (brief §24), sin "marcos dentro de marcos".
+- **Settings: fuera el anillo pálido del segmento seleccionado (brief
+  §5).** El segmento seleccionado es UNA superficie limpia: relleno
+  hondo + UN solo borde (`tokens::kSelectedBorder` `#241D15`, mismo
+  grosor que el hairline de los no seleccionados) + tinta cream. Sin el
+  `StrokeRoundRect` interior claro que el owner rechazó.
+- **Superficies en capas VISIBLES a distancia normal (brief §7/§32).**
+  `kCanvas` `#F5F1EA`, `kSurfaceRaised` `#FCFAF6`, `kSurfaceSoft`
+  `#ECE4D6`, `kSurfaceSunken` `#E3D8C3` (nuevo). Sin textura / sombra /
+  blur / glass. El orden de luminancia de `ContrastTest` (raised >
+  canvas > soft; border < canvas) se conserva. Las bandas de gallery /
+  "Meet more Nimvlets" ganan un hairline superior.
+- **Hero stage recortado al panel** (`UiRect::ClampedTo`): el halo
+  teñido ya no "asoma" por fuera del marco del hero (brief §8).
+- **Divisores del hero al ancho de la columna** (`min(w, 430)`), precio
+  con spark un poco más grande, emblema del wordmark 17 pt, indicador de
+  nav con rombo más chico y segmentos más largos.
+- **Orientación del hero — política + regresión (brief §4).**
+  `SpikeApp::CurrentRestFrame()` (estado base, `Direction::kRight`) YA
+  devuelve la orientación canónica del artista para todos los pets
+  enviados y es **pixel a pixel** idéntica al `.nvprev` de las tarjetas.
+  NO se aplica espejado en runtime; NO se sigue la `direction_` en vivo
+  del compañero de escritorio. `HeroPreviewOrientationTest`
+  (`tools/test_asset_pipeline.py`) fija esa igualdad byte a byte para
+  cada pack.
+- **Copy de la CTA — DECISIÓN DEL OWNER pendiente.** El concept dice
+  `Add to collection`; el producto conserva `Get <pet>` (brief §20). Si
+  el owner aprueba `Add to collection`, es un cambio de un string
+  localizado + su test, sin lógica.
 
 ### 23.11 Alcance NO tocado
 

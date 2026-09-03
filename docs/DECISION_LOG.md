@@ -6435,3 +6435,151 @@ textura nueva. `RenderIfNeeded()` sigue siendo no-op salvo
 brief de convergencia); el arte / preview / runtime de Nidir (golden);
 el catálogo; AppState; el hotspot invisible del Starter Shop; Global
 Click; onboarding; el menú rápido.
+
+---
+
+### DEC-148 — Block 12A pasada final de fidelidad: el concept image es la estrella polar del CHROME del Product UI; CTA / card seleccionada por ÉNFASIS de pet centralizado; Settings sin anillo pálido; superficies en capas visibles; política de orientación canónica del hero + regresión
+
+**Fecha:** 2026-09-03 · **Bloque:** 12A (pasada final de fidelidad) ·
+**Estado:** vigente · **Depende de** DEC-142 (tokens + roles de fuente),
+DEC-143 (`PetAccent` como registro de identidad + `Contrast`), DEC-144
+(ornamentos + sistema de botones), DEC-145 (wordmark + wallet pill +
+nav), DEC-146 (serif del sistema + `── ◇ ──` + rótulos flanqueados),
+DEC-147 (convergencia: nav medida/centrada, hero como panel, doble
+divisor, CTA grande, cards de una pieza, profundidad de superficie).
+**NO** implementa fondos escénicos del hero (Block 12C), **NO** agrega
+favoritos, imágenes, fuentes ni dependencias, **NO** cambia
+comportamiento / lógica / persistencia / economía / conteo de clics /
+shop oculto / onboarding / EN-ES / Global Click / el arte de los pets /
+`.nvpack` / `.nvprev`. El wallet pill queda **tal cual** (aprobado).
+
+**Contexto.** Tras la QA lado a lado del owner (app real vs. concept
+image aprobado de Nimvlets/Nidir), el owner sigue viendo el UI como
+"una interpretación simplificada" del concept y pide traducirlo **mucho
+más literalmente** — proporciones, jerarquía, riqueza de superficie,
+presencia de botón, calidad de card — con las exclusiones explícitas
+(sin fondos escénicos, sin features de mockup). El **concept image
+queda registrado como la estrella polar de fidelidad visual para el
+CHROME del Product UI**, excluyendo los fondos escénicos de personaje
+hasta Block 12C.
+
+**1. `PetAccent` gana `AccentEmphasis emphasis` (kSoft / kDeep).** Es la
+COSTURA centralizada que el brief §18/§25/§33 autoriza: no un color,
+una *estrategia*. `kDeep` = relleno de acento HONDO + tinta cream (el
+CTA violeta saturado y la card seleccionada violeta del concept para
+Nidir); `kSoft` = relleno claro del tono + tinta oscura (Bunny, Frin,
+el neutro). **Nidir y Kyubi** son `kDeep`; el resto — incluido el
+fallback neutro y cualquier id desconocido — es `kSoft` (default seguro,
+brief §34). El color final SIEMPRE pasa por `BestForeground`
+(`ButtonStyle`) o por un `Mix` sobre `kSurfaceRaised` acotado (la card),
+así un pet futuro sin perfil no puede dar un par ilegible (DEC-121). Las
+vistas NO ganan ningún `if (petId == …)`.
+
+**2. CTA `kPrimaryCta` por énfasis.** `CtaFill()` bifurca: `kDeep` ->
+`Mix(line, deepInk, 0.5)` (violeta hondo), `kSoft` -> el `Mix(softFill,
+line, 0.35)` de DEC-147. Tinta por `BestForeground` (cream para el
+hondo, ~5.2:1 en Nidir; tinta oscura para el claro). Contorno interior
+LIMPIO e intencional (brief §19): sobre el relleno hondo el borde es
+`Darken(fill, 0.28)` (se lee como filo, nunca un anillo pálido); sobre
+el claro sigue siendo `line`. Filo de oro exterior un poco más presente
+en el hondo. `Get <pet>` la usa entera; `Use <pet>` sin el spark de
+economía (Collection no es tienda). `Confirm` sigue `kPrimary`
+contenido; `Cancel` `kSecondary`.
+
+**3. Card SELECCIONADA del rail por énfasis (`ShopTile` gana
+`accentSecondary` + `emphasis`).** `kDeep` -> superficie `Mix(kSurfaceRaised,
+secondary, 0.36)` (lavanda rica, nombre `kTextPrimary` ≥ 7:1) + borde
+`Lighten(line, 0.16)` a 2 pt — la card violeta del concept. `kSoft` ->
+el tinte suave de DEC-147. Cards NO seleccionadas: un hairline con una
+**pizca** del tono del pet (`Mix(kBorder, accentLine, 0.16)`) — la
+personalidad muy tenue que el brief §24 pide sin volver a los "marcos
+dentro de marcos".
+
+**4. Settings: fuera el anillo pálido del segmento seleccionado (brief
+§5).** DEC-147 dibujaba `FillRoundRect(kSelectedFill)` + un
+`StrokeRoundRect` interior a 1 pt en `Lighten(kSelectedFill, 0.22)` —
+el owner lo rechazó (leía como "marco embutido" / anillo blanco). Ahora
+el segmento seleccionado es **UNA superficie limpia**: relleno hondo +
+UN solo borde (`tokens::kSelectedBorder` `#241D15`, apenas más oscuro
+que el relleno, MISMO grosor 1.25 pt que el hairline de los no
+seleccionados) + tinta cream. Sin acento por pet, sin rediseño
+estructural.
+
+**5. Superficies en capas VISIBLES a distancia normal (brief §7/§32).**
+Los tres tonos se separan un paso más — sin textura, sin sombra, sin
+blur, sin glass: `kCanvas` `#F6F3EE`→`#F5F1EA`, `kSurfaceRaised`
+`#FBF9F4`→`#FCFAF6`, `kSurfaceSoft` `#F0EBE1`→`#ECE4D6`, y un
+`kSurfaceSunken` `#E3D8C3` nuevo para el escalón más hondo. El orden de
+luminancia que fija `ContrastTest` (raised > canvas > soft; border <
+canvas) se conserva, con más aire entre cada escalón. La banda "Meet
+more Nimvlets" del Shop y la de la gallery de la Collection ganan un
+hairline en su borde superior. El texto secundario sigue AA sobre el
+canvas nuevo (~4.9:1, verificado).
+
+**6. Hero stage recortado al panel (`UiRect::ClampedTo`).** Con las
+superficies más contrastadas, el halo teñido del hero-stage — que
+arranca 40 pt a la izquierda del arte — "asomaba" por fuera del panel
+enmarcado. Ahora se recorta al `heroPanel.Inset(2)` en el dibujo (sin
+depender de un clip de round-rect): un halo suave contenido, nunca una
+forma que se escapa del marco (brief §8).
+
+**7. Divisores del hero al ancho de la columna.** El clamp de DEC-147
+(`min(w, 360)`) dejaba los divisores cortos frente al concept. Sube a
+`430` — `nameRule.w` YA es solo la columna de texto, así que no cruza al
+lado del arte.
+
+**8. Detalles de referencia.** Precio: spark de moneda un pelín más
+grande (5→6) y más aire hasta el número. Wordmark: emblema 15→17 pt,
+spark principal 0.42→0.46 del clúster — más presencia, sigue procedural.
+Indicador de nav activo: rombo 6→5, segmentos que sobresalen más
+(6→10), más aire respecto del rótulo.
+
+**9. Orientación del hero — política + regresión (brief §4).** El owner
+pidió la "presentación LEFT canónica" y rechazó la "orientación
+volteada". **Hallazgo:** tras las correcciones de dirección de Block
+04.3 / Block 05, `SpikeApp::CurrentRestFrame()` (estado base,
+`Direction::kRight`) YA devuelve la orientación canónica dibujada por el
+artista para TODOS los pets enviados (Bunny mira a la izquierda, Nidir
+con el hocico a la izquierda, Frin de frente) y es **pixel a pixel
+idéntica** al `.nvprev` que usan las tarjetas de browse / rail. **No se
+aplica espejado en runtime** (el brief lo desaconseja explícitamente si
+ya existe una dirección canónica) y **no se sigue la `direction_` en
+vivo** del compañero de escritorio. Se documenta la política en
+`CurrentRestFrame()` y se agrega `HeroPreviewOrientationTest`
+(`tools/test_asset_pipeline.py`): para cada pack enviado, el frame de
+reposo en `Direction::kRight` == su `.nvprev` byte a byte, y el override
+`kLeft` es una imagen genuinamente distinta. Si alguien hace que el hero
+siga `direction_`, o cambia una de las dos reglas de resolución, la
+regresión lo caza.
+
+**Bug corregido de paso.** `SettingsView.cpp` dejaba de usar `Lighten`
+-> se saca el `#include "productui/Contrast.h"` muerto.
+
+**Copy de la CTA — DECISIÓN DEL OWNER pendiente (no un cambio de
+código).** El concept dice `Add to collection`; el producto real dice
+`Get <pet>` (`StringKey::kGetPetPrefix` + nombre). Este pase **conserva
+`Get <pet>`** (brief §20: no cambiar semántica/copy sin autorización de
+los docs de producto). Recomendación para la QA del owner:
+`Add to collection` describe mejor el resultado (agregar a la Collection,
+no "obtener" un objeto) y coincide con el concept — si el owner lo
+aprueba, es un cambio de un string localizado (EN/ES) más su test de
+localización, sin tocar lógica.
+
+**Tests.** `PetAccentTest` (+2: `emphasis` poblado y fallback seguro
+kSoft; Nidir/Kyubi kDeep, Bunny/Frin kSoft). `ButtonStyleTest` (+1: el
+CTA hondo es más oscuro que el suave, tinta clara vs. oscura según el
+relleno, contorno interior más oscuro que el relleno, los dos ≥ 4.5:1).
+`tools/test_asset_pipeline.py` (+2: `HeroPreviewOrientationTest`). Total
+**596 tests C++** (593 -> 596), **168 tests Python** (166 -> 168).
+
+**Rendimiento / event-driven:** intacto. Todo sigue procedural, cacheado
+y event-driven — sin loop de render, sin animación de ornamento, sin
+blur, sin sombra cara, sin textura nueva. `RenderIfNeeded()` sigue
+siendo no-op salvo `dirty_`/`EXPOSED`; el `waitMs` del pet no gana
+ningún término (DEC-112 intacto).
+
+**Congelado sin tocar:** el wallet pill (aprobado); los flujos de
+producto y su copy (incl. `Get <pet>`); el arte / preview / `.nvpack` /
+`.nvprev` / runtime de todos los pets; el catálogo; AppState; el hotspot
+invisible del Starter Shop; Global Click; onboarding; el menú rápido; la
+semántica de dirección del compañero de escritorio.
