@@ -60,7 +60,9 @@ class TextCache {
 // Dibuja `utf8` con su BASELINE en la y lógica `baselineY`, alineado en
 // x respecto de `anchorX`. `maxWidthLogical > 0` recorta con "…".
 // Devuelve el ancho lógico dibujado. No-op silencioso si la plataforma
-// no rasteriza texto (Windows/Linux por ahora).
+// no rasteriza texto (Windows/Linux por ahora). `family` / `tracking`
+// (Block 12A refinement) por defecto sans / natural — los callers de
+// cuerpo no cambian.
 float DrawText(
     UiPainter& painter,
     TextCache& cache,
@@ -71,12 +73,32 @@ float DrawText(
     float anchorX,
     float baselineY,
     HAlign align,
+    int maxWidthLogical = 0,
+    platform::TextFamily family = platform::TextFamily::kSans,
+    double tracking = 0.0);
+
+// Overload por ROL de fuente tokenizado (Block 12A refinement): saca
+// tamaño / peso / familia / interletraje de `role`. Es el camino que
+// prefieren los rótulos de display (marca, hero, sección, nav).
+float DrawText(
+    UiPainter& painter,
+    TextCache& cache,
+    const std::string& utf8,
+    const type::FontRole& role,
+    UiColor color,
+    float anchorX,
+    float baselineY,
+    HAlign align,
     int maxWidthLogical = 0);
 
 // Ancho lógico que tendría `utf8` sin recortar — para pasadas de layout
 // fino que la capa pura de CollectionLayout no cubre (dimensionar un
 // botón al texto exacto, etc.).
-float MeasureText(TextCache& cache, const std::string& utf8, double pointSize, platform::TextWeight weight, float scale);
+float MeasureText(
+    TextCache& cache, const std::string& utf8, double pointSize, platform::TextWeight weight,
+    float scale, platform::TextFamily family = platform::TextFamily::kSans, double tracking = 0.0);
+
+float MeasureText(TextCache& cache, const std::string& utf8, const type::FontRole& role, float scale);
 
 // Dibuja `utf8` con ajuste de línea por palabras (greedy) dentro de
 // `maxWidthLogical`, todas las líneas alineadas a la izquierda contra

@@ -5,7 +5,7 @@
 #include "productui/OrnamentGeometry.h"
 
 using nimvlets::productui::DiamondHalfWidthAt;
-using nimvlets::productui::HeadingMotifAdvance;
+using nimvlets::productui::FlankedLabelHalfBlock;
 using nimvlets::productui::OrnamentalDividerRuleLen;
 using nimvlets::productui::SparkleBounds;
 using nimvlets::productui::UiRect;
@@ -52,9 +52,19 @@ bool TestOrnamentalDividerRuleLength() {
     return true;
 }
 
-bool TestHeadingMotifAdvanceIsPositiveAndGrowsWithDiamond() {
-    NIMVLETS_CHECK(HeadingMotifAdvance(6.0f) > 0.0f);
-    NIMVLETS_CHECK(HeadingMotifAdvance(8.0f) > HeadingMotifAdvance(6.0f));
+// El semi-bloque de un rótulo flanqueado (◇  label  ◇) es simétrico:
+// del centro al borde exterior de un rombo lateral = mitad del texto +
+// hueco + lado del rombo. Crece con cada término.
+bool TestFlankedLabelHalfBlock() {
+    NIMVLETS_CHECK(FlankedLabelHalfBlock(100.0f, 5.0f, 10.0f) == 65.0f);
+    NIMVLETS_CHECK(FlankedLabelHalfBlock(0.0f, 5.0f, 10.0f) == 15.0f);  // etiqueta vacía: solo hueco + rombo
+    NIMVLETS_CHECK(FlankedLabelHalfBlock(120.0f, 5.0f, 10.0f) >
+                   FlankedLabelHalfBlock(100.0f, 5.0f, 10.0f));
+    NIMVLETS_CHECK(FlankedLabelHalfBlock(100.0f, 7.0f, 10.0f) >
+                   FlankedLabelHalfBlock(100.0f, 5.0f, 10.0f));
+    // El bloque total es 2x el semi-bloque -> simétrico alrededor del centro.
+    const float hb = FlankedLabelHalfBlock(80.0f, 5.0f, 10.0f);
+    NIMVLETS_CHECK((hb * 2.0f) == (80.0f + 2.0f * (10.0f + 5.0f)));
     return true;
 }
 
@@ -65,8 +75,7 @@ void RegisterOrnamentGeometryTests(testing::TestRunner& runner) {
                TestSparkleBoundsCenteredAndSymmetric);
     runner.Add("OrnamentGeometry/DiamondHalfWidthProfile", TestDiamondHalfWidthProfile);
     runner.Add("OrnamentGeometry/OrnamentalDividerRuleLength", TestOrnamentalDividerRuleLength);
-    runner.Add("OrnamentGeometry/HeadingMotifAdvanceIsPositiveAndGrowsWithDiamond",
-               TestHeadingMotifAdvanceIsPositiveAndGrowsWithDiamond);
+    runner.Add("OrnamentGeometry/FlankedLabelHalfBlock", TestFlankedLabelHalfBlock);
 }
 
 }  // namespace nimvlets::tests

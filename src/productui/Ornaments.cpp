@@ -40,11 +40,19 @@ void DrawAccentRule(UiPainter& p, const UiRect& r, UiColor color) {
     p.FillRect(r, color);
 }
 
-float DrawHeadingMotif(UiPainter& p, float x, float centerY, UiColor color) {
-    constexpr float kDiamond = 6.0f;
-    p.FillRect(UiRect{x, centerY - 0.5f, 5.0f, 1.0f}, color);
-    p.FillDiamond(UiRect{x + 7.0f, centerY - kDiamond * 0.5f, kDiamond, kDiamond}, color);
-    return HeadingMotifAdvance(kDiamond);
+void DrawFlankedLabel(
+    UiPainter& p, TextCache& text, const std::string& label, const type::FontRole& role,
+    UiColor labelColor, UiColor ornamentColor, float centerX, float baselineY) {
+    constexpr float kDiamond = 5.0f;  // lado del rombo
+    constexpr float kGap = 10.0f;     // rombo <-> texto
+    const float w = MeasureText(text, label, role, p.Scale());
+    const float halfBlock = FlankedLabelHalfBlock(w, kDiamond, kGap);
+    // Centro visual del texto ~ baseline - 4 pt (altura de x aproximada).
+    const float cy = baselineY - 4.0f;
+    p.FillDiamond(UiRect{centerX - halfBlock, cy - kDiamond * 0.5f, kDiamond, kDiamond}, ornamentColor);
+    p.FillDiamond(UiRect{centerX + halfBlock - kDiamond, cy - kDiamond * 0.5f, kDiamond, kDiamond},
+                  ornamentColor);
+    DrawText(p, text, label, role, labelColor, centerX, baselineY, HAlign::kCenter);
 }
 
 void DrawSoftPanel(
@@ -62,7 +70,7 @@ void DrawSoftPanel(
 
 void DrawButton(
     UiPainter& p, TextCache& text, const UiRect& r, const std::string& label, const ButtonVisual& v,
-    double labelSize, platform::TextWeight weight) {
+    const type::FontRole& role) {
     if (v.fill.a != 0) {
         p.FillRoundRect(r, 9.0f, v.fill);
     }
@@ -72,7 +80,7 @@ void DrawButton(
     if (v.drawFocusRing) {
         p.StrokeRoundRect(r.Inset(-3.0f), 12.0f, 2.0f, tokens::kFocus);
     }
-    DrawText(p, text, label, labelSize, weight, v.ink, r.CenterX(), r.CenterY() + 4.5f, HAlign::kCenter,
+    DrawText(p, text, label, role, v.ink, r.CenterX(), r.CenterY() + 4.5f, HAlign::kCenter,
              static_cast<int>(r.w - 6.0f));
 }
 

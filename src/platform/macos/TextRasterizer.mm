@@ -26,7 +26,12 @@ namespace {
 
 // NSFont autoreleased -> CTFontRef prestado (toll-free bridged). NO se
 // libera: lo maneja el @autoreleasepool del caller.
-CTFontRef BorrowSystemFont(double pixelSize, TextWeight weight) {
+//
+// `family == kSerif` pide el *diseño serif del sistema* (New York) vía
+// NSFontDescriptor — NO se carga ningún asset. Si esta versión de macOS
+// no puede resolver la variante serif, cae a la sans de UI: nunca queda
+// sin fuente.
+CTFontRef BorrowSystemFont(double pixelSize, TextWeight weight, TextFamily family) {
     NSFontWeight nsWeight = NSFontWeightRegular;
     switch (weight) {
         case TextWeight::kRegular:
@@ -42,6 +47,14 @@ CTFontRef BorrowSystemFont(double pixelSize, TextWeight weight) {
     NSFont* font = [NSFont systemFontOfSize:pixelSize weight:nsWeight];
     if (font == nil) {
         font = [NSFont systemFontOfSize:pixelSize];
+    }
+    if (family == TextFamily::kSerif && font != nil) {
+        NSFontDescriptor* serifDesc =
+            [font.fontDescriptor fontDescriptorWithDesign:NSFontDescriptorSystemDesignSerif];
+        NSFont* serif = serifDesc != nil ? [NSFont fontWithDescriptor:serifDesc size:pixelSize] : nil;
+        if (serif != nil) {
+            font = serif;
+        }
     }
     return (CTFontRef)font;
 }
@@ -60,21 +73,36 @@ NSString* SingleLine(const std::string& utf8) {
         componentsJoinedByString:@" "];
 }
 
-// CTLine creada (el caller la CFRelease-a). `color` es prestado.
-CTLineRef CreateLine(NSString* text, CTFontRef font, CGColorRef color) {
-    NSDictionary* attrs = @{
+// Atributos de una línea: fuente, color y, si `kernPx > 0`,
+// interletraje extra (kCTKernAttributeName, en unidades de píxel del
+// backing — el caller ya lo escaló). Devuelve un NSDictionary
+// autoreleased.
+NSDictionary* LineAttrs(CTFontRef font, CGColorRef color, double kernPx) {
+    if (kernPx > 0.0) {
+        return @{
+            (NSString*)kCTFontAttributeName : (id)font,
+            (NSString*)kCTForegroundColorAttributeName : (id)color,
+            (NSString*)kCTKernAttributeName : @(kernPx),
+        };
+    }
+    return @{
         (NSString*)kCTFontAttributeName : (id)font,
         (NSString*)kCTForegroundColorAttributeName : (id)color,
     };
+}
+
+// CTLine creada (el caller la CFRelease-a). `color` es prestado.
+CTLineRef CreateLine(NSString* text, CTFontRef font, CGColorRef color, double kernPx) {
     NSAttributedString* attributed =
-        [[[NSAttributedString alloc] initWithString:text attributes:attrs] autorelease];
+        [[[NSAttributedString alloc] initWithString:text
+                                        attributes:LineAttrs(font, color, kernPx)] autorelease];
     return CTLineCreateWithAttributedString((CFAttributedStringRef)attributed);
 }
 
 // Devuelve una CTLine (el caller la CFRelease-a) recortada al final con
 // "…" si `line` supera `maxWidthPx`; si entra o no se puede truncar,
 // devuelve `line` con una referencia extra.
-CTLineRef TruncatedLine(CTLineRef line, CTFontRef font, CGColorRef color, int maxWidthPx) {
+CTLineRef TruncatedLine(CTLineRef line, CTFontRef font, CGColorRef color, int maxWidthPx, double kernPx) {
     if (maxWidthPx <= 0) {
         return (CTLineRef)CFRetain(line);
     }
@@ -88,10 +116,7 @@ CTLineRef TruncatedLine(CTLineRef line, CTFontRef font, CGColorRef color, int ma
 
     NSAttributedString* ellipsisAttr =
         [[[NSAttributedString alloc] initWithString:@"…"
-                                        attributes:@{
-                                            (NSString*)kCTFontAttributeName : (id)font,
-                                            (NSString*)kCTForegroundColorAttributeName : (id)color,
-                                        }] autorelease];
+                                        attributes:LineAttrs(font, color, kernPx)] autorelease];
     CTLineRef ellipsisLine = CTLineCreateWithAttributedString((CFAttributedStringRef)ellipsisAttr);
     CTLineRef truncated =
         CTLineCreateTruncatedLine(line, static_cast<double>(maxWidthPx), kCTLineTruncationEnd, ellipsisLine);
@@ -116,9 +141,10 @@ int MeasureTextWidth(const TextRasterRequest& request) {
     }
     @autoreleasepool {
         const double pixelSize = std::max(1.0, request.pointSize * request.scale);
-        CTFontRef font = BorrowSystemFont(pixelSize, request.weight);
+        const double kernPx = std::max(0.0, request.tracking * request.scale);
+        CTFontRef font = BorrowSystemFont(pixelSize, request.weight, request.family);
         CGColorRef color = CGColorCreateGenericRGB(0.0, 0.0, 0.0, 1.0);
-        CTLineRef line = CreateLine(SingleLine(request.utf8), font, color);
+        CTLineRef line = CreateLine(SingleLine(request.utf8), font, color, kernPx);
 
         double width = 0.0;
         if (line != nullptr) {
@@ -140,17 +166,18 @@ bool RasterizeText(const TextRasterRequest& request, RasterizedText& out) {
 
     @autoreleasepool {
         const double pixelSize = std::max(1.0, request.pointSize * request.scale);
-        CTFontRef font = BorrowSystemFont(pixelSize, request.weight);
+        const double kernPx = std::max(0.0, request.tracking * request.scale);
+        CTFontRef font = BorrowSystemFont(pixelSize, request.weight, request.family);
         CGColorRef color = CGColorCreateGenericRGB(
             static_cast<CGFloat>(request.r) / 255.0, static_cast<CGFloat>(request.g) / 255.0,
             static_cast<CGFloat>(request.b) / 255.0, 1.0);
 
-        CTLineRef fullLine = CreateLine(SingleLine(request.utf8), font, color);
+        CTLineRef fullLine = CreateLine(SingleLine(request.utf8), font, color, kernPx);
         if (fullLine == nullptr) {
             CGColorRelease(color);
             return false;
         }
-        CTLineRef line = TruncatedLine(fullLine, font, color, request.maxWidthPx);
+        CTLineRef line = TruncatedLine(fullLine, font, color, request.maxWidthPx, kernPx);
         CFRelease(fullLine);
         if (line == nullptr) {
             CGColorRelease(color);

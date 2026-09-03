@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "productui/OrnamentGeometry.h"
 #include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/ShopPaint.h"
@@ -314,16 +313,12 @@ void ShopView::Render(
 
     // --- BROWSE: la estantería de personajes es todo el contenido ---
     if (layout.presentation == ShopPresentation::kBrowse) {
-        // Encabezado contextual con un motivo editorial chico a la
-        // izquierda (referencia E) — mismo copy, un poco más de carácter.
-        const float bh = MeasureText(text, layout.browseHeading, type::role::kCaption,
-                                     TextWeight::kRegular, painter.Scale());
-        const float adv = HeadingMotifAdvance(6.0f);
-        const float lx = layout.browseHeadingAnchor.CenterX() - (bh + adv) * 0.5f;
-        DrawHeadingMotif(painter, lx, layout.browseHeadingAnchor.y + 9.0f, tokens::kOrnamentNeutral);
-        DrawText(painter, text, layout.browseHeading, type::role::kCaption, TextWeight::kRegular,
-                 tokens::kTextSecondary, lx + adv, layout.browseHeadingAnchor.y + 13.0f, HAlign::kLeft,
-                 static_cast<int>(layout.browseHeadingAnchor.w));
+        // Rótulo editorial: ◇  Nimvlets you can meet  ◇ — un rombo a
+        // cada lado, sin líneas, centrado (owner QA — DEC-146).
+        DrawFlankedLabel(painter, text, layout.browseHeading, type::role::kSectionLabel,
+                         tokens::kTextSecondary, tokens::kOrnamentNeutral,
+                         layout.browseHeadingAnchor.CenterX(),
+                         layout.browseHeadingAnchor.y + 13.0f);
 
         for (const ShopTile& t : layout.tiles) {
             const bool hovered = hoverId_ == t.focusId;

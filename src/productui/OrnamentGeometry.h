@@ -12,7 +12,7 @@ namespace nimvlets::productui {
 // simetría y su centrado sin ventana ni renderer. Coordenadas en
 // PUNTOS lógicos. No es un motor de gráficos vectoriales: solo lo que
 // Nimvlets usa (spark, rombo, divisor ornamental, regla de acento,
-// motivo de encabezado).
+// rótulo flanqueado).
 
 // Caja contenedora de un spark de radio `radius` centrado en (cx, cy).
 // El spark son dos rombos finos cruzados: sus puntas llegan justo a
@@ -38,12 +38,14 @@ inline float OrnamentalDividerRuleLen(float bandW, float gap) {
     return half < 0.0f ? 0.0f : half;
 }
 
-// Avance en x (puntos lógicos) que ocupa el motivo de encabezado
-// contextual (una marca chica: tick + rombo) antes de la etiqueta,
-// para `diamond` = lado del rombo. El caller coloca el texto en
-// `x + HeadingMotifAdvance(d)`.
-inline float HeadingMotifAdvance(float diamond) {
-    return 7.0f + diamond + 6.0f;  // tick(5)+aire(2) · rombo · aire(6)
+// Semi-ancho del bloque de un rótulo flanqueado (◇  label  ◇): del
+// centro al borde EXTERIOR de un rombo lateral, para `labelWidth`
+// (ancho medido de la etiqueta), lado de rombo `diamond` y hueco
+// `gap` entre rombo y texto. Simétrico. El caller coloca el rombo
+// izquierdo en `centerX - <esto>` y el derecho en
+// `centerX + <esto> - diamond`.
+inline float FlankedLabelHalfBlock(float labelWidth, float diamond, float gap) {
+    return labelWidth * 0.5f + gap + diamond;
 }
 
 }  // namespace nimvlets::productui

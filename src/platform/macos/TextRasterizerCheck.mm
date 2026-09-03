@@ -32,6 +32,7 @@
 using nimvlets::platform::MeasureTextWidth;
 using nimvlets::platform::RasterizedText;
 using nimvlets::platform::RasterizeText;
+using nimvlets::platform::TextFamily;
 using nimvlets::platform::TextRasterizationAvailable;
 using nimvlets::platform::TextRasterRequest;
 using nimvlets::platform::TextWeight;
@@ -118,6 +119,32 @@ int main() {
     TextRasterRequest big = req;
     big.pointSize = 40.0;
     Check(MeasureTextWidth(big) > measured, "larger point size measures wider");
+
+    // Familia SERIF (Block 12A refinement — DEC-146): pedir el diseño
+    // serif del sistema produce un bitmap con métricas distintas a la
+    // sans para el mismo texto/tamaño (prueba que el descriptor tomó
+    // efecto), y nunca vacío ni degenerado.
+    {
+        TextRasterRequest serif = req;
+        serif.utf8 = "Collection";
+        serif.family = TextFamily::kSerif;
+        RasterizedText serifBmp;
+        const bool serifOk = RasterizeText(serif, serifBmp);
+        Check(serifOk, "RasterizeText succeeded with TextFamily::kSerif");
+        Check(serifBmp.width > 0 && serifBmp.height > 0 && HasHighAlphaPixel(serifBmp),
+              "serif bitmap has positive area and drew glyphs");
+        Check(serifBmp.width != basic.width || serifBmp.height != basic.height,
+              "serif metrics differ from sans for the same string (design descriptor took effect)");
+    }
+
+    // Interletraje (tracking): un valor positivo ensancha la línea sin
+    // romperla.
+    {
+        TextRasterRequest tracked = req;
+        tracked.utf8 = "Collection";
+        tracked.tracking = 2.0;
+        Check(MeasureTextWidth(tracked) > measured, "positive tracking measures wider");
+    }
 
     // Densidad de backing Retina (Block 06.2 §8/§27): el mismo texto
     // lógico se rasteriza a ~2x los píxeles cuando scale = 2.0. Prueba

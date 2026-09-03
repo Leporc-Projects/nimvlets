@@ -36,12 +36,16 @@ void DrawOrnamentalDivider(UiPainter& p, const UiRect& band, UiColor line, UiCol
 // Wrapper nombrado para un tratamiento consistente.
 void DrawAccentRule(UiPainter& p, const UiRect& r, UiColor color);
 
-// Motivo editorial chico a la izquierda de un encabezado contextual
-// ("Nimvlets you can meet", referencia E): un tick corto + un rombo.
-// Se dibuja con la punta izquierda en `x`, centrado en `centerY`.
-// Devuelve el avance en x (puntos) — el caller pone la etiqueta en
-// `x + <avance>`.
-float DrawHeadingMotif(UiPainter& p, float x, float centerY, UiColor color);
+// Rótulo editorial simple con un rombo chico A CADA LADO, centrado:
+//   ◇  label  ◇
+// SIN líneas laterales (owner QA, DEC-146). Ligero y centrado. `role`
+// da tamaño / peso / familia / interletraje; el texto se dibuja con su
+// baseline en `baselineY`, centrado en `centerX`; los rombos se
+// alinean con el centro visual del texto. Consistente en EN/ES —
+// mide el ancho real de la etiqueta.
+void DrawFlankedLabel(
+    UiPainter& p, TextCache& text, const std::string& label, const type::FontRole& role,
+    UiColor labelColor, UiColor ornamentColor, float centerX, float baselineY);
 
 // Panel enmarcado suave reusable (referencia D, "subtle inner frame"):
 // superficie cálida + borde exterior fino + highlight interior
@@ -51,10 +55,11 @@ void DrawSoftPanel(
 
 // Dibuja un botón semántico: relleno / borde / tinta de
 // ResolveButtonVisual, etiqueta centrada, anillo de foco desplazado en
-// tokens::kFocus si `v.drawFocusRing`. `weight` por defecto semibold
-// (Primary / Confirm); las vistas pasan kMedium para Secondary / Quiet.
+// tokens::kFocus si `v.drawFocusRing`. `role` = rol de fuente
+// tokenizado (las vistas pasan type::role::kButton, o
+// .WithWeight(kMedium) para Secondary / Quiet).
 void DrawButton(
     UiPainter& p, TextCache& text, const UiRect& r, const std::string& label, const ButtonVisual& v,
-    double labelSize, platform::TextWeight weight = platform::TextWeight::kSemibold);
+    const type::FontRole& role);
 
 }  // namespace nimvlets::productui

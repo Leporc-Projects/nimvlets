@@ -1,5 +1,6 @@
 #pragma once
 
+#include "platform/TextRasterizer.h"
 #include "productui/UiColor.h"
 #include "productui/VisualTokens.h"
 
@@ -28,46 +29,73 @@ constexpr UiColor kGalleryShelf = tokens::kSurfaceSoft;
 }  // namespace theme
 
 // ============================================================
-//  Escala tipográfica + ROLES semánticos (Block 12A)
+//  Escala tipográfica + ROLES DE FUENTE tokenizados
+//  (Block 12A + refinement DEC-146)
 // ============================================================
 //
-// Tamaños en PUNTOS lógicos. Jerarquía por tamaño / peso / espacio /
-// composición, NO por más contenedores ni por una tipografía empacada:
-// el look serif editorial del mockup es INSPIRACIÓN para la jerarquía
-// y el aire, no un mandato de traer una fuente externa (brief §6). Se
-// sigue usando la rasterización nativa segura por plataforma
-// (platform::RasterizeText).
+// Tamaños en PUNTOS lógicos. Jerarquía por familia / tamaño / peso /
+// interletraje / composición — NO por más contenedores ni por una
+// tipografía DECORATIVA empacada. El refinamiento owner-QA le da a los
+// roles de DISPLAY (marca, título de hero, rótulos de sección y de
+// nav) el *diseño serif del sistema* (New York en macOS, resuelto por
+// NSFontDescriptor — SIN asset), mientras que cuerpo / metadata /
+// caption / botón / wallet siguen en la SANS del sistema (SF Pro):
+// legibilidad primero. Ver DEC-146.
 namespace type {
 
-constexpr double kTitle = 16.0;        // "Nimvlets" (cabecera discreta)
-constexpr double kClicks = 13.0;       // "1 248 clicks"
-constexpr double kSectionTitle = 15.0; // "Collection"
-constexpr double kSectionSub = 12.0;   // "Your companions"
+// --- Escala cruda (sans, natural) — se conserva para las llamadas que
+//     pasan (tamaño, peso) por separado. ---
+constexpr double kTitle = 16.0;
+constexpr double kClicks = 13.0;
+constexpr double kSectionTitle = 15.0;
+constexpr double kSectionSub = 12.0;
 
-constexpr double kHeroName = 25.0;     // el nombre del Nimvlet protagonista
-constexpr double kHeroSpecies = 13.0;  // etiqueta de especie
+constexpr double kHeroName = 25.0;
+constexpr double kHeroSpecies = 13.0;
 constexpr double kHeroBody = 13.5;     // la línea de descripción (Block 06.2 §13)
-constexpr double kHeroStatus = 13.0;   // "On desktop" / "Not in your collection"
-constexpr double kHeroVariant = 14.0;  // "Male · Female"
+constexpr double kHeroStatus = 13.0;
+constexpr double kHeroVariant = 14.0;
 
 constexpr double kGalleryName = 13.5;
 constexpr double kGalleryStatus = 11.5;
 
 constexpr double kButton = 13.0;
 
-// --- Roles semánticos (Block 12A) --------------------------------
-// El Product UI pide un ROL, no un número mágico. Mapean sobre la
-// escala de arriba — cambiar un rol acá lo cambia en todo su uso.
+// --- Rol de fuente tokenizado -----------------------------------
+// El Product UI pide un ROL, no un número mágico ni una familia suelta.
+// Cambiar un rol acá lo cambia en todo su uso.
+struct FontRole {
+    double size = 13.0;
+    platform::TextWeight weight = platform::TextWeight::kRegular;
+    platform::TextFamily family = platform::TextFamily::kSans;
+    // Interletraje extra en PUNTOS lógicos (0 = natural). Un toque chico
+    // sobre los rótulos serif chicos.
+    double tracking = 0.0;
+
+    constexpr FontRole WithWeight(platform::TextWeight w) const {
+        return FontRole{size, w, family, tracking};
+    }
+    constexpr FontRole WithSize(double s) const { return FontRole{s, weight, family, tracking}; }
+};
+
 namespace role {
 
-constexpr double kBrand = kTitle;          // 16 — el wordmark "✦ Nimvlets"
-constexpr double kHeroTitle = kHeroName;   // 25 — nombre del personaje seleccionado
-constexpr double kSectionTitle = 15.0;     // encabezados de sección / grupo
-constexpr double kBody = kHeroBody;        // 13.5 — descripción editorial
-constexpr double kMetadata = 13.0;         // especie, precio, estado
-constexpr double kCaption = 11.5;          // sub-línea de gallery, hints, encabezados contextuales
-constexpr double kButton = 13.0;           // etiqueta de CTA
-constexpr double kWallet = kClicks;        // 13 — balance en la pill del wallet
+// DISPLAY / editorial -> SERIF del sistema.
+constexpr FontRole kBrand{16.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.2};
+constexpr FontRole kHeroTitle{25.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.0};
+// Rótulos de sección + pestañas de navegación (el peso lo fija el
+// caller con WithWeight: semibold activa, regular inactiva).
+constexpr FontRole kSectionLabel{15.0, platform::TextWeight::kMedium, platform::TextFamily::kSerif, 0.3};
+// Títulos de grupo de Settings ("Companion" / "Language" / …) — chico,
+// apagado, un pelín más de interletraje para leerse como rótulo.
+constexpr FontRole kGroupTitle{12.0, platform::TextWeight::kSemibold, platform::TextFamily::kSerif, 0.6};
+
+// TEXTO -> SANS del sistema, sin cambios: legibilidad primero.
+constexpr FontRole kBody{13.5, platform::TextWeight::kRegular, platform::TextFamily::kSans, 0.0};
+constexpr FontRole kMetadata{13.0, platform::TextWeight::kRegular, platform::TextFamily::kSans, 0.0};
+constexpr FontRole kCaption{11.5, platform::TextWeight::kRegular, platform::TextFamily::kSans, 0.0};
+constexpr FontRole kButton{13.0, platform::TextWeight::kSemibold, platform::TextFamily::kSans, 0.2};
+constexpr FontRole kWallet{13.0, platform::TextWeight::kMedium, platform::TextFamily::kSans, 0.0};
 
 }  // namespace role
 

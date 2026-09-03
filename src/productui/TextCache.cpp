@@ -24,12 +24,14 @@ void TextCache::Clear() {
 }
 
 std::string TextCache::KeyOf(const platform::TextRasterRequest& request) {
-    char buf[96];
+    char buf[128];
     std::snprintf(
-        buf, sizeof(buf), "|%d|%d|%d|%d|%d|%d|%d|",
+        buf, sizeof(buf), "|%d|%d|%d|%d|%d|%d|%d|%d|%d|",
         static_cast<int>(request.pointSize * 4.0),   // 0.25pt de resolución
         static_cast<int>(request.scale * 100.0),
         static_cast<int>(request.weight),
+        static_cast<int>(request.family),
+        static_cast<int>(request.tracking * 100.0),
         request.r, request.g, request.b,
         request.maxWidthPx);
     return request.utf8 + buf;
@@ -67,12 +69,14 @@ namespace {
 
 platform::TextRasterRequest MakeRequest(
     const std::string& utf8, double pointSize, platform::TextWeight weight, UiColor color, float scale,
-    int maxWidthPx) {
+    int maxWidthPx, platform::TextFamily family, double tracking) {
     platform::TextRasterRequest req;
     req.utf8 = utf8;
     req.pointSize = pointSize;
     req.scale = scale;
     req.weight = weight;
+    req.family = family;
+    req.tracking = tracking;
     req.r = color.r;
     req.g = color.g;
     req.b = color.b;
@@ -92,11 +96,13 @@ float DrawText(
     float anchorX,
     float baselineY,
     HAlign align,
-    int maxWidthLogical) {
+    int maxWidthLogical,
+    platform::TextFamily family,
+    double tracking) {
     const float scale = painter.Scale();
     const int maxWidthPx = maxWidthLogical > 0 ? static_cast<int>(static_cast<float>(maxWidthLogical) * scale) : 0;
     const TextCache::Glyphs g =
-        cache.Acquire(MakeRequest(utf8, pointSize, weight, color, scale, maxWidthPx));
+        cache.Acquire(MakeRequest(utf8, pointSize, weight, color, scale, maxWidthPx, family, tracking));
     if (g.texture == nullptr) {
         return 0.0f;
     }
@@ -113,14 +119,31 @@ float DrawText(
 }
 
 float MeasureText(
-    TextCache& /*cache*/, const std::string& utf8, double pointSize, platform::TextWeight weight, float scale) {
+    TextCache& /*cache*/, const std::string& utf8, double pointSize, platform::TextWeight weight,
+    float scale, platform::TextFamily family, double tracking) {
     platform::TextRasterRequest req;
     req.utf8 = utf8;
     req.pointSize = pointSize;
     req.scale = scale;
     req.weight = weight;
+    req.family = family;
+    req.tracking = tracking;
     const int px = platform::MeasureTextWidth(req);
     return static_cast<float>(px) / scale;
+}
+
+// --- Overloads por rol de fuente tokenizado (Block 12A refinement) ---
+
+float DrawText(
+    UiPainter& painter, TextCache& cache, const std::string& utf8, const type::FontRole& role,
+    UiColor color, float anchorX, float baselineY, HAlign align, int maxWidthLogical) {
+    return DrawText(painter, cache, utf8, role.size, role.weight, color, anchorX, baselineY, align,
+                    maxWidthLogical, role.family, role.tracking);
+}
+
+float MeasureText(
+    TextCache& cache, const std::string& utf8, const type::FontRole& role, float scale) {
+    return MeasureText(cache, utf8, role.size, role.weight, scale, role.family, role.tracking);
 }
 
 namespace {

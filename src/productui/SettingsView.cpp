@@ -85,7 +85,7 @@ void SettingsView::DrawNotice(
                    ResolveButtonVisual(role, nullptr,
                                        ButtonStateFlags{hoverId_ == b.focusId, false,
                                                         focusedId == b.focusId, false}),
-                   type::role::kButton, TextWeight::kMedium);
+                   type::role::kButton.WithWeight(TextWeight::kMedium));
     }
 }
 
@@ -479,7 +479,10 @@ void SettingsView::Render(
     painter.PushClip(UiRect{0.0f, kHeaderClipTop, viewportW, std::max(0.0f, viewportH - kHeaderClipTop)});
 
     for (const SettingsGroup& g : layout.groups) {
-        DrawText(painter, text, g.title, type::kSectionSub, TextWeight::kMedium, theme::kTextMuted,
+        // Título de grupo en serif del sistema — un rótulo editorial
+        // chico y apagado; Settings sigue siendo la sección más callada
+        // (owner QA: "Settings is generally fine" — DEC-146).
+        DrawText(painter, text, g.title, type::role::kGroupTitle, tokens::kTextSecondary,
                  g.titleAnchor.x, g.titleAnchor.y + 11.0f, HAlign::kLeft);
         painter.FillRect(g.rule, theme::kHairline);
 

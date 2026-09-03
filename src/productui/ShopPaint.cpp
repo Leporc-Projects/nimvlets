@@ -99,7 +99,7 @@ void DrawShopHero(
     const unsigned char artAlpha = h.status == ShopItemStatus::kOwned ? kOwnedArtAlpha : 255;
     painter.DrawTextureContained(art, h.art, artAlpha);
 
-    DrawText(painter, text, h.displayName, type::kHeroName, TextWeight::kSemibold, theme::kText,
+    DrawText(painter, text, h.displayName, type::role::kHeroTitle, tokens::kTextPrimary,
              h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
     painter.FillRect(h.nameRule, h.accent.line);
 
@@ -119,7 +119,7 @@ void DrawShopHero(
     }
 
     if (h.confirm.visible) {
-        DrawTextWrapped(painter, text, h.confirm.prompt, type::role::kBody, TextWeight::kRegular,
+        DrawTextWrapped(painter, text, h.confirm.prompt, type::kHeroBody, TextWeight::kRegular,
                         tokens::kTextPrimary, h.confirm.promptAnchor.x, h.confirm.promptAnchor.y + 13.0f,
                         h.confirm.promptAnchor.w, 16.0f, 2);
 
@@ -129,7 +129,7 @@ void DrawShopHero(
                    ResolveButtonVisual(ButtonRole::kSecondary, nullptr,
                                        ButtonStateFlags{false, false,
                                                         focusedId == h.confirm.cancelFocusId, false}),
-                   type::role::kButton, TextWeight::kMedium);
+                   type::role::kButton.WithWeight(TextWeight::kMedium));
         DrawButton(painter, text, h.confirm.confirmButton, h.confirm.confirmLabel,
                    ResolveButtonVisual(ButtonRole::kPrimary, &h.accent,
                                        ButtonStateFlags{false, false,

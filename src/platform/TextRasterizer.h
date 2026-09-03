@@ -36,6 +36,19 @@ enum class TextWeight {
     kSemibold,
 };
 
+// Familia tipográfica SEMÁNTICA (Block 12A refinement — DEC-146). NO se
+// nombra una fuente concreta: `kSans` = la sans de UI del sistema (SF
+// Pro en macOS), `kSerif` = el *diseño serif* del sistema (New York en
+// macOS, resuelto por NSFontDescriptor — NINGÚN asset empacado). Una
+// plataforma sin variante serif cae a la sans. Windows/Linux todavía no
+// dibujan texto de producto (los stubs devuelven false), así que no hay
+// divergencia real: cuando lleguen DirectWrite / fontconfig, `kSerif`
+// mapea al serif de esa plataforma.
+enum class TextFamily {
+    kSans,
+    kSerif,
+};
+
 struct TextRasterRequest {
     // UTF-8. Una sola línea (los '\n' se tratan como espacio) — el
     // Product UI de este bloque no tiene ningún texto multilínea.
@@ -50,6 +63,16 @@ struct TextRasterRequest {
     double scale = 1.0;
 
     TextWeight weight = TextWeight::kRegular;
+
+    // Familia tipográfica (ver TextFamily). `kSans` por defecto — el
+    // texto de cuerpo, metadata, botones y wallet no cambia.
+    TextFamily family = TextFamily::kSans;
+
+    // Interletraje EXTRA en PUNTOS lógicos (se escala a píxeles con
+    // `scale` internamente). 0 = natural. Un toque chico (~0.2-0.5 pt)
+    // sobre los rótulos serif chicos les da un aire editorial sin
+    // volverlos temáticos (Block 12A refinement).
+    double tracking = 0.0;
 
     // Color del texto. Los glyphs salen tintados de este color con
     // alpha = cobertura del glyph (straight alpha, para encajar con

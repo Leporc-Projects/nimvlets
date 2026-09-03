@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "productui/ButtonStyle.h"
-#include "productui/OrnamentGeometry.h"
 #include "productui/Ornaments.h"
 #include "productui/SectionHeaderView.h"
 #include "productui/UiTheme.h"
@@ -291,7 +290,7 @@ void CollectionView::Render(
         const unsigned char artAlpha = h.status == OwnershipStatus::kLocked ? kLockedArtAlpha : 255;
         painter.DrawTextureContained(art, h.art, artAlpha);
 
-        DrawText(painter, text, h.displayName, type::kHeroName, TextWeight::kSemibold, theme::kText,
+        DrawText(painter, text, h.displayName, type::role::kHeroTitle, tokens::kTextPrimary,
                  h.nameAnchor.x, h.nameAnchor.y + 24.0f, HAlign::kLeft);
         // Regla de acento fina bajo el nombre — el tono del pet, sin caja.
         painter.FillRect(h.nameRule, h.accent.line);
@@ -363,16 +362,12 @@ void CollectionView::Render(
     //     (DEC-136 / brief §4.A) ---
     if (!hasGallery) {
         if (!layout.emptyGalleryText.empty()) {
-            // Línea editorial quieta hacia el Shop, con el mismo motivo
-            // chico que los encabezados contextuales (referencia E).
-            const float ew = MeasureText(text, layout.emptyGalleryText, type::role::kCaption,
-                                         TextWeight::kRegular, painter.Scale());
-            const float adv = HeadingMotifAdvance(6.0f);
-            const float lx = layout.emptyGalleryAnchor.CenterX() - (ew + adv) * 0.5f;
-            DrawHeadingMotif(painter, lx, layout.emptyGalleryAnchor.y + 9.0f, tokens::kOrnamentNeutral);
-            DrawText(painter, text, layout.emptyGalleryText, type::role::kCaption, TextWeight::kRegular,
-                     tokens::kTextMuted, lx + adv, layout.emptyGalleryAnchor.y + 13.0f, HAlign::kLeft,
-                     static_cast<int>(layout.emptyGalleryAnchor.w));
+            // Línea editorial quieta hacia el Shop, con el mismo rótulo
+            // flanqueado que el encabezado del Shop (owner QA — DEC-146).
+            DrawFlankedLabel(painter, text, layout.emptyGalleryText, type::role::kSectionLabel,
+                             tokens::kTextMuted, tokens::kOrnamentNeutral,
+                             layout.emptyGalleryAnchor.CenterX(),
+                             layout.emptyGalleryAnchor.y + 13.0f);
         }
         painter.PopClip();
         return;

@@ -311,10 +311,11 @@ void StarterShopView::Render(
         return;
     }
 
-    // Encabezado quieto "Starter choices".
-    DrawText(painter, text, layout.heading, type::kSectionSub, TextWeight::kRegular, theme::kTextMuted,
-             layout.headingAnchor.CenterX(), layout.headingAnchor.y + 13.0f, HAlign::kCenter,
-             static_cast<int>(layout.headingAnchor.w));
+    // Rótulo editorial: ◇  Starter choices  ◇ (owner QA — DEC-146).
+    // Solo visible YA dentro del submodo — no revela la entrada.
+    DrawFlankedLabel(painter, text, layout.heading, type::role::kSectionLabel, tokens::kTextSecondary,
+                     tokens::kOrnamentNeutral, layout.headingAnchor.CenterX(),
+                     layout.headingAnchor.y + 13.0f);
 
     if (layout.presentation == StarterShopPresentation::kBrowse) {
         for (const ShopTile& t : layout.tiles) {
