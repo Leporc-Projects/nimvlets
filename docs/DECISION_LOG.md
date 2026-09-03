@@ -6195,3 +6195,100 @@ su izquierda, pill libre del wordmark).
 **Congelado sin tocar:** `header.clicksText` / `WalletDisplay` /
 `SetClickBalance` (DEC-138/DEC-140), el menú rápido de la barra, la
 semántica de las pestañas.
+
+---
+
+### DEC-146 — Block 12A refinamiento owner-QA: indicador de nav "línea + rombo", rótulos de sección flanqueados (◇ … ◇), y tipografía editorial con el serif del SISTEMA (sin asset)
+
+**Fecha:** 2026-09-02 · **Bloque:** 12A (pase de refinamiento) ·
+**Estado:** vigente · **Depende de** DEC-142 (tokens + roles), DEC-144
+(primitivas de ornamento / botones), DEC-145 (wordmark + wallet pill +
+nav). **NO** rediseña el sistema: es un pase visual NARROW guiado por
+la QA del owner. **NO** toca comportamiento, lógica, persistencia,
+conteo de clics, ni el mecanismo del shop oculto. El wallet pill queda
+**aprobado tal cual**.
+
+**Contexto.** El owner revisó Block 12A y aprobó la dirección. Pidió
+tres ajustes puntuales.
+
+**1. Indicador de tab activo — "línea + rombo", no una barra negra.**
+Block 12A dibujaba el tab activo con una regla casi-negra
+(`tokens::kTextPrimary`) + un rombo debajo. El owner lo quiere en la
+**misma familia/color que el rombo separador** y **combinado** con él.
+Ahora: una regla de 2 pt en `tokens::kOrnamentNeutral` con un rombo de
+6 pt **fusionado** encima (centrado sobre la regla) — se lee como
+"línea + rombo", elegante y restringido. Sigue siendo obvio de un
+vistazo: el peso **semibold** y el color de texto principal del label
+cargan la distinción de "activa"; el indicador es la segunda pista, no
+la única. Hit targets, orden de foco, `NavTargetSection` y
+focus-visible por modalidad **intactos**.
+
+**2. Rótulo de sección — `◇  label  ◇`, sin líneas laterales.** El
+`DrawHeadingMotif` de Block 12A (un tick + un rombo a la IZQUIERDA,
+texto alineado a la izquierda) se reemplaza por **`DrawFlankedLabel`**:
+un rombo chico a **cada lado** de la etiqueta, **sin líneas**, centrado.
+Aplicado a los tres usos del mismo patrón — el encabezado del Shop
+("Nimvlets you can meet" / "Nimvlets que puedes conocer"), la línea de
+un-solo-poseído de la Collection, y el encabezado del Starter Shop
+oculto ("Starter choices", ya dentro del submodo — no revela la
+entrada). Mide el **ancho real** de la etiqueta con `MeasureText` →
+consistente en EN/ES. El copy **no cambia**. La geometría pura pasó de
+`HeadingMotifAdvance` a `FlankedLabelHalfBlock` (test actualizado).
+
+**3. Typography pass 1 — SERIF DEL SISTEMA para los roles de display,
+sin ningún asset.** El owner quiere la UI "un poco más bella y
+editorial, más cerca del concept image", pero limpia y legible. La
+decisión, honesta:
+
+- **NO** se empaca ninguna fuente. **NO** se agrega una dependencia.
+- `type::role::*` pasa de "solo tamaño" a un `type::FontRole {size,
+  weight, family, tracking}` tokenizado.
+- Los roles de **display** — `kBrand` (wordmark), `kHeroTitle` (nombre
+  del personaje), `kSectionLabel` (pestañas de nav + rótulos de
+  sección), `kGroupTitle` (títulos de grupo de Settings) — usan
+  `TextFamily::kSerif`, que en macOS pide el **diseño serif del
+  sistema** (New York) vía
+  `-[NSFontDescriptor fontDescriptorWithDesign:NSFontDescriptorSystemDesignSerif]`.
+  Si la versión de macOS no lo resuelve, **cae a la sans** (nunca queda
+  sin fuente). Verificado contra el adaptador REAL en
+  `nimvlets_macos_text_check` (las métricas serif difieren de la sans
+  para el mismo string → el descriptor tomó efecto).
+- El **cuerpo, la metadata, los botones y el wallet** siguen en la
+  **sans** del sistema (SF Pro). Legibilidad primero — la copy larga
+  nunca es serif.
+- Un `tracking` chico (~0.2-0.6 pt, `kCTKernAttributeName`) sobre los
+  rótulos serif chicos, para aire editorial sin volverlos temáticos.
+- `TextRasterRequest` gana `family` + `tracking` (los dos en la clave
+  de caché de `TextCache`). `DrawText` / `MeasureText` ganan un overload
+  por `FontRole`; `DrawButton` toma un `FontRole`.
+- **Windows/Linux**: los rasterizadores siguen siendo stubs que
+  devuelven `false` (no dibujan texto de producto todavía), así que
+  **no hay divergencia real**. Cuando lleguen DirectWrite / fontconfig,
+  `kSerif` mapea al serif de esa plataforma (Georgia / un serif del
+  sistema) — el rol es la costura, no un nombre de fuente.
+
+**Por qué el serif del sistema y no un asset:** es la ruta
+system-safe que el brief de refinamiento pide explícitamente ("if a new
+font asset is not appropriate, use the best system-safe route and
+document the decision honestly"). New York existe en macOS desde la 11,
+comparte métricas con SF para uso de UI, no requiere licencia ni
+distribución, y no crea un problema de empaquetado ni de divergencia
+cross-platform. El brief original de Block 12A (§6) prohibía "una
+tipografía macOS-only que haga divergir Windows/Linux" — acá NO
+diverge porque esas plataformas todavía no rasterizan texto de
+producto, y el rol (`kSerif`) las deja mapear a su propio serif cuando
+lo hagan.
+
+**Tests.** `nimvlets_macos_text_check` (+2 asserts: la familia serif
+produce métricas distintas a la sans; `tracking` positivo ensancha).
+`OrnamentGeometryTest`: `HeadingMotifAdvance` → `FlankedLabelHalfBlock`
+(simétrico, crece con cada término, bloque total = 2× semi-bloque). El
+conteo total de tests C++ (584) no cambia. Idle del Product UI sigue
+event-driven (0 % CPU) — el serif se cachea igual que la sans (la
+familia es parte de la clave).
+
+**Congelado sin tocar:** el wallet pill (aprobado); los fills negros de
+selección en Settings; el sistema de tint del hero; los botones de
+CTA / confirmación / Use (solo cambian de familia de etiqueta a través
+del `FontRole`, sin rediseño); el fondo / la paleta; el shop oculto;
+todo el comportamiento de producto.

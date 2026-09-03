@@ -50,19 +50,25 @@ sin divisor ni segundo plano, una sola línea quieta hacia el Shop
 (`kCollectionOnlyActive`). Ver §5, §6.3 y DEC-136.
 
 **Actualización Block 12A (fundación del sistema de diseño visual —
-DEC-142..DEC-145).** Pasada owner-directed de LENGUAJE VISUAL, sin tocar
+DEC-142..DEC-146).** Pasada owner-directed de LENGUAJE VISUAL, sin tocar
 ningún flujo de producto: tokens visuales semánticos (`productui::tokens`),
-roles tipográficos (`type::role`), el `PetAccent` promovido al registro
-CENTRALIZADO de identidad por pet (`secondary` + costura `heroStage`),
-helpers de contraste, primitivas de ornamento procedurales
-(`DrawSparkle` / `DrawDiamond` / `DrawOrnamentalDivider` /
-`DrawAccentRule` / `DrawHeadingMotif` / `DrawSoftPanel`), un sistema de
-botones semántico (`ButtonRole` Primary/Secondary/Quiet con clamp de
-contraste), y su aplicación restringida: wordmark con spark, wallet
-**pill**, polish del tab activo de la nav, divisor ornamental (uno por
-pantalla), motivo de encabezado, y cards con panel enmarcado suave. **Sin
-imágenes, sin fuentes, sin dependencias, sin fondos escénicos (12C), sin
-favoritos, sin animación de UI.** Ver **§23**.
+roles DE FUENTE tokenizados (`type::FontRole` / `type::role`), el
+`PetAccent` promovido al registro CENTRALIZADO de identidad por pet
+(`secondary` + costura `heroStage`), helpers de contraste, primitivas de
+ornamento procedurales (`DrawSparkle` / `DrawDiamond` /
+`DrawOrnamentalDivider` / `DrawAccentRule` / `DrawFlankedLabel` /
+`DrawSoftPanel`), un sistema de botones semántico (`ButtonRole`
+Primary/Secondary/Quiet con clamp de contraste), y su aplicación
+restringida: wordmark con spark, wallet **pill**, tab activo de la nav
+como **"línea + rombo"** en el tono de ornamento, rótulos editoriales
+flanqueados (`◇ … ◇`), divisor ornamental (uno por pantalla), cards con
+panel enmarcado suave, y **tipografía editorial** — los roles de display
+(marca, título de hero, rótulos de sección y de nav) usan el *diseño
+serif del sistema* (New York en macOS, SIN asset); el cuerpo sigue en
+sans. **Sin imágenes, sin fuentes empacadas, sin dependencias, sin fondos
+escénicos (12C), sin favoritos, sin animación de UI.** El refinamiento
+owner-QA (DEC-146) ajustó el indicador de nav, los rótulos de sección y
+la tipografía; el wallet pill se aprobó tal cual. Ver **§23**.
 
 **Actualización Block 06.1 (pase de identidad visual + localización).**
 La arquitectura y la funcionalidad de Block 06 quedaron aprobadas por
@@ -1606,7 +1612,7 @@ vez de permanente. Fijado en `tests/SettingsLayoutTest.cpp`.
   Settings y solo tras una acción explícita del owner — nunca al
   arrancar. Ver `docs/PRIVACY_SECURITY.md` §H.
 
-## 23. Sistema de diseño visual — la FUNDACIÓN (Block 12A)
+## 23. Sistema de diseño visual — la FUNDACIÓN (Block 12A + refinamiento owner-QA DEC-146)
 
 Block 12A es una pasada **owner-directed** de LENGUAJE VISUAL y
 primitivas de presentación reusables. **NO** rediseña ningún flujo de
@@ -1645,15 +1651,38 @@ tokens — las vistas viejas compilan sin tocar nada; el código nuevo usa
 nunca domina un control. Los tokens **no cambian por pet** (el acento por
 pet vive aparte, §23.3).
 
-### 23.2 Roles tipográficos (`productui::type::role`, DEC-142)
+### 23.2 Roles DE FUENTE tokenizados (`productui::type::role` / `type::FontRole`, DEC-142 + refinamiento DEC-146)
 
 No es un proyecto de font-pack: sigue la rasterización nativa segura por
-plataforma (`platform::RasterizeText`), sin fuente empacada. Solo se
-agregan NOMBRES semánticos sobre la escala existente — `kBrand` (16),
-`kHeroTitle` (25), `kSectionTitle` (15), `kBody` (13.5), `kMetadata`
-(13), `kCaption` (11.5), `kButton` (13), `kWallet` (13). El look serif
-editorial del mockup es inspiración para la jerarquía y el aire, no un
-mandato de traer un serif macOS-only.
+plataforma (`platform::RasterizeText`), **sin ningún asset empacado**.
+Cada rol es un `type::FontRole { size, weight, family, tracking }`:
+
+| Rol | Tamaño / peso | Familia | Uso |
+|---|---|---|---|
+| `kBrand` | 16 semibold | **serif** | wordmark "✦ Nimvlets" |
+| `kHeroTitle` | 25 semibold | **serif** | nombre del personaje seleccionado |
+| `kSectionLabel` | 15 (peso por caller) | **serif** | pestañas de nav + rótulos de sección (`◇ … ◇`) |
+| `kGroupTitle` | 12 semibold | **serif** | títulos de grupo de Settings ("Companion" …) |
+| `kBody` | 13.5 regular | sans | descripción editorial |
+| `kMetadata` | 13 regular | sans | especie, precio, estado |
+| `kCaption` | 11.5 regular | sans | sub-línea de gallery, hints |
+| `kButton` | 13 semibold | sans | etiqueta de CTA |
+| `kWallet` | 13 medium | sans | balance en la pill |
+
+**Serif del sistema, sin asset** (owner QA — DEC-146): `family ==
+kSerif` pide el *diseño serif del sistema* (New York en macOS) vía
+`NSFontDescriptor fontDescriptorWithDesign:NSFontDescriptorSystemDesignSerif`
+— si la versión de macOS no lo resuelve, cae a la sans (nunca queda sin
+fuente). El cuerpo, la metadata, los botones y el wallet siguen en la
+**sans** del sistema (SF Pro): legibilidad primero. Windows/Linux
+todavía no dibujan texto de producto (los stubs devuelven `false`), así
+que no hay divergencia real; cuando lleguen DirectWrite / fontconfig,
+`kSerif` mapea al serif de esa plataforma. `TextRasterRequest` gana
+`family` + `tracking` (los dos en la clave de caché); `DrawText` /
+`MeasureText` ganan un overload por `FontRole`; `DrawButton` toma un
+`FontRole`. Un `tracking` chico (~0.2-0.6 pt, vía `kCTKernAttributeName`)
+sobre los rótulos serif chicos les da aire editorial sin volverlos
+temáticos.
 
 ### 23.3 Identidad visual por pet — el registro CENTRALIZADO (`productui::PetAccent`, DEC-143)
 
@@ -1711,14 +1740,20 @@ Geometría pura testeable en `OrnamentGeometry.h`.
   Shop. No se inserta en todas partes.
 - **`DrawAccentRule(rect, color)`** — la regla de acento corta de 2 pt
   bajo el nombre del hero (nombrado, consistente).
-- **`DrawHeadingMotif(x, centerY, color) -> avance`** — tick + rombo, a
-  la izquierda de un encabezado contextual (referencia E). "Nimvlets you
-  can meet" del Shop y la línea "Conoce más Nimvlets en la Tienda" de la
-  Collection con un solo poseído. El copy NO cambia.
+- **`DrawFlankedLabel(text, label, role, labelColor, ornamentColor,
+  centerX, baselineY)`** — rótulo editorial `◇  label  ◇`: un rombo a
+  CADA lado, **sin líneas laterales**, centrado, serif (owner QA —
+  DEC-146). Reemplaza al viejo `DrawHeadingMotif` (tick + rombo a la
+  izquierda). Usado en el encabezado del Shop ("Nimvlets you can meet"),
+  la línea de un-solo-poseído de la Collection y el encabezado del
+  Starter Shop. Mide el ancho REAL de la etiqueta -> consistente EN/ES.
+  El copy NO cambia. Geometría pura: `FlankedLabelHalfBlock`.
 - **`DrawSoftPanel(rect, radius, surface, border, innerHighlight)`** —
   panel enmarcado suave: superficie cálida + hairline exterior +
   highlight interior casi-blanco opcional. **Sin drop shadow, sin
   glass.**
+- **`DrawButton(..., role)`** — botón semántico (ver §23.6); toma un
+  `type::FontRole`.
 
 ### 23.6 Sistema de botones (`productui::ButtonRole`, DEC-144)
 
@@ -1739,15 +1774,16 @@ estrena el sistema SOLO en el aviso del conteo global (Continue =
 Primary, Not now = Quiet, Check again = Secondary) — sigue siendo la
 sección más callada, sin motivos por fila (brief §23).
 
-### 23.7 Wordmark + wallet pill + polish de nav (DEC-145)
+### 23.7 Wordmark + wallet pill + polish de nav (DEC-145 + refinamiento DEC-146)
 
 Todo en la cabecera COMPARTIDA (`SectionHeaderView`), solo tratamiento
 visual — la arquitectura de navegación, los hit targets y el soporte de
 teclado NO cambian (brief §15):
 
 - **Wordmark**: un spark procedural chico a la izquierda del nombre
-  literal `Nimvlets` (referencia A). No es un logo de imagen; el nombre
-  de la app en la barra de título del SO **no se toca**.
+  literal `Nimvlets` (referencia A), ahora en **serif del sistema**
+  (`type::role::kBrand`). No es un logo de imagen; el nombre de la app
+  en la barra de título del SO **no se toca**.
 - **Wallet pill**: el balance pasa de texto flotante a una **cápsula
   cálida discreta** con un spark chico (referencia B). Clicks siguen
   siendo la única moneda; sin estilo de moneda premium. `header.clicksText`
@@ -1755,10 +1791,19 @@ teclado NO cambian (brief §15):
   wallet canónico (DEC-138) queda intacto. El ancho sale de
   `productui::ComputeWalletPill(textWidth)` (puro), así la vista y su
   test no pueden divergir; entra `0` / `1` / `500` / valores grandes en
-  EN y ES, y a 600 / 800 / 1200 de ancho.
-- **Nav**: los separadores `·` pasan a rombos minúsculos en el tono
-  ornamento; el tab activo gana una regla fina de 1.5 pt + un rombo chico
-  centrado (referencia C).
+  EN y ES, y a 600 / 800 / 1200 de ancho. **El owner lo aprobó — se
+  mantiene tal cual.**
+- **Pestañas**: en **serif del sistema** (`type::role::kSectionLabel`,
+  peso semibold activa / regular inactiva). Separadores `·` = rombos
+  minúsculos en el tono ornamento.
+- **Indicador de tab activo (owner QA — DEC-146)**: ya NO es una regla
+  casi-negra. Es **"línea + rombo" en el MISMO tono de ornamento** que
+  los separadores: una regla de 2 pt en `tokens::kOrnamentNeutral` con
+  un rombo de 6 pt **fusionado** encima (centrado sobre la regla). Sigue
+  siendo obvio de un vistazo — el peso semibold y el color de texto
+  principal cargan la distinción; el indicador es la segunda pista,
+  elegante y restringida. Hit targets, orden de foco y `NavTargetSection`
+  intactos.
 
 ### 23.8 Cards y items de gallery (brief §21/§22)
 
